@@ -1,0 +1,22 @@
+# 시크릿 — JWT_SECRET / OPENAI_API_KEY / DB_PASSWORD
+.env
+.env.*
+!.env.example
+
+# 업로드 이미지 (로컬 FS)
+uploads/
+
+# Gradle / Java
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+*.class
+*.log
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store

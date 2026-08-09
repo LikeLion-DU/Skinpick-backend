@@ -1,0 +1,6 @@
+app:
+  auth.test-account.enabled: true
+  ai.mock: ${AI_MOCK:false}
+
+logging.level:
+  org.hibernate.SQL: DEBUG
