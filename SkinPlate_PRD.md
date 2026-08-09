@@ -1,0 +1,3498 @@
+# Skin Plate — 제품 요구사항 정의서 (PRD) & 기술 설계서
+
+> **"오늘의 피부를 위한 오늘의 한 끼"**
+> AI 피부 분석 기반 식사 추천 서비스 · 해커톤 MVP
+
+| 항목 | 내용 |
+|---|---|
+| 문서 버전 | v1.4 |
+| 작성일 | 2026-08-07 · **v1.4 개정 2026-08-09** (2차 리뷰 반영 + 배포 전제 확정) |
+| 문서 범위 | 제품 요구사항(PRD) + 기술 설계(Architecture / API / DB / Rule Engine) |
+| 개발 기간 | 10일 (해커톤) |
+| 대상 플랫폼 | Android / iOS (Flutter) |
+| 팀 구성 가정 | Flutter 1~2명, Backend 1~2명, 기획/디자인 1명 |
+
+### 문서 사용 안내
+
+본 문서는 두 개의 층으로 구성된다.
+
+- **Part 1 · 제품 요구사항** — 무엇을, 왜 만드는가 (원문 PRD 기반)
+- **Part 2 · 기술 설계** — 어떻게 만드는가 (아키텍처 / 구조 / 명세)
+
+원문 PRD에 없던 항목(성공 지표, 화면 정의, 리스크)은 제목 옆에 **`[보강]`** 으로 표시했다. 원문에 있던 내용은 의미를 바꾸지 않고 구조화만 했다.
+
+---
+
+# 목차
+
+**Part 1 · 제품 요구사항**
+
+1. [프로젝트 개요](#1-프로젝트-개요)
+2. [문제 정의](#2-문제-정의)
+3. [핵심 가치](#3-핵심-가치)
+4. [MVP 범위](#4-mvp-범위)
+5. [User Flow](#5-user-flow)
+6. [화면 정의 [보강]](#6-화면-정의-보강)
+7. [차별점](#7-차별점)
+8. [성공 지표 · KPI [보강]](#8-성공-지표--kpi-보강)
+
+**Part 2 · 기술 설계**
+
+9. [전체 시스템 아키텍처](#9-전체-시스템-아키텍처)
+10. [Flutter 프로젝트 구조](#10-flutter-프로젝트-구조)
+11. [Spring Boot 프로젝트 구조](#11-spring-boot-프로젝트-구조)
+12. [DB ERD](#12-db-erd)
+13. [Entity 설계](#13-entity-설계)
+14. [API 명세](#14-api-명세)
+15. [DTO 설계](#15-dto-설계)
+16. [인증 · 보안 설계](#16-인증--보안-설계)
+17. [OpenAI 연동 구조](#17-openai-연동-구조)
+18. [Skin Plate Rule Engine 설계](#18-skin-plate-rule-engine-설계)
+19. [개발 우선순위 · 10일 일정](#19-개발-우선순위--10일-일정)
+20. [리스크 · 대응 방안 [보강]](#20-리스크--대응-방안-보강)
+21. [최종 발표 메시지](#21-최종-발표-메시지)
+
+**부록**
+
+- [부록 A. 환경 변수](#부록-a-환경-변수)
+- [부록 B. 로컬 실행](#부록-b-로컬-실행)
+- [부록 C. 용어 정의](#부록-c-용어-정의)
+- [부록 D. v1.1 변경 이력](#부록-d-v11-변경-이력)
+
+---
+---
+
+# Part 1 · 제품 요구사항
+
+---
+
+## 1. 프로젝트 개요
+
+AI 피부 분석을 기반으로 사용자가 촬영한 음식이 **현재 피부 상태에 적합한지** 평가하고, 더 나은 식사 선택을 제안하는 모바일 서비스(MVP)를 개발한다.
+
+핵심 컨셉은 단순한 피부 분석이 아니라 다음의 연결이다.
+
+```
+피부 분석  →  음식 분석  →  행동 변화
+```
+
+기존 서비스가 "당신의 피부는 이렇습니다"에서 멈춘다면, 본 서비스는 **"그래서 오늘 이 음식을 이렇게 드세요"** 까지 도달한다.
+
+---
+
+## 2. 문제 정의
+
+많은 사람들이 피부 고민이 생기면 화장품을 먼저 바꾼다. 그러나 실제 피부 건강은 **식습관과 생활습관**의 영향을 크게 받는다.
+
+현재 대부분의 피부 분석 서비스는 아래의 한계를 갖는다.
+
+| 한계 | 설명 |
+|---|---|
+| 분석에서 종료 | 피부 상태 수치만 제공하고 끝난다 |
+| 행동 연결 부재 | 사용자가 **당장 실천할 수 있는 행동**으로 이어지지 않는다 |
+| 맥락 없는 조언 | "물을 많이 드세요" 같은 일반론에 머문다 |
+| 식사와의 단절 | 피부에 가장 직접적인 식사 선택을 다루지 않는다 |
+
+우리는 AI를 통해
+
+1. 현재 피부 상태를 분석하고
+2. 오늘 먹으려는 음식을 분석한 뒤
+3. 피부에 더 좋은 선택을 제안하는 서비스를 만든다.
+
+---
+
+## 3. 핵심 가치
+
+> ### "오늘의 피부를 위한 오늘의 한 끼"
+
+AI가 피부를 분석하는 것에서 끝나는 것이 아니라, **오늘 먹는 식사까지 함께 관리하는 것**이 목표이다.
+
+이 가치를 제품에서 검증하는 기준은 하나다.
+
+> **사용자가 앱을 닫은 뒤, 눈앞의 식사에서 실제로 무언가를 바꾸는가?**
+
+"국물을 절반만 남기세요" 같은 **즉시 실행 가능한 한 문장**이 이 제품의 최소 성공 단위다.
+
+---
+
+## 4. MVP 범위
+
+### 4.1 AI 피부 분석
+
+**입력**
+
+- 얼굴 사진 촬영
+- 또는 갤러리 업로드
+
+**AI 분석 결과**
+
+| 지표 | 범위 | 설명 |
+|---|---|---|
+| Skin Score | 0~100 | 5개 세부 지표를 종합한 오늘의 피부 점수 |
+| 피부 수분 (hydration) | 0~100 | 높을수록 촉촉함 |
+| 피부 유분 (oil) | 0~100 | 높을수록 유분 과다 |
+| 홍조 (redness) | 0~100 | 높을수록 붉음/자극 |
+| 트러블 (trouble) | 0~100 | 높을수록 여드름/염증 |
+| 피부 장벽 (barrier) | 0~100 | 높을수록 장벽 건강 |
+
+> **지표 방향 주의** — `hydration`, `barrier`는 높을수록 좋고, `oil`, `redness`, `trouble`은 높을수록 나쁘다. Rule Engine과 UI 색상 로직이 이 방향성을 공유해야 한다.
+
+**Skin Score 산출식 (확정)**
+
+5개 지표의 방향을 "높을수록 좋음"으로 통일한 뒤 평균낸다.
+
+```
+SkinScore = round( ( hydration + barrier
+                   + (100 − oil) + (100 − redness) + (100 − trouble) ) / 5 )
+```
+
+> **산식을 문서에 박아두는 이유** — 산식이 없으면 Day 4에 구현자가 아무 평균이나 짜고, 그때부터 문서의 예시 점수와 어긋난다. S05 화면은 **총점 게이지와 5개 지표 바를 한 화면에 동시에** 띄우기 때문에, 둘이 안 맞으면 심사위원이 3초 만에 본다.
+
+**결과 예시** — `hydration 38 · oil 52 · redness 64 · trouble 25 · barrier 78`
+
+```
+(38 + 78 + 48 + 36 + 75) / 5 = 55
+
+Skin Score : 55
+· 피부 장벽 양호   (barrier 78 → GOOD)
+· 건조 주의        (hydration 38 → CAUTION)
+· 홍조 주의        (redness 정렬점수 36 → CAUTION)
+```
+
+> **55가 86보다 낫다.** 86점이면 사용자도 심사위원도 "괜찮네"에서 멈춘다. 55점이어야 "그래서 오늘 뭘 먹어야 하나"로 이어지고, 그게 이 제품이 존재하는 이유다.
+
+**Highlights 산출 규칙 (확정)**
+
+두 결정을 분리한다. **무엇을 보여줄지는 위치가, 어떤 상태로 보여줄지는 값이 정한다.**
+
+| 단계 | 기준 |
+|---|---|
+| 무엇을 (3줄 선택) | 1행 = 가장 좋은 지표 · 2행 = 두 번째로 나쁜 지표 · 3행 = 가장 나쁜 지표 |
+| 어떤 상태로 | 방향 정렬 점수 **60 이상 `GOOD` / 40 이상 `WARN` / 그 미만 `CAUTION`** |
+
+상태까지 위치로 정하면 **화면이 거짓말을 한다.**
+
+| 케이스 | 지표 | Skin Score | 위치로만 정하면 |
+|---|---|---|---|
+| 전부 나쁨 | `20/90/85/80/25` | **18** | "가장 좋은 것"이 장벽 25인데 **초록 GOOD "피부 장벽 양호"** |
+| 전부 좋음 | `95/10/5/5/95` | **94** | "가장 나쁜 것"이 유분 10인데 **빨강 CAUTION "유분 과다"** |
+
+이건 v1.2에서 Blocker로 고친 "86점 vs 수분 38"과 같은 종류의 사고다. 임계값(60/40)은 `SkinMetrics`의 판정 기준과 일치시킨다 — `isDry`·`isBarrierWeak`가 40 미만이므로, 두 기준이 어긋나면 "홍조 주의라면서 뱃지는 노랑"이 된다.
+
+**위치로 3개를 뽑는 이유는 레이아웃 고정이다.** 고정되는 것은 줄 수(항상 3줄)이지 색이 아니다. 상태가 정말 나쁘면 세 줄 모두 `CAUTION`이 나오고, 그게 맞다.
+
+지표별 문구는 **DTO 설계서 §1.12.1 `SkinHighlightBuilder`** 참조.
+
+---
+
+### 4.2 Skin Plate
+
+사용자가 **음식 사진**을 촬영한다.
+
+AI가 분석하는 항목
+
+- 음식 종류
+- 주요 재료
+- 영양 정보 (칼로리 / 단백질 / 지방 / 탄수화물 / 나트륨 / 당류)
+
+그리고 **현재 피부 분석 결과와 비교**하여 Skin Plate Score를 생성한다.
+
+**결과 예시**
+
+```
+Skin Plate : 87점
+
+좋은 점
+· 단백질 충분
+· 비타민 풍부
+
+주의사항
+· 나트륨 과다
+
+추천 행동
+· 국물을 절반만 남기면 Skin Plate 점수가 상승합니다.
+```
+
+> **핵심 포인트** — Skin Plate Score는 "이 음식이 건강한가"가 아니라 **"이 음식이 지금 당신의 피부에 맞는가"** 를 측정한다. 같은 라면이라도 홍조 지수가 높은 사용자에게는 더 낮은 점수가 나온다. 이것이 일반 식단 앱과의 결정적 차이다.
+
+---
+
+### 4.3 AI 추천
+
+피부 상태와 음식을 종합하여 **오늘 추천하는 음식**과 **주의해야 하는 음식**을 제안한다.
+
+**예시**
+
+| 구분 | 항목 |
+|---|---|
+| 추천 | 키위, 브로콜리, 연어 |
+| 주의 | 라면, 탄산음료 |
+
+각 항목에 **추천 이유**도 함께 생성한다.
+
+예: `연어 — 오메가3가 피부 장벽 회복을 돕습니다. 오늘 건조 지표가 낮게 나왔습니다.`
+
+---
+
+### 4.4 로그인 · 회원가입
+
+사용자를 식별해야 **분석 기록이 축적**되고, 그래야 "어제보다 오늘 피부가 나아졌다"는 서사가 가능해진다. 이메일 + 비밀번호 방식의 자체 인증을 구현한다.
+
+**구현 범위**
+
+| 기능 | 포함 여부 | 비고 |
+|---|---|---|
+| 이메일 회원가입 | ✅ | 이메일 + 비밀번호 + 닉네임 |
+| 이메일 로그인 | ✅ | JWT Access Token 발급 |
+| 자동 로그인 | ✅ | 토큰을 기기 보안 저장소에 보관 |
+| 로그아웃 | ✅ | 로컬 토큰 삭제 |
+| 내 정보 조회 | ✅ | `GET /auth/me` |
+| **피부 타입 선택** | ✅ | 가입 직후 1탭 선택 (S01c). **건너뛰기 가능** — 아래 4.4.1 |
+| **테스트 계정** | ✅ | 아래 4.4.2 참조 |
+| 이메일 인증 메일 발송 | ❌ | 해커톤 범위 외 |
+| 비밀번호 재설정 | ❌ | 해커톤 범위 외 |
+| 소셜 로그인 (카카오/애플) | ❌ | Phase 2 |
+| Refresh Token 갱신 | ❌ | Access Token 유효기간 7일로 대체 |
+
+> **왜 Refresh Token을 안 만드는가** — 해커톤 시연 기간은 10일이고, Access Token 유효기간을 7일로 두면 토큰 갱신 시나리오가 시연 중에 아예 발생하지 않는다. 갱신 로직은 코드량 대비 심사에서 얻는 게 없다. 다만 `TokenPair`를 반환할 자리는 DTO에 남겨 둬서 Phase 2에서 필드 추가만으로 붙게 한다.
+
+#### 4.4.1 피부 타입 선택 (가입 직후)
+
+회원가입이 끝나면 **"평소 본인 피부는 어떻다고 생각하세요?"** 를 한 번 묻는다.
+
+| 선택지 | 코드 |
+|---|---|
+| 건성 | `DRY` |
+| 지성 | `OILY` |
+| 복합성 | `COMBINATION` |
+| 민감성 | `SENSITIVE` |
+| 잘 모르겠어요 | `UNKNOWN` |
+
+**설계 원칙 3가지**
+
+| 원칙 | 이유 |
+|---|---|
+| **회원가입 폼 안에 넣지 않는다.** 가입 완료 후 별도 화면(S01c) | 입력 필드 4개 옆에 라디오 그룹이 붙으면 폼이 길어 보인다. 가입을 끝낸 뒤 칩 하나 고르는 건 마찰이 아니라 참여다 |
+| **건너뛰기가 항상 보인다.** 미선택 = `NULL` | 필수로 만들면 시연 흐름이 여기서 멈춘다. 미선택이어도 서비스는 완전히 동작한다 |
+| **Rule Engine에는 넣지 않는다.** 표시·비교 전용 | 자가 신고값이 점수에 개입하면 "같은 사진 두 번 찍어도 같은 점수"라는 주장에 사용자 입력이라는 변수가 하나 더 끼어든다. `PlateContext`는 계속 `(SkinMetrics, FoodAnalysis)` 둘만 받는다 |
+
+**어디에 쓰이는가 — S05의 갭 코멘트**
+
+```
+Skin Score 55
+· 피부 장벽 양호 / 약간 건조 / 홍조 주의
+──────────────────────────────────────
+평소 생각하신 타입 : 지성
+오늘 측정 기준     : 건성
+
+"지성이라고 생각하셨지만 오늘은 유분보다 수분 부족이 두드러집니다.
+ 유분기는 수분이 모자랄 때도 늘어날 수 있습니다."
+```
+
+> **이 갭이 이 기능의 존재 이유다.** 피부 타입을 받아서 개인화에 쓰는 게 아니라, **"당신이 알고 있던 것과 오늘 측정이 다르다"를 보여주기 위해** 받는다. 이건 차별점 표(§7)의 "고정 타입이 아니라 오늘의 상태"라는 주장을 **화면에서 직접 증명하는 장치**이기도 하다.
+>
+> 미선택(`NULL`)이면 갭 카드 자리에 **"평소 본인 피부는?" 인라인 선택 칩**이 대신 뜬다. 건너뛴 사용자도 결과를 본 뒤에 마음이 바뀌면 그 자리에서 고를 수 있다.
+
+**관찰 타입 판정 규칙 (결정론적)**
+
+```
+redness > 70                    → SENSITIVE
+hydration < 40 && oil > 70      → COMBINATION   (수분 부족형 지성)
+oil > 70                        → OILY
+hydration < 40                  → DRY
+그 외                           → NORMAL
+```
+
+> AI에게 "이 사람 피부 타입이 뭐야"를 묻지 않는다. **5개 지표에서 규칙으로 도출한다.** 같은 지표면 항상 같은 타입이 나와야 갭 코멘트도 재현 가능하다.
+
+---
+
+#### 4.4.2 테스트 계정
+
+심사위원과 팀원이 **회원가입 없이 즉시 앱을 체험**할 수 있도록 고정 테스트 계정을 제공한다.
+
+| 항목 | 값 |
+|---|---|
+| 이메일 | `test@skinplate.app` |
+| 비밀번호 | `test1234!` |
+| 닉네임 | `테스트유저` |
+| 생성 시점 | 서버 기동 시 자동 생성 (`TestAccountInitializer`) |
+| 활성 조건 | `app.auth.test-account.enabled=true` (local/dev 프로파일 기본 on, prod 기본 off) |
+
+**로그인 화면에 "테스트 계정으로 시작하기" 버튼을 배치한다.**
+
+> **이 버튼이 해커톤에서 갖는 의미** — 심사위원이 무대 위에서 이메일과 비밀번호를 타이핑하는 20초는 발표 시간의 11%다. 게다가 오타 한 번이면 흐름이 끊긴다. 원탭 버튼 하나로 그 리스크가 사라진다. 로그인을 구현하되 시연 마찰은 0으로 만드는 것이 목표다.
+
+추가 테스트 계정 2개(`test2@skinplate.app`, `test3@skinplate.app`, 동일 비밀번호)를 함께 생성해 **여러 명이 동시에 시연**할 때 기록이 섞이지 않게 한다.
+
+---
+
+### 4.5 범위 정의 (In / Out)
+
+**해커톤 기간 내 반드시 구현 (In Scope)**
+
+- [x] **로그인 / 회원가입** (이메일 + 비밀번호, 테스트 계정 포함)
+- [x] 피부 분석
+- [x] 음식 분석
+- [x] Skin Plate Score
+- [x] AI 추천
+
+**구현하지 않음 (Out of Scope)**
+
+- [ ] 커뮤니티
+- [ ] 관리자 페이지
+- [ ] 결제
+- [ ] SNS 연동 (소셜 로그인 포함)
+- [ ] 푸시 알림
+- [ ] 웰니스하우스 예약
+- [ ] 이메일 인증 / 비밀번호 재설정
+
+> **인증 도입의 설계적 영향** — 로그인·회원가입을 제외한 **모든 API가** `Authorization: Bearer {token}` 을 요구하고, 서버는 토큰에서 `userId`를 꺼내 쓴다. 컨트롤러는 `@AuthenticationPrincipal`로 사용자를 주입받으므로 요청 본문에 `userId`를 담지 않는다. **클라이언트가 보낸 userId를 신뢰하지 않는 것**이 인증을 넣는 진짜 이유다.
+
+---
+
+## 5. User Flow
+
+```mermaid
+flowchart TD
+    A[앱 실행] --> T{"저장된 토큰 유효?"}
+    T -->|Yes| HOME["홈 (S02)"]
+    T -->|No| L["로그인 화면 (S01)"]
+    L --> L1[이메일 로그인]
+    L --> L2[회원가입]
+    L --> L3["테스트 계정으로 시작하기<br/>(원탭)"]
+    L2 --> TYPE["피부 타입 선택 (S01c)<br/>건너뛰기 가능"]
+    L1 --> HOME
+    TYPE --> HOME
+    L3 --> HOME
+    HOME --> B[피부 사진 촬영]
+    B --> C[AI 피부 분석]
+    C --> D[Skin Score 생성]
+    D --> E[음식 사진 촬영]
+    E --> F[AI 음식 분석]
+    F --> G[Skin Plate Score 생성]
+    G --> H[추천 음식 및 행동 제안]
+```
+
+**텍스트 버전**
+
+```
+앱 실행
+  ↓
+토큰 검사 → 없으면 로그인/회원가입 (또는 테스트 계정 원탭)
+  ↓
+(회원가입한 경우) 피부 타입 선택 — 건너뛰기 가능
+  ↓
+홈
+  ↓
+피부 사진 촬영
+  ↓
+AI 피부 분석
+  ↓
+Skin Score 생성
+  ↓
+음식 사진 촬영
+  ↓
+AI 음식 분석
+  ↓
+Skin Plate Score 생성
+  ↓
+추천 음식 및 행동 제안
+```
+
+**핵심 제약**: 이 플로우는 **처음부터 끝까지 3분 이내**에 완주 가능해야 한다. 해커톤 심사 시연이 곧 이 플로우이기 때문이다.
+
+---
+
+## 6. 화면 정의 [보강]
+
+| ID | 화면 | 주요 요소 | 전환 |
+|---|---|---|---|
+| S00 | 스플래시 / 토큰 게이트 | 로고, 저장된 토큰 유효성 검사 | 유효 → S02 / 무효 → S01 |
+| S01 | 로그인 | 이메일·비밀번호 입력, 로그인 버튼, **"테스트 계정으로 시작하기"**, 회원가입 링크 | → S02 / S01b |
+| S01b | 회원가입 | 이메일·비밀번호·비밀번호 확인·닉네임, 유효성 안내 | → S01c |
+| S01c | 피부 타입 선택 | "평소 본인 피부는?" 칩 5개, **건너뛰기** | → S02 |
+| S02 | 홈 | 오늘의 Skin Score 카드(없으면 CTA), 최근 Plate, "피부 분석하기" 버튼 | → S03 / S06 |
+| S03 | 피부 촬영 | 카메라 프리뷰, 얼굴 가이드 오버레이, 갤러리 버튼 | → S04 |
+| S04 | 분석 로딩 | 진행 애니메이션, 단계 텍스트("피부 특징 추출 중…") | → S05 |
+| S05 | 피부 결과 | Skin Score 원형 게이지, 5개 지표 바, 한 줄 요약 3개, "음식 분석하기" CTA | → S06 |
+| S06 | 음식 촬영 | 카메라 프리뷰, 갤러리 버튼 | → S07 |
+| S07 | Skin Plate 결과 | Plate Score, 좋은 점 / 주의사항 / **추천 행동** 카드, **"왜 60점인가" 접이식 계산 내역**, **행동 실행 버튼(점수 재계산 애니메이션)** | → S08 |
+| S08 | AI 추천 | 추천 음식 리스트 + 이유, 주의 음식 리스트 + 이유, 공유 버튼 | → S02 |
+| S09 | 히스토리 (P2) | 날짜별 Skin Score · Plate 기록 리스트 | → S05 / S07 |
+
+**화면 설계 원칙**
+
+1. **로딩 화면이 제품의 일부다.** AI 응답에 5~8초가 걸린다. 빈 스피너 대신 분석 단계를 순차로 보여주어 체감 대기시간을 줄인다.
+2. **결과 화면의 주인공은 점수가 아니라 행동이다.** S07에서 "추천 행동" 카드를 시각적으로 가장 강조한다.
+3. **모든 결과 화면은 다음 단계 CTA로 끝난다.** 사용자가 플로우 중간에서 멈추지 않도록 한다.
+4. **로그인은 한 번만 보인다.** S00에서 토큰이 유효하면 로그인 화면을 건너뛴다. 재실행할 때마다 로그인을 요구하면 시연 흐름이 매번 끊긴다.
+5. **회원가입 폼은 필수 입력 4개를 넘지 않는다.** 이메일·비밀번호·비밀번호 확인·닉네임. 성별·나이는 받지 않는다 — 피부 사진이 그걸 대신한다. 피부 타입은 폼 안이 아니라 **가입 완료 후 별도 화면(S01c)에서 칩 한 번**으로 받고, 건너뛸 수 있다.
+6. **S07에서 점수가 눈앞에서 움직여야 한다.** "국물을 절반만 남기면 점수가 상승합니다"라는 *문장*과, 버튼을 눌러 `60 → 68`이 실제로 오르는 *경험*은 다른 제품이다. 이 5초가 이 서비스의 전부다.
+
+---
+
+## 7. 차별점
+
+```mermaid
+flowchart LR
+    subgraph OLD["기존 서비스"]
+        A1[피부 분석] --> A2[끝]
+    end
+    subgraph NEW["우리 서비스"]
+        B1[피부 분석] --> B2[음식 분석]
+        B2 --> B3[피부 맞춤 식사 추천]
+        B3 --> B4[실행 가능한 행동 제안]
+    end
+```
+
+| 비교 항목 | 기존 피부 분석 서비스 | Skin Plate |
+|---|---|---|
+| 분석 대상 | 피부만 | 피부 + 음식 |
+| 결과 형태 | 수치와 진단 | 수치 + **오늘의 행동** |
+| 개인화 기준 | 피부 타입 (고정) | **오늘의 피부 상태 (가변).** 자가 신고 타입은 받되 점수에는 쓰지 않고, "알고 있던 것과 오늘이 다르다"를 보여주는 데만 쓴다 |
+| 사용자 다음 행동 | 화장품 구매 | 눈앞의 식사 조정 |
+| 재방문 동기 | 낮음 (월 1회) | 높음 (식사마다) |
+
+---
+
+## 8. 성공 지표 · KPI [보강]
+
+해커톤 기간에는 사용자 규모 지표가 무의미하다. **동작 신뢰성**과 **플로우 완주율**에 집중한다.
+
+### 8.1 제품 지표
+
+| 지표 | 목표 | 측정 방법 |
+|---|---|---|
+| 회원가입 완료율 | ≥ 85% | S01b 진입 → 가입 성공 비율 |
+| 자동 로그인 성공률 | ≥ 99% | 재실행 시 S00에서 S02로 직행한 비율 |
+| 전체 플로우 완주율 | ≥ 70% | 로그인 완료 → S08 도달 비율 (로컬 이벤트 로그) |
+| 플로우 완주 소요 시간 | ≤ 3분 | S02 진입 ~ S08 도달 (로그인 제외) |
+| 추천 행동 이해도 | 정성 평가 | 테스터 5인 대상 "무엇을 할지 알겠는가" 확인 |
+
+### 8.2 기술 지표
+
+| 지표 | 목표 |
+|---|---|
+| 로그인 / 회원가입 API 응답 시간 (p95) | ≤ 500ms |
+| 유효 토큰의 인증 실패(오탐) | **0건** |
+| 피부 분석 API 응답 시간 (p95) | ≤ 8초 |
+| 음식 분석 API 응답 시간 (p95) | ≤ 6초 |
+| AI 응답 파싱 성공률 | ≥ 95% |
+| API 5xx 에러율 | ≤ 1% |
+| 시연 중 앱 크래시 | **0건** |
+
+### 8.3 해커톤 심사 대응 지표
+
+| 지표 | 목표 |
+|---|---|
+| 데모 시나리오 무중단 성공 | 3회 연속 |
+| **테스트 계정 원탭 로그인 소요 시간** | ≤ 5초 |
+| 오프라인/네트워크 장애 시 데모 지속 가능 | Mock 모드로 전환 가능 |
+
+---
+---
+
+# Part 2 · 기술 설계
+
+> **설계 원칙**
+> 1. 유지보수 가능한 구조 — 레이어 경계를 명확히
+> 2. 확장 가능한 아키텍처 — 규칙과 프롬프트를 코드에서 분리
+> 3. Clean Architecture 지향 — 단, 3계층까지만
+> 4. Feature 기반 모듈 구조 — 기능 단위로 폴더를 자른다
+> 5. **10일 내 구현 가능** — 위 4개와 충돌하면 이 항목이 이긴다
+>
+> **오버엔지니어링 금지 목록**: 멀티모듈 Gradle, CQRS, 이벤트 소싱, Kafka, Redis 캐시, 마이크로서비스, Kubernetes, 자동 롤백 CI/CD. 전부 하지 않는다.
+
+---
+
+## 9. 전체 시스템 아키텍처
+
+### 9.1 구성도
+
+```mermaid
+flowchart TB
+    subgraph Client["📱 Client — Flutter"]
+        UI[Presentation<br/>Riverpod + go_router]
+        DOM[Domain<br/>UseCase / Entity]
+        DATA[Data<br/>Dio / DTO]
+        TOKEN[(Secure Storage<br/>JWT 보관)]
+        UI --> DOM --> DATA
+        DATA -.-> TOKEN
+    end
+
+    subgraph Server["☁️ Backend — Spring Boot 3"]
+        SEC[Security Filter Chain<br/>JWT 검증 → userId 주입]
+        CTRL[Controller Layer<br/>REST API]
+        SVC[Service Layer<br/>비즈니스 로직]
+        ENGINE[Rule Engine<br/>Skin Plate Score]
+        REPO[Repository Layer<br/>Spring Data JPA]
+        SEC --> CTRL
+        CTRL --> SVC
+        SVC --> ENGINE
+        SVC --> REPO
+    end
+
+    subgraph Infra["🔌 Infrastructure"]
+        OPENAI[OpenAI Vision API<br/>gpt-4o]
+        STORAGE[Image Storage<br/>Local FS / S3]
+    end
+
+    DB[(PostgreSQL 16)]
+
+    DATA -->|"HTTPS REST + Bearer Token<br/>multipart"| SEC
+    SVC -->|WebClient| OPENAI
+    SVC --> STORAGE
+    REPO --> DB
+```
+
+### 9.2 책임 분리 (원문 "AI 역할" 반영)
+
+| 주체 | 책임 |
+|---|---|
+| **OpenAI** | 피부 특징 추출, 음식 인식, 자연어 추천 생성 |
+| **Backend** | Skin Plate Score 계산, 음식↔피부 상태 매칭, 추천 Rule Engine, 응답 생성 |
+| **Flutter** | 촬영/업로드, 상태 표현, 결과 시각화 |
+
+> **즉, AI는 "인식"을 담당하고 서비스의 핵심 로직은 Backend가 담당한다.**
+>
+> 이 분리가 중요한 이유: 점수 계산을 LLM에 맡기면 같은 입력에 다른 점수가 나와 **데모 중 재현이 불가능**해진다. 규칙 기반 계산은 항상 같은 결과를 낸다. 심사위원이 같은 사진을 두 번 찍어도 같은 점수가 나와야 한다.
+
+### 9.3 기술 스택
+
+| 영역 | 기술 | 버전 | 선정 이유 |
+|---|---|---|---|
+| Frontend | Flutter | 3.24+ | 크로스플랫폼, 빠른 UI 구현 |
+| 상태관리 | Riverpod | 2.x | 보일러플레이트 적음, 테스트 용이 |
+| 라우팅 | go_router | 14.x | 선언적 라우팅 |
+| 네트워크 | Dio + Retrofit | - | 인터셉터, multipart 지원 |
+| 모델 | freezed + json_serializable | - | 불변 DTO 자동 생성 |
+| 토큰 저장 | flutter_secure_storage | 9.x | Keychain / Keystore 기반 JWT 보관 |
+| **얼굴 감지** | **google_mlkit_face_detection** | **0.11.x** | **온디바이스 얼굴 게이트 + 크롭 (§9.5)** |
+| Backend | Spring Boot | 3.3.x | 팀 숙련도, 생태계 |
+| Language | Java | 21 | record, sealed, pattern matching |
+| **인증** | **Spring Security + jjwt** | **6.3 / 0.12.x** | **JWT 검증 필터, BCrypt 해싱** |
+| ORM | Spring Data JPA | - | 빠른 CRUD |
+| DB | PostgreSQL | 16 | JSONB로 AI 원본 응답 저장 |
+| AI | OpenAI | gpt-4o | Vision + Structured Outputs 지원 |
+| 문서화 | springdoc-openapi | 2.x | Swagger UI 자동 생성 |
+| 로컬 DB | Docker Compose | - | 개발 중 Postgres만 컨테이너로 |
+| **배포** | **Railway · Render · Fly.io 중 택1** | - | **HTTPS 자동 발급이 선택 기준.** Dockerfile 하나로 배포. 상세는 §9.6 |
+
+### 9.4 이미지 처리 파이프라인
+
+```
+[Flutter] 촬영
+   → ML Kit 얼굴 게이트 (피부 사진만)  ★ §9.5
+   → 얼굴 영역 크롭 (여백 20%)
+   → 리사이즈 (긴 변 1024px) + JPEG 압축 (quality 80)
+   → multipart 업로드
+[Backend] 수신
+   → 검증 (MIME, ≤5MB)
+   → 저장 (Local FS: /uploads/{yyyy}/{MM}/{uuid}.jpg)
+   → Base64 인코딩
+   → OpenAI Vision 호출 (피부 detail: "high" / 음식 detail: "low")
+   → JSON 파싱 → DB 저장
+```
+
+> **비용·속도 최적화** — 클라이언트 리사이즈만으로 업로드 용량이 1/5로 줄어든다. 음식은 `detail: "low"`(고정 85토큰)로 충분하고, **피부만 `high`**로 보낸다. 홍조·트러블 판정이 512px 다운샘플로는 성립하지 않기 때문이다.
+>
+> 피부 사진은 **온디바이스로 얼굴만 크롭해서 올린다**(§9.5). 같은 토큰으로 얼굴의 실효 해상도가 3배 이상 올라간다.
+
+---
+
+### 9.5 온디바이스 얼굴 게이트 (ML Kit)
+
+**결론부터: 넣는다. 단 "판정"이 아니라 "게이트 + 크롭"으로만 쓴다.**
+
+#### 왜 필요한가
+
+지금 설계에서 "얼굴이 아니다"를 알아내는 유일한 방법은 **OpenAI에 보내고 `faceDetected: false`를 받는 것**이다. 그 한 번에 5~8초와 API 비용이 나간다. 그리고 더 큰 문제가 셋 있다.
+
+| 문제 | 게이트 없이 | 게이트 있으면 |
+|---|---|---|
+| **실효 해상도** | 상반신·배경 포함 사진을 1024px로 줄이면 **얼굴은 200px 남짓**이다. 그걸 다시 Vision이 타일로 자른다 | 얼굴만 크롭해 올리면 같은 용량으로 **얼굴이 1024px를 꽉 채운다.** 홍조·트러블 판정 근거가 실제로 생긴다 |
+| **재현성** | 거리·각도·조도가 매번 달라 지표가 흔들린다. severityFactor가 그 숫자 위에 얹혀 있다 | 얼굴 크기·정면 각도를 강제하면 **입력 분산 자체가 줄어든다** |
+| **시연 실패** | 어두운 곳에서 찍고 8초 기다린 뒤 "얼굴을 인식하지 못했습니다"를 본다 | 촬영 버튼이 애초에 비활성화되고 "조금 더 밝은 곳으로" 안내가 뜬다 |
+
+#### 무엇을 쓰는가 — ML Kit이다, OpenCV·MediaPipe가 아니다
+
+| 후보 | 판단 |
+|---|---|
+| **google_mlkit_face_detection** | ✅ **채택.** Flutter 공식 수준 플러그인, 온디바이스, 무료, Android/iOS 동시 지원. 바운딩 박스 + 머리 각도(Euler Y/Z) + 눈 뜸 확률까지 준다. 붙이는 데 반나절 |
+| OpenCV (`opencv_dart`, FFI) | ❌ 네이티브 빌드 설정과 바이너리 크기가 해커톤에서 감당이 안 된다. Haar cascade는 정확도도 ML Kit보다 낮다 |
+| MediaPipe Tasks | ❌ Flutter 플러그인 생태계가 아직 얇다. 플랫폼 채널을 직접 짜야 하고, 그 시간이 Day 4를 통째로 먹는다 |
+
+**MediaPipe의 468점 랜드마크는 이 제품에 필요 없다.** 우리가 필요한 건 "얼굴이 있는가 / 충분히 큰가 / 정면인가" 세 가지뿐이고, ML Kit이 그걸 다 준다.
+
+#### 게이트 조건 (촬영 버튼 활성화 기준)
+
+| 조건 | 기준 | 실패 시 안내 |
+|---|---|---|
+| 얼굴 개수 | 정확히 1개 | "얼굴이 한 명만 보이게 해주세요" |
+| 얼굴 크기 | 바운딩 박스 높이 ≥ 프레임 높이의 40% | "조금 더 가까이 와주세요" |
+| 정면 여부 | `headEulerAngleY`, `headEulerAngleZ` 절댓값 ≤ 15° | "정면을 봐주세요" |
+| 밝기 | 얼굴 영역 평균 휘도 ≥ 60 (0~255) | "조금 더 밝은 곳에서 촬영해주세요" |
+
+> **밝기는 ML Kit이 주지 않는다.** 크롭한 얼굴 영역의 픽셀 평균 휘도를 직접 계산한다. 10줄이면 되고, 이게 시연 실패를 가장 많이 막아준다.
+
+#### 쓰지 말아야 할 곳
+
+**피부 상태 판정에는 절대 쓰지 않는다.** ML Kit이 주는 `smilingProbability`, `leftEyeOpenProbability` 같은 값으로 트러블이나 홍조를 추정하려 들면, "AI는 인식, 로직은 Backend"라는 우리 구조가 무너지고 근거 없는 숫자가 하나 더 생긴다. **게이트와 크롭까지가 전부다.**
+
+#### 비용
+
+| 항목 | 값 |
+|---|---|
+| 작업 시간 | 반나절 (Day 5~6 권장) |
+| APK 증가 | 약 +3~5MB (번들 모델 기준) |
+| iOS 추가 작업 | `pod install` + 카메라 권한 문구 — 30분 |
+| 런타임 | 프레임당 20~40ms, 온디바이스 |
+
+> **Day 8 이후에는 붙이지 마라.** 네이티브 의존성이 추가되는 작업이라 빌드가 깨지면 복구에 시간이 든다. Day 5~6이 마지노선이다.
+
+#### 심사 포인트
+
+> "AI에 던지기 전에 온디바이스에서 품질을 한 번 거릅니다. 얼굴만 잘라 보내니까 같은 비용으로 해상도가 3배 올라가고, 촬영 조건이 일정해져서 점수도 안 흔들립니다."
+
+이 한 문장이 §21의 예상 질문 "512px로 홍조를 판별할 수 있나요?"에 대한 답이 된다.
+
+---
+
+### 9.6 배포 구성 — 발표 형식이 아키텍처를 바꾼다
+
+**전제가 바뀌었다.** 발표는 **사전 제작 영상**이고, 현장에서는 **배포된 앱**으로 시연한다. 그러면 이 문서 곳곳에 깔려 있던 "노트북 `bootRun` + 에뮬레이터 `10.0.2.2`" 전제가 성립하지 않는다.
+
+#### 무엇이 달라지는가
+
+| 항목 | 노트북 시연 전제 (구) | 배포본 시연 (현) |
+|---|---|---|
+| 서버 위치 | 노트북 localhost | **공인 주소에 배포** |
+| 프로토콜 | HTTP | **HTTPS 필수** (Android API 28+ cleartext 차단) |
+| `API_BASE_URL` | `http://10.0.2.2:8080` | `https://{배포 도메인}` |
+| 앱 빌드 | 디버그 | **릴리즈** |
+| 이미지 서빙 | 로컬 FS | 재배포 시 소실 — 아래 참조 |
+| 첫 배포 시점 | Day 10 | **Day 6** |
+
+#### 배포처 선택 — HTTPS를 공짜로 주는 곳으로 간다
+
+| 후보 | 판단 |
+|---|---|
+| **Railway · Render · Fly.io** | ✅ **채택.** Dockerfile 하나로 배포되고 **HTTPS 인증서를 자동 발급**한다. Postgres 애드온도 클릭 한 번. cleartext 차단 문제가 **통째로 사라진다** |
+| 클라우드 VM(EC2 등) + nginx | ❌ 인증서 발급·갱신·리버스 프록시 설정에 반나절. 해커톤에서 그 시간은 없다 |
+| 노트북 + ngrok | ⚠️ 백업으로만. HTTPS는 되지만 무료 플랜은 URL이 재기동마다 바뀌어 릴리즈 빌드에 못 박을 수 없다 |
+
+> **HTTPS를 자동으로 받는 것이 이 선택의 전부다.** 그것 하나로 `network_security_config.xml`, cleartext 예외, 인증서 작업이 전부 불필요해진다. 리스크 R16이 소멸한다.
+
+이에 따라 **API도 컨테이너화한다.** §9.3에서 "API는 컨테이너화하지 않는다"고 적었던 것은 노트북 시연 전제였고, 지금은 무효다.
+
+```dockerfile
+# Dockerfile — 멀티스테이지, 30줄이면 끝난다
+FROM gradle:8-jdk21 AS build
+COPY . /src
+WORKDIR /src
+RUN gradle bootJar --no-daemon
+
+FROM eclipse-temurin:21-jre
+COPY --from=build /src/build/libs/*.jar /app.jar
+ENV SPRING_PROFILES_ACTIVE=prod
+ENTRYPOINT ["java","-jar","/app.jar"]
+```
+
+#### 이미지 서빙 — 아예 의존하지 않는다
+
+배포 환경에서 로컬 파일 시스템은 컨테이너를 재시작하면 사라진다. 볼륨을 붙이거나 S3를 쓰면 되지만, **더 간단한 답이 있다.**
+
+> **결과 화면은 서버가 준 `imageUrl`이 아니라 앱이 방금 찍은 로컬 파일을 표시한다.**
+
+- S05·S07에서 보여줄 사진은 **사용자가 30초 전에 촬영한 것**이고, 그 파일은 앱 안에 이미 있다
+- 히스토리(S09)를 잘라냈으므로 **서버 이미지를 다시 꺼내 볼 화면이 없다**
+- `imageUrl`은 응답에 남기되 **시연 경로가 그것에 의존하지 않는다**
+
+이 결정 하나로 **호스트 불일치(R17)와 배포 환경 이미지 유실이 동시에 사라진다.** 서버는 이미지를 저장하되, 저장이 깨져도 시연은 멀쩡하다.
+
+#### 환경별 설정 3벌
+
+| 환경 | `SPRING_PROFILES_ACTIVE` | 테스트 계정 | `API_BASE_URL` |
+|---|---|---|---|
+| 로컬 개발 | `local` | 활성 | `http://10.0.2.2:8080/api/v1` |
+| 배포 (시연) | `prod` + `TEST_ACCOUNT_ENABLED=true` | **활성** | `https://{도메인}/api/v1` |
+| 배포 (실서비스) | `prod` | 비활성 | 〃 |
+
+> **시연용 배포는 `prod` 프로파일이면서 테스트 계정은 켜야 한다.** 그래서 테스트 계정 스위치를 프로파일이 아니라 **독립 프로퍼티**(`app.auth.test-account.enabled`)로 뽑아둔 것이다. 심사위원이 현장에서 원탭 로그인을 해야 하기 때문이다.
+
+#### 배포 일정 — Day 6에 한 번 올린다
+
+**첫 배포는 예외 없이 반나절을 먹는다.** 환경변수 누락, 포트, DB 연결 문자열, 헬스체크, 빌드 캐시. 그걸 Day 10에 처음 하면 발표 당일에 한다는 뜻이다.
+
+| 시점 | 할 일 |
+|---|---|
+| Day 6 | **1차 배포.** 기능이 절반만 돌아도 올린다. 목적은 파이프라인을 뚫는 것 |
+| Day 7 | 릴리즈 빌드로 실기기에서 배포 서버 호출 확인 |
+| Day 8 | **배포본 E2E 1회 완주** — 이게 시연에서 쓸 바로 그 빌드다 |
+| Day 9~10 | 영상 촬영·편집. 코드는 동결 |
+
+---
+
+## 10. Flutter 프로젝트 구조
+
+### 10.1 원칙
+
+- **Feature-first**: 기능 폴더가 최상위, 레이어는 그 하위
+- **레이어 3개만**: `data` / `domain` / `presentation`
+- **의존 방향**: `presentation → domain ← data` (domain은 아무것도 모른다)
+- **한 기능을 지우면 폴더 하나만 지우면 된다**
+
+### 10.2 디렉토리 구조
+
+```
+lib/
+├── main.dart
+│
+├── app/                                # 앱 전역 설정
+│   ├── app.dart                        # MaterialApp, ProviderScope
+│   ├── router/
+│   │   └── app_router.dart             # go_router 라우트 정의
+│   └── theme/
+│       ├── app_colors.dart
+│       ├── app_text_styles.dart
+│       └── app_theme.dart
+│
+├── core/                               # 기능 무관 공통 인프라
+│   ├── config/
+│   │   └── env.dart                    # API_BASE_URL, MOCK_MODE 플래그
+│   ├── network/
+│   │   ├── dio_client.dart             # Dio 인스턴스 + 타임아웃
+│   │   ├── auth_interceptor.dart       # Authorization: Bearer 자동 주입
+│   │   ├── unauthorized_interceptor.dart  # 401 감지 → 토큰 삭제 → 로그인 이동
+│   │   └── api_envelope.dart          # 공통 응답 래퍼 { success, data, error }
+│   ├── storage/
+│   │   └── token_storage.dart          # flutter_secure_storage 래퍼
+│   ├── error/
+│   │   └── failure.dart                # Network / Server / Auth / Analysis Failure
+│   ├── result/
+│   │   └── result.dart                 # Result<T> (Success | Failure)
+│   ├── di/
+│   │   └── providers.dart              # Riverpod 전역 Provider 등록
+│   ├── utils/
+│   │   ├── image_compressor.dart       # 리사이즈 + 압축
+│   │   └── validators.dart             # 이메일/비밀번호 형식 검증
+│   └── widgets/
+│       ├── score_gauge.dart            # 원형 점수 게이지 (재사용)
+│       ├── metric_bar.dart             # 지표 막대 (재사용)
+│       ├── loading_steps.dart          # 단계형 로딩 인디케이터
+│       └── primary_button.dart
+│
+├── features/
+│   │
+│   ├── auth/                           # ⓪ 로그인 / 회원가입
+│   │   ├── data/
+│   │   │   ├── datasources/
+│   │   │   │   └── auth_remote_datasource.dart
+│   │   │   ├── models/
+│   │   │   │   └── auth_dtos.dart              # freezed (요청·응답 한 파일)
+│   │   │   └── repositories/
+│   │   │       └── auth_repository_impl.dart
+│   │   ├── domain/
+│   │   │   ├── entities/
+│   │   │   │   └── auth_user.dart              # AuthUser + AuthSession
+│   │   │   ├── repositories/auth_repository.dart
+│   │   │   └── usecases/
+│   │   │       ├── login.dart
+│   │   │       ├── get_me.dart
+│   │   │       ├── signup.dart
+│   │   │       ├── login_with_test_account.dart   # 원탭 로그인
+│   │   │       ├── restore_session.dart           # 앱 시작 시 토큰 복원
+│   │   │       └── logout.dart
+│   │   └── presentation/
+│   │       ├── pages/
+│   │       │   ├── splash_page.dart            # S00 토큰 게이트
+│   │       │   ├── login_page.dart             # S01
+│   │       │   └── signup_page.dart            # S01b
+│   │       ├── providers/
+│   │       │   └── auth_notifier.dart          # 전역 인증 상태
+│   │       └── widgets/
+│   │           ├── auth_text_field.dart
+│   │           └── test_account_button.dart    # "테스트 계정으로 시작하기"
+│   │
+│   ├── skin_analysis/                  # ① 피부 분석
+│   │   ├── data/
+│   │   │   ├── datasources/
+│   │   │   │   └── skin_remote_datasource.dart
+│   │   │   ├── models/
+│   │   │   │   └── skin_dtos.dart              # freezed
+│   │   │   └── repositories/
+│   │   │       └── skin_repository_impl.dart
+│   │   ├── domain/
+│   │   │   ├── entities/
+│   │   │   │   └── skin_analysis.dart
+│   │   │   ├── repositories/
+│   │   │   │   └── skin_repository.dart        # 추상 인터페이스
+│   │   │   └── usecases/
+│   │   │       ├── analyze_skin.dart
+│   │   │       └── get_latest_skin_analysis.dart
+│   │   └── presentation/
+│   │       ├── pages/
+│   │       │   ├── skin_capture_page.dart      # S03
+│   │       │   ├── skin_loading_page.dart      # S04
+│   │       │   └── skin_result_page.dart       # S05
+│   │       ├── providers/
+│   │       │   └── skin_analysis_notifier.dart
+│   │       └── widgets/
+│   │           ├── skin_score_card.dart
+│   │           └── skin_metric_list.dart
+│   │
+│   ├── skin_plate/                     # ② 음식 분석 + Plate Score
+│   │   ├── data/
+│   │   │   ├── datasources/plate_remote_datasource.dart
+│   │   │   ├── models/
+│   │   │   │   └── plate_dtos.dart             # freezed
+│   │   │   └── repositories/plate_repository_impl.dart
+│   │   ├── domain/
+│   │   │   ├── entities/
+│   │   │   │   ├── skin_plate.dart
+│   │   │   │   └── plate_feedback.dart
+│   │   │   ├── repositories/plate_repository.dart
+│   │   │   └── usecases/create_skin_plate.dart
+│   │   └── presentation/
+│   │       ├── pages/
+│   │       │   ├── food_capture_page.dart      # S06
+│   │       │   └── plate_result_page.dart      # S07
+│   │       ├── providers/plate_notifier.dart
+│   │       └── widgets/
+│   │           ├── plate_score_card.dart
+│   │           ├── feedback_section.dart       # 좋은 점/주의/행동
+│   │           └── action_highlight_card.dart  # 추천 행동 강조
+│   │
+│   ├── recommendation/                 # ③ AI 추천
+│   │   ├── data/ …
+│   │   ├── domain/ …
+│   │   └── presentation/
+│   │       ├── pages/recommendation_page.dart  # S08
+│   │       └── widgets/food_recommend_tile.dart
+│   │
+│   └── home/                           # ④ 홈
+│       └── presentation/
+│           └── pages/home_page.dart            # S02
+│
+└── shared/
+    └── enums/
+        ├── feedback_type.dart          # GOOD / CAUTION / ACTION
+        └── recommendation_type.dart    # RECOMMEND / AVOID
+```
+
+### 10.3 레이어별 역할
+
+| 레이어 | 역할 | 하지 말아야 할 것 |
+|---|---|---|
+| `presentation` | 화면, 상태 관리, 사용자 입력 | HTTP 직접 호출, JSON 파싱 |
+| `domain` | 비즈니스 규칙, 순수 Dart 객체 | Flutter/Dio import |
+| `data` | API 통신, DTO ↔ Entity 변환 | UI 상태 참조 |
+
+### 10.4 상태 관리 패턴
+
+```dart
+// skin_analysis_notifier.dart
+@riverpod
+class SkinAnalysisNotifier extends _$SkinAnalysisNotifier {
+  @override
+  AsyncValue<SkinAnalysis?> build() => const AsyncData(null);
+
+  Future<void> analyze(File image) async {
+    state = const AsyncLoading();
+    final result = await ref.read(analyzeSkinUseCaseProvider)(image);
+    state = result.when(
+      success: (data) => AsyncData(data),
+      failure: (f) => AsyncError(f, StackTrace.current),
+    );
+  }
+}
+```
+
+화면은 `AsyncValue`의 3상태(`loading` / `data` / `error`)만 분기하면 된다. 별도 로딩 플래그를 만들지 않는다.
+
+### 10.5 인증 상태 관리 · 라우트 가드
+
+```dart
+// auth_notifier.dart — 전역 인증 상태
+sealed class AuthState {}
+class AuthInitial       extends AuthState {}   // 토큰 확인 중
+class Authenticated     extends AuthState { final AuthUser user; Authenticated(this.user); }
+class Unauthenticated   extends AuthState {}
+
+@riverpod
+class AuthNotifier extends _$AuthNotifier {
+  @override
+  AuthState build() {
+    _restore();                       // 앱 시작 시 1회
+    return AuthInitial();
+  }
+
+  Future<void> _restore() async {
+    final token = await ref.read(tokenStorageProvider).read();
+    if (token == null) { state = Unauthenticated(); return; }
+    final result = await ref.read(getMeUseCaseProvider)();
+    state = result.when(
+      success: (user) => Authenticated(user),
+      failure: (_) => Unauthenticated(),   // 만료·위조 토큰이면 로그인으로
+    );
+  }
+
+  Future<void> loginWithTestAccount() async { … }
+  Future<void> logout() async {
+    await ref.read(tokenStorageProvider).clear();
+    state = Unauthenticated();
+  }
+}
+```
+
+**go_router 리다이렉트**
+
+```dart
+final router = GoRouter(
+  refreshListenable: authListenable,          // AuthState 변화 시 재평가
+  redirect: (context, state) {
+    final auth = ref.read(authNotifierProvider);
+    final goingToAuth = state.matchedLocation.startsWith('/auth');
+
+    return switch (auth) {
+      AuthInitial()      => '/splash',
+      Unauthenticated()  => goingToAuth ? null : '/auth/login',
+      Authenticated()    => goingToAuth ? '/home' : null,
+    };
+  },
+  routes: [ … ],
+);
+```
+
+> **가드를 화면마다 넣지 않는다.** 라우터 한 곳에서 리다이렉트를 처리하면, 새 화면을 추가할 때 인증 체크를 잊는 사고가 구조적으로 불가능해진다. 화면이 11개인 지금은 차이가 작지만, 서둘러 화면을 추가하는 해커톤 8~9일차에 이 차이가 드러난다.
+
+**토큰 저장 (`token_storage.dart`)**
+
+```dart
+class TokenStorage {
+  static const _key = 'access_token';
+  final _storage = const FlutterSecureStorage();
+
+  Future<void> save(String token) => _storage.write(key: _key, value: token);
+  Future<String?> read()          => _storage.read(key: _key);
+  Future<void> clear()            => _storage.delete(key: _key);
+}
+```
+
+`SharedPreferences`가 아니라 `flutter_secure_storage`를 쓴다. iOS Keychain / Android Keystore에 저장되므로 루팅되지 않은 기기에서 다른 앱이 토큰을 읽을 수 없다. 코드량 차이는 거의 없다.
+
+---
+
+## 11. Spring Boot 프로젝트 구조
+
+### 11.1 원칙
+
+- **단일 모듈**(멀티모듈 Gradle 금지) + **패키지로 경계 분리**
+- **Domain-first 패키징**: `domain/{aggregate}/` 아래에 controller~entity를 모은다
+- **`global/`**: 전역 설정·예외·공통 응답
+- **`infra/`**: 외부 시스템 연동 (OpenAI, Storage) — 도메인이 여기에 의존하되 반대는 금지
+
+### 11.2 패키지 구조
+
+```
+src/main/java/com/skinplate/api/
+│
+├── SkinPlateApplication.java
+│
+├── global/
+│   ├── config/
+│   │   ├── WebConfig.java              # CORS, multipart 설정
+│   │   ├── SecurityConfig.java         # ★ 필터 체인, 인가 규칙, PasswordEncoder
+│   │   ├── OpenAiConfig.java           # WebClient Bean, 타임아웃
+│   │   ├── JpaConfig.java              # Auditing
+│   │   └── SwaggerConfig.java
+│   ├── security/                       # ★ 인증 인프라
+│   │   ├── JwtTokenProvider.java       # 발급 / 검증 / 파싱
+│   │   ├── JwtAuthenticationFilter.java# OncePerRequestFilter
+│   │   ├── JwtAuthenticationEntryPoint.java  # 401 JSON 응답
+│   │   └── CurrentUser.java            # @AuthenticationPrincipal 메타 애노테이션
+│   ├── common/
+│   │   ├── ApiResponse.java            # 공통 응답 래퍼
+│   │   ├── BaseTimeEntity.java         # createdAt / updatedAt
+│   │   └── PageResponse.java
+│   ├── exception/
+│   │   ├── BusinessException.java
+│   │   ├── ErrorCode.java              # enum
+│   │   └── GlobalExceptionHandler.java # @RestControllerAdvice
+│   └── init/
+│       └── TestAccountInitializer.java # ★ 테스트 계정 자동 생성 (ApplicationRunner)
+│
+├── domain/
+│   │
+│   ├── auth/                           # ★ 인증 도메인
+│   │   ├── controller/AuthController.java
+│   │   ├── service/AuthService.java
+│   │   └── dto/
+│   │       ├── SignupRequest.java
+│   │       ├── LoginRequest.java
+│   │       ├── TestLoginRequest.java
+│   │       ├── UpdateProfileRequest.java
+│   │       ├── AuthResponse.java       # accessToken + user
+│   │       └── MeResponse.java
+│   │
+│   ├── user/
+│   │   ├── service/UserService.java
+│   │   ├── repository/AppUserRepository.java
+│   │   ├── entity/
+│   │   │   ├── AppUser.java
+│   │   │   ├── Role.java               # USER (ADMIN은 자리만)
+│   │   │   └── SkinType.java           # declared + observed
+│   │   └── dto/UserSummaryDto.java
+│   │
+│   ├── skin/
+│   │   ├── controller/SkinAnalysisController.java
+│   │   ├── service/
+│   │   │   ├── SkinAnalysisService.java        # 흐름 조율
+│   │   │   ├── SkinScoreCalculator.java        # Skin Score 산출
+│   │   │   ├── SkinHighlightBuilder.java       # 3줄 요약
+│   │   │   └── SkinTypeGapAnalyzer.java        # 자가 진단 갭
+│   │   ├── repository/SkinAnalysisRepository.java
+│   │   ├── entity/SkinAnalysis.java
+│   │   └── dto/
+│   │       ├── SkinAnalysisResponse.java
+│   │       ├── SkinMetricsDto.java
+│   │       ├── HighlightDto.java
+│   │       └── SkinTypeGapDto.java
+│   │
+│   ├── food/
+│   │   ├── service/
+│   │   │   ├── FoodAnalysisService.java
+│   │   │   └── StandardNutrition.java          # 시연 음식 표준 영양값
+│   │   ├── repository/
+│   │   │   ├── FoodAnalysisRepository.java
+│   │   │   └── FoodIngredientRepository.java
+│   │   ├── entity/
+│   │   │   ├── FoodAnalysis.java
+│   │   │   └── FoodIngredient.java
+│   │   └── dto/FoodAnalysisResponse.java
+│   │
+│   ├── plate/                                  # ★ 핵심 도메인
+│   │   ├── controller/SkinPlateController.java
+│   │   ├── service/SkinPlateService.java
+│   │   ├── engine/
+│   │   │   ├── PlateRuleEngine.java            # 룰 수집·집계
+│   │   │   ├── PlateContext.java               # 룰 입력 (피부+음식)
+│   │   │   ├── RuleResult.java                 # 룰 출력
+│   │   │   ├── PlateRule.java                  # 룰 인터페이스
+│   │   │   └── rules/
+│   │   │       ├── SodiumRule.java
+│   │   │       ├── SugarTroubleRule.java
+│   │   │       ├── ProteinRule.java
+│   │   │       ├── HydrationFoodRule.java
+│   │   │       ├── SpicyRednessRule.java
+│   │   │       ├── FriedOilRule.java
+│   │   │       ├── VitaminRule.java
+│   │   │       ├── Omega3BarrierRule.java
+│   │   │       └── ProbioticRule.java
+│   │   ├── repository/
+│   │   │   ├── SkinPlateRepository.java
+│   │   │   └── SkinPlateFeedbackRepository.java
+│   │   ├── entity/
+│   │   │   ├── SkinPlate.java
+│   │   │   ├── SkinPlateFeedback.java
+│   │   │   └── PlateActionCode.java            # 시뮬레이션 액션
+│   │   └── dto/
+│   │       ├── SkinPlateCreateRequest.java
+│   │       ├── SkinPlateResponse.java
+│   │       ├── PlateSimulateRequest.java
+│   │       ├── PlateSimulateResponse.java
+│   │       └── PlateFeedbackDto.java
+│   │
+│   └── recommendation/
+│       ├── controller/RecommendationController.java
+│       ├── service/
+│       │   ├── RecommendationService.java
+│       │   └── RecommendationCandidates.java   # 취약 항목 → 후보 음식
+│       ├── repository/RecommendationRepository.java
+│       ├── entity/Recommendation.java
+│       └── dto/RecommendationResponse.java
+│
+└── infra/
+    ├── openai/
+    │   ├── OpenAiVisionClient.java             # WebClient 호출
+    │   ├── prompt/
+    │   │   ├── SkinAnalysisPrompt.java
+    │   │   ├── FoodAnalysisPrompt.java
+    │   │   └── RecommendationPrompt.java
+    │   ├── schema/
+    │   │   ├── skin-analysis-schema.json       # Structured Outputs
+    │   │   └── food-analysis-schema.json
+    │   ├── dto/
+    │   │   ├── OpenAiSkinResult.java
+    │   │   └── OpenAiFoodResult.java
+    │   └── exception/OpenAiClientException.java
+    └── storage/
+        ├── ImageStorage.java                   # 인터페이스
+        └── LocalImageStorage.java              # 구현 (S3 교체 지점)
+
+src/main/resources/
+├── application.yml
+├── application-local.yml
+├── application-prod.yml
+└── db/migration/
+    ├── V1__init.sql
+    └── V2__seed.sql          # 추천 매핑 등 정적 데이터 (테스트 계정은 코드로 생성)
+```
+
+### 11.3 계층 의존 규칙
+
+```
+SecurityFilter  →  Controller  →  Service  →  Repository  →  Entity
+   (JWT 검증)                        ↓
+                                Engine (plate)
+                                     ↓
+                                infra (openai / storage)
+```
+
+- Controller는 Entity를 직접 반환하지 않는다. 항상 DTO.
+- Service만 `@Transactional`을 갖는다.
+- **OpenAI 호출은 트랜잭션 밖에서 한다.** AI 호출 18초를 트랜잭션 안에 두면 DB 커넥션 하나가 18초 잠긴다. 기본 풀 10이면 동시 10명에서 고갈되는데, 심사위원 3명이 슬롯 1·2·3으로 동시에 체험하는 시나리오를 우리가 직접 상정하고 있다(§16.5).
+- **Entity → DTO 변환은 `@Transactional(readOnly = true)` 메서드 안에서만.** `open-in-view: false`이므로 컨트롤러에서 `SkinPlateResponse.from()`을 호출하면 LAZY 연쇄(`foodAnalysis` → `ingredients` → `feedbacks`)에서 `LazyInitializationException`이 난다.
+- Engine은 Spring 컨텍스트에 의존하되 DB에는 접근하지 않는다 (순수 계산).
+- **Controller는 사용자 식별에 `@CurrentUser Long userId`만 받는다.** 요청 본문의 userId는 존재하지 않으며, 존재하더라도 무시한다.
+
+---
+
+## 12. DB ERD
+
+### 12.1 ERD
+
+```mermaid
+erDiagram
+    APP_USER ||--o{ SKIN_ANALYSIS : "촬영"
+    APP_USER ||--o{ FOOD_ANALYSIS : "촬영"
+    APP_USER ||--o{ SKIN_PLATE : "생성"
+    SKIN_ANALYSIS ||--o{ SKIN_PLATE : "기준"
+    FOOD_ANALYSIS ||--|| SKIN_PLATE : "대상"
+    FOOD_ANALYSIS ||--o{ FOOD_INGREDIENT : "포함"
+    SKIN_PLATE ||--o{ SKIN_PLATE_FEEDBACK : "피드백"
+    SKIN_ANALYSIS ||--o{ RECOMMENDATION : "추천근거"
+
+    APP_USER {
+        bigint id PK
+        varchar email UK "로그인 ID"
+        varchar password "BCrypt 해시"
+        varchar nickname
+        varchar role "USER / ADMIN"
+        varchar declared_skin_type "자가 신고. NULL 허용"
+        boolean is_test_account "테스트 계정 여부"
+        timestamp last_login_at
+        timestamp created_at
+    }
+
+    SKIN_ANALYSIS {
+        bigint id PK
+        bigint user_id FK
+        varchar image_url
+        int skin_score "0-100"
+        int hydration "0-100"
+        int oil "0-100"
+        int redness "0-100"
+        int trouble "0-100"
+        int barrier "0-100"
+        varchar summary "한줄 요약"
+        jsonb raw_ai_response
+        timestamp created_at
+    }
+
+    FOOD_ANALYSIS {
+        bigint id PK
+        bigint user_id FK
+        varchar image_url
+        varchar food_name
+        varchar food_category
+        int calories_kcal
+        numeric protein_g
+        numeric fat_g
+        numeric carb_g
+        int sodium_mg
+        numeric sugar_g
+        varchar cooking_method "FRIED/BOILED/GRILLED/RAW/STEAMED/ETC"
+        boolean is_spicy
+        jsonb raw_ai_response
+        timestamp created_at
+    }
+
+    FOOD_INGREDIENT {
+        bigint id PK
+        bigint food_analysis_id FK
+        varchar name
+        varchar tag "VITAMIN_C/OMEGA3/DAIRY..."
+    }
+
+    SKIN_PLATE {
+        bigint id PK
+        bigint user_id FK
+        bigint skin_analysis_id FK
+        bigint food_analysis_id FK
+        int plate_score "0-100"
+        varchar summary
+        jsonb applied_rules "적용 룰 코드 배열"
+        timestamp created_at
+    }
+
+    SKIN_PLATE_FEEDBACK {
+        bigint id PK
+        bigint skin_plate_id FK
+        varchar type "GOOD/CAUTION/ACTION"
+        varchar message
+        int score_delta "GOOD/CAUTION 행"
+        int expected_gain "ACTION 행 회복 점수"
+        varchar rule_code
+        int display_order
+    }
+
+    RECOMMENDATION {
+        bigint id PK
+        bigint user_id FK
+        bigint skin_analysis_id FK
+        varchar type "RECOMMEND/AVOID"
+        varchar food_name
+        varchar reason
+        int display_order
+        timestamp created_at
+    }
+```
+
+### 12.2 테이블 설계 근거
+
+| 테이블 | 설계 포인트 |
+|---|---|
+| `app_user` | `declared_skin_type`은 **NULL 허용**이다. 건너뛴 사용자와 "잘 모르겠어요(UNKNOWN)"를 고른 사용자는 다르게 다뤄야 한다 — 전자에겐 다시 물어보고, 후자에겐 안 물어본다. `email`이 로그인 ID이자 유니크 키. `password`는 **BCrypt 해시만** 저장하고 평문은 어디에도 남기지 않는다(로그 포함). `is_test_account`로 시연용 계정을 구분해 나중에 통계에서 제외할 수 있게 한다 |
+| `skin_analysis` | 5개 지표를 **정규화하지 않고 컬럼으로** 둔다. 지표 개수가 고정이고 조회가 항상 전체이므로 EAV는 과설계 |
+| `raw_ai_response` (jsonb) | AI 원본 응답 보존. 프롬프트를 바꿔도 과거 데이터 재해석 가능. 디버깅 시 필수 |
+| `food_ingredient` | 재료는 개수가 가변이므로 별도 테이블. `tag`로 룰 엔진이 매칭 |
+| `skin_plate.applied_rules` | 어떤 룰이 점수에 기여했는지 저장 → "왜 87점인가"를 사후 설명 가능 |
+| `skin_plate_feedback` | 좋은 점/주의/행동을 **하나의 테이블 + type 컬럼**으로. 테이블 3개로 쪼개지 않는다 |
+| `recommendation` | 피부 분석 1건당 N개 생성. 음식 분석과 독립적으로 조회 가능 |
+
+### 12.3 인덱스
+
+```sql
+CREATE UNIQUE INDEX idx_app_user_email ON app_user(lower(email));   -- 대소문자 무시 유니크
+CREATE INDEX idx_skin_analysis_user_created ON skin_analysis(user_id, created_at DESC);
+CREATE INDEX idx_food_analysis_user_created ON food_analysis(user_id, created_at DESC);
+CREATE INDEX idx_skin_plate_user_created   ON skin_plate(user_id, created_at DESC);
+CREATE INDEX idx_feedback_plate            ON skin_plate_feedback(skin_plate_id);
+CREATE INDEX idx_recommendation_skin       ON recommendation(skin_analysis_id);
+```
+
+> 조회 패턴이 전부 "특정 유저의 최신 N건"이므로 `(user_id, created_at DESC)` 복합 인덱스면 충분하다.
+
+### 12.4 확장 옵션 (Phase 2, MVP 미포함)
+
+`nutrient_rule` 테이블 — 룰을 DB에서 관리하면 재배포 없이 조정 가능하다. 다만 **해커톤 10일 안에는 코드 기반 룰이 더 빠르고 디버깅이 쉽다.** 룰 인터페이스만 잘 잡아두면 나중에 DB 기반 `DynamicPlateRule` 하나를 추가하는 것으로 마이그레이션된다.
+
+---
+
+## 13. Entity 설계
+
+### 13.1 공통 베이스
+
+```java
+@Getter
+@MappedSuperclass
+@EntityListeners(AuditingEntityListener.class)
+public abstract class BaseTimeEntity {
+
+    @CreatedDate
+    @Column(updatable = false)
+    private LocalDateTime createdAt;
+
+    @LastModifiedDate
+    private LocalDateTime updatedAt;
+}
+```
+
+### 13.2 AppUser
+
+```java
+@Entity
+@Table(name = "app_user")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public class AppUser extends BaseTimeEntity {
+
+    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false, unique = true, length = 100)
+    private String email;
+
+    @Column(nullable = false, length = 100)
+    private String password;          // BCrypt 해시. 평문 금지
+
+    @Column(nullable = false, length = 30)
+    private String nickname;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private Role role;
+
+    @Column(nullable = false)
+    private boolean testAccount;
+
+    /** 사용자가 스스로 고른 피부 타입. NULL = 아직 안 정함 (건너뜀) */
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private SkinType declaredSkinType;
+
+    private LocalDateTime lastLoginAt;
+
+    public static AppUser create(String email, String encodedPassword, String nickname) {
+        AppUser u = new AppUser();
+        u.email = email.toLowerCase(Locale.ROOT);
+        u.password = encodedPassword;
+        u.nickname = nickname;
+        u.role = Role.USER;
+        u.testAccount = false;
+        return u;
+    }
+
+    public static AppUser createTestAccount(String email, String encodedPassword, String nickname) {
+        AppUser u = create(email, encodedPassword, nickname);
+        u.testAccount = true;
+        return u;
+    }
+
+    public void markLoggedIn() {
+        this.lastLoginAt = LocalDateTime.now();
+    }
+
+    public void declareSkinType(SkinType skinType) {
+        this.declaredSkinType = skinType;
+    }
+}
+```
+
+```java
+public enum Role {
+    USER,
+    ADMIN     // 현재 미사용. 관리자 기능은 Out of Scope이나 enum 자리만 확보
+}
+```
+
+> **`toLowerCase()`를 팩토리에서 처리하는 이유** — `Test@skinplate.app`으로 가입한 뒤 `test@skinplate.app`으로 로그인하려는 사용자는 반드시 나온다. 저장 시점에 정규화하면 조회 코드 전체가 이 문제를 신경 쓰지 않아도 된다.
+
+### 13.3 SkinAnalysis
+
+```java
+@Entity
+@Table(name = "skin_analysis")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public class SkinAnalysis extends BaseTimeEntity {
+
+    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", nullable = false)
+    private AppUser user;
+
+    @Column(nullable = false, length = 500)
+    private String imageUrl;
+
+    @Column(nullable = false)
+    private int skinScore;
+
+    @Embedded
+    private SkinMetrics metrics;
+
+    @Column(length = 300)
+    private String summary;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(columnDefinition = "jsonb")
+    private String rawAiResponse;
+
+    public static SkinAnalysis create(AppUser user, String imageUrl,
+                                      SkinMetrics metrics, int skinScore,
+                                      String summary, String raw) {
+        SkinAnalysis s = new SkinAnalysis();
+        s.user = user;
+        s.imageUrl = imageUrl;
+        s.metrics = metrics;
+        s.skinScore = skinScore;
+        s.summary = summary;
+        s.rawAiResponse = raw;
+        return s;
+    }
+}
+```
+
+```java
+@Embeddable
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+@AllArgsConstructor
+public class SkinMetrics {
+    private int hydration;   // 높을수록 좋음
+    private int oil;         // 높을수록 나쁨
+    private int redness;     // 높을수록 나쁨
+    private int trouble;     // 높을수록 나쁨
+    private int barrier;     // 높을수록 좋음
+
+    public boolean isDry()          { return hydration < 40; }
+    public boolean isOily()         { return oil > 70; }
+    public boolean hasRedness()     { return redness > 60; }
+    public boolean hasTrouble()     { return trouble > 60; }
+    public boolean isBarrierWeak()  { return barrier < 40; }
+}
+```
+
+> **`@Embeddable` 선택 이유** — 5개 지표를 값 객체로 묶으면 `isDry()` 같은 판정 로직을 Entity 안에 둘 수 있다. Rule 클래스가 `if (metrics.getHydration() < 40)` 대신 `if (metrics.isDry())`를 쓰게 되어 기준값 변경이 한 곳에서 끝난다.
+
+### 13.4 FoodAnalysis / FoodIngredient
+
+```java
+@Entity
+@Table(name = "food_analysis")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public class FoodAnalysis extends BaseTimeEntity {
+
+    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id", nullable = false)
+    private AppUser user;
+
+    @Column(nullable = false, length = 500)
+    private String imageUrl;
+
+    @Column(nullable = false, length = 100)
+    private String foodName;
+
+    @Column(length = 50)
+    private String foodCategory;
+
+    @Embedded
+    private Nutrition nutrition;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private CookingMethod cookingMethod;   // FRIED, BOILED, GRILLED, RAW, STEAMED, ETC
+
+    private boolean spicy;
+
+    @OneToMany(mappedBy = "foodAnalysis", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<FoodIngredient> ingredients = new ArrayList<>();
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(columnDefinition = "jsonb")
+    private String rawAiResponse;
+
+    public void addIngredient(FoodIngredient ingredient) {
+        ingredients.add(ingredient);
+        ingredient.assignTo(this);
+    }
+
+    public boolean hasTag(IngredientTag tag) {
+        return ingredients.stream().anyMatch(i -> i.getTag() == tag);
+    }
+}
+```
+
+```java
+@Embeddable
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+@AllArgsConstructor
+public class Nutrition {
+    private int caloriesKcal;
+    private BigDecimal proteinG;
+    private BigDecimal fatG;
+    private BigDecimal carbG;
+    private int sodiumMg;
+    private BigDecimal sugarG;
+}
+```
+
+```java
+public enum IngredientTag {
+    VITAMIN_C, VITAMIN_A, OMEGA3, ANTIOXIDANT, PROBIOTIC,
+    DAIRY, GLUTEN, CAPSAICIN, CAFFEINE, ALCOHOL, HIGH_GI, ETC
+}
+```
+
+### 13.5 SkinPlate / SkinPlateFeedback
+
+```java
+@Entity
+@Table(name = "skin_plate")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public class SkinPlate extends BaseTimeEntity {
+
+    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "user_id")
+    private AppUser user;
+
+    @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "skin_analysis_id")
+    private SkinAnalysis skinAnalysis;
+
+    @OneToOne(fetch = FetchType.LAZY) @JoinColumn(name = "food_analysis_id")
+    private FoodAnalysis foodAnalysis;
+
+    @Column(nullable = false)
+    private int plateScore;
+
+    @Column(length = 300)
+    private String summary;
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(columnDefinition = "jsonb")
+    private String appliedRules;
+
+    @OneToMany(mappedBy = "skinPlate", cascade = CascadeType.ALL, orphanRemoval = true)
+    @OrderBy("displayOrder ASC")
+    private List<SkinPlateFeedback> feedbacks = new ArrayList<>();
+
+    public void addFeedback(SkinPlateFeedback f) {
+        feedbacks.add(f);
+        f.assignTo(this);
+    }
+}
+```
+
+```java
+@Entity
+@Table(name = "skin_plate_feedback")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public class SkinPlateFeedback extends BaseTimeEntity {
+
+    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "skin_plate_id")
+    private SkinPlate skinPlate;
+
+    @Enumerated(EnumType.STRING) @Column(nullable = false, length = 20)
+    private FeedbackType type;     // GOOD, CAUTION, ACTION
+
+    @Column(nullable = false, length = 200)
+    private String message;
+
+    private int scoreDelta;      // GOOD / CAUTION 행에서 사용 (± 점수)
+
+    private int expectedGain;    // ACTION 행에서 사용 (행동 시 회복 점수)
+
+    @Column(length = 30)
+    private String ruleCode;
+
+    private int displayOrder;
+}
+```
+
+> **`scoreDelta`와 `expectedGain`을 하나로 합치지 않는다.** R02는 감점 −12지만 "매운 양념을 덜어내면" 회복되는 폭은 +6이다. 매운맛을 완전히 없앨 수는 없으니 감점 전액이 돌아오지 않는다. 두 값이 다르다는 사실 자체가 추천 행동을 정직하게 만든다.
+
+### 13.6 Recommendation
+
+```java
+@Entity
+@Table(name = "recommendation")
+@Getter
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public class Recommendation extends BaseTimeEntity {
+
+    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "user_id")
+    private AppUser user;
+
+    @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "skin_analysis_id")
+    private SkinAnalysis skinAnalysis;
+
+    @Enumerated(EnumType.STRING) @Column(nullable = false, length = 20)
+    private RecommendationType type;   // RECOMMEND, AVOID
+
+    @Column(nullable = false, length = 100)
+    private String foodName;
+
+    @Column(length = 300)
+    private String reason;
+
+    private int displayOrder;
+}
+```
+
+---
+
+## 14. API 명세
+
+### 14.1 공통 규약
+
+| 항목 | 값 |
+|---|---|
+| Base URL | `https://{host}/api/v1` |
+| 인증 | **JWT Bearer.** 헤더 `Authorization: Bearer {accessToken}` |
+| 인증 예외 경로 | `/auth/signup`, `/auth/login`, `/auth/test-login`, `/health`, `/uploads/**`, `/swagger-ui/**`, `/v3/api-docs/**` |
+| Content-Type | `application/json` / 업로드는 `multipart/form-data` |
+| 문자 인코딩 | UTF-8 |
+| 이미지 제한 | JPEG/PNG, 최대 5MB |
+| API 문서 | `/swagger-ui/index.html` |
+
+**공통 응답 포맷**
+
+```json
+{
+  "success": true,
+  "data": { },
+  "error": null
+}
+```
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": {
+    "code": "AI_ANALYSIS_FAILED",
+    "message": "얼굴을 인식하지 못했습니다. 밝은 곳에서 다시 촬영해 주세요."
+  }
+}
+```
+
+**에러 코드**
+
+| 코드 | HTTP | 설명 |
+|---|---|---|
+| `INVALID_INPUT` | 400 | 요청 값 검증 실패 (이메일 형식, 비밀번호 규칙 등) |
+| `EMAIL_ALREADY_EXISTS` | 409 | 이미 가입된 이메일 |
+| `INVALID_CREDENTIALS` | 401 | 이메일 또는 비밀번호 불일치 |
+| `UNAUTHORIZED` | 401 | 토큰 없음 / 형식 오류 |
+| `TOKEN_EXPIRED` | 401 | 토큰 만료 → 클라이언트는 로그인 화면으로 이동 |
+| `TEST_LOGIN_DISABLED` | 403 | 테스트 계정 로그인이 비활성화된 환경 |
+| `INVALID_IMAGE` | 400 | 형식/용량 위반 |
+| `FACE_NOT_DETECTED` | 422 | 얼굴 미인식 |
+| `FOOD_NOT_DETECTED` | 422 | 음식 미인식 |
+| `SKIN_ANALYSIS_NOT_FOUND` | 404 | 기준 피부 분석 없음 |
+| `AI_ANALYSIS_FAILED` | 502 | OpenAI 호출 실패 |
+| `AI_TIMEOUT` | 504 | OpenAI 타임아웃 |
+| `INTERNAL_ERROR` | 500 | 기타 |
+
+---
+
+### 14.2 엔드포인트 목록
+
+| # | Method | Path | 인증 | 설명 | 우선순위 |
+|---|---|---|---|---|---|
+| 1 | POST | `/auth/signup` | — | 회원가입 | P0 |
+| 2 | POST | `/auth/login` | — | 로그인 (JWT 발급) | P0 |
+| 3 | POST | `/auth/test-login` | — | **테스트 계정 원탭 로그인** | P0 |
+| 4 | GET | `/auth/me` | ✅ | 내 정보 조회 (토큰 유효성 확인 겸용) | P0 |
+| 4-b | **PATCH** | **`/auth/me`** | ✅ | **피부 타입·닉네임 수정** | **P0** |
+| 5 | POST | `/skin/analyses` | ✅ | 피부 사진 분석 | P0 |
+| 6 | GET | `/skin/analyses/latest` | ✅ | 최신 피부 분석 조회 | P0 |
+| 7 | GET | `/skin/analyses/{id}` | ✅ | 피부 분석 상세 | P1 |
+| 8 | POST | `/plates` | ✅ | 음식 분석 + Plate Score 생성 | P0 |
+| 9 | **POST** | **`/plates/{id}/simulate`** | ✅ | **추천 행동 실행 시 점수 재계산 (저장 안 함)** | **P0** |
+| 10 | GET | `/plates/{id}` | ✅ | Plate 상세 | P1 |
+| ~~11~~ | ~~GET~~ | ~~`/plates`~~ | — | ~~Plate 목록(날짜별)~~ **해커톤 범위에서 제외** | ~~P2~~ |
+| 11 | GET | `/recommendations` | ✅ | 피부 기반 음식 추천 | P0 |
+| 12 | GET | `/health` | — | 헬스체크 | P0 |
+
+> **로그아웃 API가 없는 이유** — Access Token 단독 구조에서 서버는 상태를 갖지 않는다. 로그아웃은 클라이언트가 저장된 토큰을 지우는 것으로 끝난다. 서버 측 무효화(블랙리스트)는 Redis가 필요하고, 해커톤에서 그 비용을 치를 이유가 없다.
+
+---
+
+### 14.3 상세 명세
+
+#### ① POST `/api/v1/auth/signup`
+
+**Request**
+
+```json
+{
+  "email": "duing@example.com",
+  "password": "myPassw0rd!",
+  "nickname": "두잉"
+}
+```
+
+**검증 규칙**
+
+| 필드 | 규칙 | 실패 메시지 |
+|---|---|---|
+| `email` | RFC 형식, 최대 100자 | "올바른 이메일 형식이 아닙니다." |
+| `password` | 8~30자, 영문 + 숫자 필수 | "비밀번호는 영문과 숫자를 포함해 8자 이상이어야 합니다." |
+| `nickname` | 2~10자 | "닉네임은 2자 이상 10자 이하로 입력해 주세요." |
+
+**Response 201**
+
+```json
+{
+  "success": true,
+  "data": {
+    "accessToken": "eyJhbGciOiJIUzI1NiJ9...",
+    "tokenType": "Bearer",
+    "expiresIn": 604800,
+    "user": { "userId": 12, "email": "duing@example.com", "nickname": "두잉" }
+  },
+  "error": null
+}
+```
+
+> 가입 직후 바로 토큰을 발급한다. "가입 완료 → 로그인 화면으로 이동 → 다시 입력"은 불필요한 마찰이다.
+
+**Response 409**
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": { "code": "EMAIL_ALREADY_EXISTS", "message": "이미 가입된 이메일입니다." }
+}
+```
+
+---
+
+#### ② POST `/api/v1/auth/login`
+
+**Request**
+
+```json
+{ "email": "duing@example.com", "password": "myPassw0rd!" }
+```
+
+**Response 200** — ①과 동일 구조 (`accessToken` + `user`)
+
+**Response 401**
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": {
+    "code": "INVALID_CREDENTIALS",
+    "message": "이메일 또는 비밀번호가 올바르지 않습니다."
+  }
+}
+```
+
+> **"이메일이 없습니다"와 "비밀번호가 틀립니다"를 구분하지 않는다.** 구분하면 공격자가 가입된 이메일 목록을 수집할 수 있다. 메시지 하나로 통일하는 데 드는 추가 비용은 0이다.
+
+---
+
+#### ③ POST `/api/v1/auth/test-login` ★시연용
+
+이메일·비밀번호 입력 없이 테스트 계정으로 로그인한다. 로그인 화면의 **"테스트 계정으로 시작하기"** 버튼이 이 API를 호출한다.
+
+**Request** — 본문 전체가 선택 사항이다. 빈 본문(`{}`)이거나 본문을 생략하면 슬롯 1로 로그인된다.
+
+```json
+{ "slot": 1 }
+```
+
+| 필드 | 필수 | 설명 |
+|---|---|---|
+| `slot` | ❌ | 1~3. 생략 또는 `null`이면 **1**. `test{slot}@skinplate.app` 계정에 매핑 (slot 1은 `test@skinplate.app`) |
+
+**Response 200** — ①과 동일 구조
+
+**Response 403** — `app.auth.test-account.enabled=false` 인 환경
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": { "code": "TEST_LOGIN_DISABLED", "message": "테스트 로그인이 비활성화된 환경입니다." }
+}
+```
+
+> **이 엔드포인트는 prod 프로파일에서 기본 비활성화된다.** 해커톤 이후 실서비스로 이어질 경우 설정 한 줄로 닫히도록 처음부터 플래그를 걸어둔다. 비밀번호가 문서에 적힌 계정이 운영 환경에 열려 있는 것은 사고다.
+
+---
+
+#### ④ GET `/api/v1/auth/me`
+
+토큰 유효성 확인 겸 내 정보 조회. 앱 시작 시 S00에서 호출한다.
+
+**Header**: `Authorization: Bearer {accessToken}`
+
+**Response 200**
+
+```json
+{
+  "success": true,
+  "data": {
+    "userId": 12,
+    "email": "duing@example.com",
+    "nickname": "두잉",
+    "declaredSkinType": "OILY",
+    "isTestAccount": false,
+    "joinedAt": "2026-08-01T09:00:00"
+  },
+  "error": null
+}
+```
+
+> `declaredSkinType`은 **미선택이면 키 자체가 생략된다**(`non_null` 직렬화). 앱은 이 값이 없으면 S05에서 갭 카드 대신 인라인 선택 칩을 띄운다.
+
+**Response 401** — `UNAUTHORIZED` 또는 `TOKEN_EXPIRED` → 클라이언트는 토큰을 지우고 S01로 이동
+
+---
+
+#### ④-b PATCH `/api/v1/auth/me`
+
+피부 타입을 선택·변경한다. S01c(가입 직후)와 S05(인라인 선택) 두 곳에서 호출한다.
+
+**Request** — 보낸 필드만 바뀐다
+
+```json
+{ "declaredSkinType": "OILY" }
+```
+
+| 필드 | 필수 | 값 |
+|---|---|---|
+| `declaredSkinType` | ❌ | `DRY` · `OILY` · `COMBINATION` · `SENSITIVE` · `UNKNOWN` |
+| `nickname` | ❌ | 2~10자 |
+
+**Response 200** — ④와 동일 구조
+
+> **건너뛰기는 API를 호출하지 않는다.** 아무것도 보내지 않고 다음 화면으로 넘어가면 `declared_skin_type`이 `NULL`로 남고, 그게 "아직 안 정함"의 정확한 표현이다. `UNKNOWN`을 대신 넣으면 "잘 모르겠다고 답한 사용자"와 구분이 사라져 나중에 다시 물어볼지 판단할 수 없다.
+
+---
+
+#### ⑤ POST `/api/v1/skin/analyses` ★핵심
+
+**Request** — `multipart/form-data`
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| `image` | file | ✅ | 얼굴 사진 (JPEG/PNG, ≤5MB) |
+
+**Header**: `Authorization: Bearer {accessToken}`
+
+**Response 201**
+
+```json
+{
+  "success": true,
+  "data": {
+    "skinAnalysisId": 101,
+    "skinScore": 55,
+    "metrics": {
+      "hydration": 38,
+      "oil": 52,
+      "redness": 64,
+      "trouble": 25,
+      "barrier": 78
+    },
+    "summary": "피부 장벽은 양호하지만 건조하고 홍조가 관찰됩니다.",
+    "highlights": [
+      { "label": "피부 장벽 양호", "status": "GOOD" },
+      { "label": "건조 주의",     "status": "CAUTION" },
+      { "label": "홍조 주의",     "status": "CAUTION" }
+    ],
+    "skinTypeGap": {
+      "declared": "OILY",
+      "observed": "DRY",
+      "matched": false,
+      "message": "지성이라고 생각하셨지만 오늘은 유분보다 수분 부족이 두드러집니다. 유분기는 수분이 모자랄 때도 늘어날 수 있습니다."
+    },
+    "imageUrl": "https://.../uploads/2026/08/abc.jpg",
+    "analyzedAt": "2026-08-07T12:30:00"
+  },
+  "error": null
+}
+```
+
+> **`skinTypeGap`은 사용자가 피부 타입을 선택했을 때만 내려간다.** 미선택이면 키가 생략되고, 앱은 그 자리에 "평소 본인 피부는?" 인라인 선택 칩을 띄운다.
+>
+> `observed`는 AI에게 묻지 않는다. 5개 지표에서 **규칙으로 도출**한다(§4.4.1). 같은 지표면 항상 같은 타입이 나와야 갭 코멘트도 재현 가능하다. **이 값은 DB에 저장하지 않는다** — 지표에서 언제든 다시 계산되는 파생값이라 저장하면 규칙을 바꿨을 때 과거 데이터와 어긋난다.
+
+**처리 흐름**
+
+```
+검증 → 저장 → Base64 → OpenAI Vision (Structured Output)
+     → 5개 지표 수신 → SkinScoreCalculator로 종합 점수 산출
+     → highlights 생성 → (선언 타입이 있으면) skinTypeGap 생성
+     → DB 저장 → 응답
+```
+
+---
+
+#### ⑥ GET `/api/v1/skin/analyses/latest`
+
+**Header**: `Authorization: Bearer {accessToken}`
+**Response**: ⑤와 동일 구조. 없으면 `data: null`.
+
+> 홈 화면(S02)에서 "오늘의 Skin Score" 카드를 그리기 위해 사용.
+
+---
+
+#### ⑦ POST `/api/v1/plates` ★핵심
+
+음식 사진을 분석하고, 지정된 피부 분석 결과와 매칭하여 Skin Plate Score를 생성한다.
+
+**Request** — `multipart/form-data`
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| `image` | file | ✅ | 음식 사진 |
+| `skinAnalysisId` | long | ❌ | 생략 시 최신 피부 분석 자동 사용 |
+
+**Response 201**
+
+```json
+{
+  "success": true,
+  "data": {
+    "plateId": 205,
+    "plateScore": 60,
+    "summary": "단백질 충분, 발효식품 포함. 다만 나트륨 과다, 매운맛 자극.",
+    "food": {
+      "foodAnalysisId": 305,
+      "foodName": "돼지고기 김치찌개",
+      "foodCategory": "한식/찌개",
+      "cookingMethod": "BOILED",
+      "spicy": true,
+      "ingredients": [
+        { "name": "돼지고기", "tag": "ETC" },
+        { "name": "김치",     "tag": "PROBIOTIC" },
+        { "name": "두부",     "tag": "ETC" },
+        { "name": "고춧가루", "tag": "CAPSAICIN" }
+      ],
+      "nutrition": {
+        "caloriesKcal": 520,
+        "proteinG": 28.5,
+        "fatG": 24.0,
+        "carbG": 32.0,
+        "sodiumMg": 1850,
+        "sugarG": 6.2
+      },
+      "imageUrl": "https://.../uploads/2026/08/def.jpg"
+    },
+    "feedbacks": {
+      "good": [
+        { "message": "단백질 충분",  "scoreDelta": 6,  "ruleCode": "R05" },
+        { "message": "발효식품 포함", "scoreDelta": 4,  "ruleCode": "R09" }
+      ],
+      "caution": [
+        { "message": "나트륨 과다", "scoreDelta": -8,  "ruleCode": "R04" },
+        { "message": "매운맛 자극", "scoreDelta": -12, "ruleCode": "R02" }
+      ],
+      "action": [
+        { "message": "국물을 절반만 남기면 Skin Plate 점수가 상승합니다.", "expectedGain": 8, "ruleCode": "R04" },
+        { "message": "매운 양념을 덜어내고 드셔보세요.",                   "expectedGain": 6, "ruleCode": "R02" }
+      ]
+    },
+    "baseScore": 70,
+    "appliedRules": ["R02", "R04", "R05", "R09"],
+    "createdAt": "2026-08-07T12:40:00"
+  },
+  "error": null
+}
+```
+
+> **응답 설계 의도** — `feedbacks`를 `good` / `caution` / `action` 3개 배열로 나눠서 내려준다. Flutter가 타입별로 필터링하지 않고 바로 3개 섹션에 렌더링할 수 있다. `expectedGain`은 "행동을 하면 몇 점이 오르는지"를 보여줘 사용자의 실행 동기를 만든다.
+
+---
+
+#### ⑦-b POST `/api/v1/plates/{id}/simulate` ★차별화
+
+추천 행동을 실행했다고 가정하고 **Skin Plate Score를 다시 계산해서 돌려준다. 저장하지 않는다.**
+
+**Request**
+
+```json
+{ "actions": ["HALVE_SOUP"] }
+```
+
+| 액션 | 의미 | 영양값 조정 |
+|---|---|---|
+| `HALVE_SOUP` | 국물을 절반만 남긴다 | `sodiumMg × 0.5` |
+| `LESS_SPICY` | 매운 양념을 덜어낸다 | `spicy = false`, `CAPSAICIN` 태그 제거 |
+| `NO_SUGAR_DRINK` | 단 음료 대신 물 | `sugarG × 0.4` |
+| `REMOVE_BATTER` | 튀김옷 일부 제거 | `cookingMethod = GRILLED` (R07 해제). **`fatG`는 손대지 않는다 — 어떤 룰도 지방을 보지 않아 점수에 영향이 0이다** |
+
+> `LESS_RICE`는 넣지 않았다. 연결될 룰(R10 고열량)이 미구현이라 버튼이 붙을 카드가 영영 생기지 않는다.
+
+**Response 200**
+
+```json
+{
+  "success": true,
+  "data": {
+    "plateId": 205,
+    "beforeScore": 60,
+    "afterScore": 68,
+    "appliedActions": ["HALVE_SOUP"],
+    "removedRules": ["R04"],
+    "summary": "국물을 절반만 남기면 나트륨 부담이 사라집니다."
+  },
+  "error": null
+}
+```
+
+**왜 저장하지 않는가**
+
+`skin_plate.food_analysis_id`에 `UNIQUE` 제약이 걸려 있다(음식 사진 1장 = Plate 1건). 시뮬레이션 결과를 저장하려면 같은 `FoodAnalysis`로 두 번째 Plate를 만들어야 하는데 그게 막혀 있다. **애초에 저장할 이유가 없다** — Rule Engine은 DB에 접근하지 않는 순수 계산이라 재호출이 사실상 공짜다.
+
+```java
+@Transactional(readOnly = true)                          // ★ 안전망
+FoodAnalysis copy = detachedCopyWith(origin, actions);   // user = null 인 복사본
+int after = engine.evaluate(new PlateContext(skin, copy)).score();
+```
+
+> **관리 엔티티를 절대 만지지 않는다.** `plate.getFoodAnalysis()`를 꺼내 그 자리에서 고치면, `LESS_SPICY`가 `orphanRemoval = true` 컬렉션에서 CAPSAICIN을 지우는 순간 **DB에서 재료 행이 삭제**되고 `HALVE_SOUP`은 `food_analysis.sodium_mg`를 영구히 925로 바꾼다. 무대에서 버튼을 누르면 60 → 72가 뜨고, 뒤로 갔다 다시 들어오면 원래 점수가 72다. 구현 세부는 **DTO 설계서 §1.19.2** 참조.
+
+> **이 API가 이 프로젝트에서 가장 값싼 차별화다.** 작업량은 반나절인데, 심사위원 눈앞에서 `60 → 68`이 움직인다. 다른 팀의 "AI가 조언을 해줍니다"와 우리의 "조언을 실행하면 점수가 이만큼 오릅니다"는 완전히 다른 인상을 남긴다.
+>
+> 이전 설계의 `potentialScore`(감점 절댓값 합산)는 **어떤 실제 계산과도 일치하지 않았다.** 예시 A에서 60 + 8 + 6 = 74가 나오는데, 실제로 국물을 절반 남기면 나트륨이 925mg이 되어 R04가 아예 발동하지 않으므로 **68**이고, 매운 양념까지 덜면 **80**이다. 74는 어디에도 없는 숫자다. 근사치를 버리고 실제로 다시 계산한다.
+
+---
+
+#### ⑧ GET `/api/v1/recommendations?skinAnalysisId={id}`
+
+**Response 200**
+
+```json
+{
+  "success": true,
+  "data": {
+    "skinAnalysisId": 101,
+    "recommend": [
+      { "foodName": "키위",     "reason": "비타민C가 콜라겐 생성을 도와 홍조 완화에 도움이 됩니다." },
+      { "foodName": "브로콜리", "reason": "항산화 성분이 피부 자극을 줄여줍니다." },
+      { "foodName": "연어",     "reason": "오메가3가 건조한 피부 장벽 회복을 돕습니다." }
+    ],
+    "avoid": [
+      { "foodName": "라면",     "reason": "나트륨이 높아 피부 수분을 빼앗습니다." },
+      { "foodName": "탄산음료", "reason": "당류가 트러블을 악화시킬 수 있습니다." }
+    ],
+    "generatedAt": "2026-08-07T12:31:00"
+  },
+  "error": null
+}
+```
+
+> **추천은 이 API 안에서 없으면 그 자리에서 만든다(lazy 동기).** 피부 분석 직후 비동기로 미리 만들어두는 쪽이 이론상 빠르지만, `@EnableAsync`·스레드풀·트랜잭션 경계·실패 시 폴백을 전부 세팅해야 하고, **그러고도 AI가 8초 늦으면 S08이 빈 화면**이 된다. 발표 클라이맥스 직전에.
+>
+> `existsBySkinAnalysisId`로 확인하고 없으면 만들면 된다. 후보 음식이 이미 코드 테이블로 정해져 있으므로(§18.9), AI 문장 생성이 실패해도 정적 이유 문구로 폴백하면 그만이다 — G4 축소 경로가 그제서야 실제로 동작하는 경로가 된다.
+
+---
+
+#### ⑨ 나머지 조회 엔드포인트 (P1 · P2)
+
+응답 구조가 위 명세의 재사용이므로 요약만 정의한다.
+
+| Method · Path | 요청 | 응답 | 비고 |
+|---|---|---|---|
+| `GET /skin/analyses/{id}` | path `id` | ⑤와 동일 구조 | **`findByIdAndUserId`** — 타인의 id면 404 |
+| `GET /plates/{id}` | path `id` | ⑦과 동일 구조 | **`findByIdAndUserId`** — 타인의 id면 404 |
+| `GET /health` | — | `{"status":"UP"}` | 인증 불필요 |
+
+> **`findByIdAndUserId`를 쓰지 않고 `findById`로 조회하면, 인증을 붙여놓고도 `/plates/1`부터 순서대로 호출해 남의 피부 분석 결과를 전부 읽을 수 있다.** 인증이 있는 시스템에서 가장 흔한 사고 형태이며, 조건 하나로 막힌다.
+
+**404 응답**
+
+```json
+{
+  "success": false,
+  "data": null,
+  "error": { "code": "SKIN_ANALYSIS_NOT_FOUND", "message": "분석 결과를 찾을 수 없습니다." }
+}
+```
+
+> 타인의 리소스에 접근했을 때도 403이 아니라 **404를 반환한다.** 403은 "존재하지만 권한이 없다"를 알려주므로 id를 훑어 다른 사용자의 데이터 존재 여부를 셀 수 있다.
+
+---
+
+## 15. DTO 설계
+
+### 15.1 원칙
+
+- **Java `record`** 사용 (불변, 보일러플레이트 없음)
+- Request DTO는 `*Request`, Response DTO는 `*Response`
+- Entity → DTO 변환은 **DTO 안의 정적 팩토리 메서드**에서 (`from(entity)`)
+- **Entity를 절대 그대로 반환하지 않는다** (LAZY 로딩 직렬화 사고 방지)
+
+### 15.2 공통 응답 래퍼
+
+```java
+public record ApiResponse<T>(boolean success, T data, ErrorBody error) {
+
+    public static <T> ApiResponse<T> ok(T data) {
+        return new ApiResponse<>(true, data, null);
+    }
+
+    public static <T> ApiResponse<T> fail(ErrorCode code, String message) {
+        return new ApiResponse<>(false, null, new ErrorBody(code.name(), message));
+    }
+
+    public record ErrorBody(String code, String message) {}
+}
+```
+
+### 15.3 인증 DTO
+
+```java
+public record SignupRequest(
+        @NotBlank @Email @Size(max = 100)
+        String email,
+
+        @NotBlank
+        @Pattern(regexp = "^(?=.*[A-Za-z])(?=.*\\d).{8,30}$",
+                 message = "비밀번호는 영문과 숫자를 포함해 8자 이상이어야 합니다.")
+        String password,
+
+        @NotBlank @Size(min = 2, max = 10)
+        String nickname
+) {}
+
+public record LoginRequest(
+        @NotBlank @Email String email,
+        @NotBlank String password
+) {}
+
+public record TestLoginRequest(
+        @Min(1) @Max(3) Integer slot        // null 허용 → 기본 1
+) {}
+```
+
+```java
+public record AuthResponse(
+        String accessToken,
+        String tokenType,        // 항상 "Bearer"
+        long expiresIn,          // 초 단위 (604800 = 7일)
+        UserSummaryDto user
+) {
+    public static AuthResponse of(String token, long expiresIn, AppUser user) {
+        return new AuthResponse(token, "Bearer", expiresIn, UserSummaryDto.from(user));
+    }
+}
+
+public record UserSummaryDto(Long userId, String email, String nickname) {
+    public static UserSummaryDto from(AppUser u) {
+        return new UserSummaryDto(u.getId(), u.getEmail(), u.getNickname());
+    }
+}
+
+public record MeResponse(
+        Long userId, String email, String nickname,
+        SkinType declaredSkinType,          // null이면 키가 생략된다
+        boolean isTestAccount, LocalDateTime joinedAt
+) {
+    public static MeResponse from(AppUser u) {
+        return new MeResponse(u.getId(), u.getEmail(), u.getNickname(),
+                              u.getDeclaredSkinType(),
+                              u.isTestAccount(), u.getCreatedAt());
+    }
+}
+```
+
+> **`AuthResponse`에 `refreshToken` 필드를 미리 만들어 두지 않았다.** 쓰지 않는 필드를 `null`로 내려보내면 클라이언트 개발자가 "이거 언제 채워지나요"를 묻게 된다. Phase 2에서 필드를 추가하는 편이 낫다 — JSON은 필드 추가에 하위 호환이다.
+
+### 15.4 피부 분석 DTO
+
+```java
+public record SkinAnalysisResponse(
+        Long skinAnalysisId,
+        int skinScore,
+        SkinMetricsDto metrics,
+        String summary,
+        List<HighlightDto> highlights,
+        SkinTypeGapDto skinTypeGap,      // 선언 타입이 없으면 null → 키 생략
+        String imageUrl,
+        LocalDateTime analyzedAt
+) {
+    public static SkinAnalysisResponse from(SkinAnalysis e,
+                                            List<HighlightDto> highlights,
+                                            SkinTypeGapDto gap) {
+        return new SkinAnalysisResponse(
+                e.getId(),
+                e.getSkinScore(),
+                SkinMetricsDto.from(e.getMetrics()),
+                e.getSummary(),
+                highlights,
+                gap,
+                e.getImageUrl(),
+                e.getCreatedAt()
+        );
+    }
+}
+
+public record SkinMetricsDto(int hydration, int oil, int redness, int trouble, int barrier) {
+    public static SkinMetricsDto from(SkinMetrics m) {
+        return new SkinMetricsDto(m.getHydration(), m.getOil(),
+                                  m.getRedness(), m.getTrouble(), m.getBarrier());
+    }
+}
+
+public record HighlightDto(String label, String status) {}   // GOOD / WARN / CAUTION
+```
+
+### 15.5 Skin Plate DTO
+
+```java
+public record SkinPlateResponse(
+        Long plateId,
+        int plateScore,
+        int baseScore,          // 항상 70. S07 계산 내역 카드가 첫 줄에 쓴다
+        String summary,
+        FoodAnalysisDto food,
+        FeedbackGroupDto feedbacks,
+        List<String> appliedRules,
+        LocalDateTime createdAt
+) {}
+
+public record FeedbackGroupDto(
+        List<FeedbackDto> good,
+        List<FeedbackDto> caution,
+        List<ActionDto> action
+) {
+    public static FeedbackGroupDto from(List<SkinPlateFeedback> all) {
+        return new FeedbackGroupDto(
+            all.stream().filter(f -> f.getType() == FeedbackType.GOOD)
+               .map(FeedbackDto::from).toList(),
+            all.stream().filter(f -> f.getType() == FeedbackType.CAUTION)
+               .map(FeedbackDto::from).toList(),
+            all.stream().filter(f -> f.getType() == FeedbackType.ACTION)
+               .map(ActionDto::from).toList()
+        );
+    }
+}
+
+public record FeedbackDto(String message, int scoreDelta, String ruleCode) {
+    public static FeedbackDto from(SkinPlateFeedback f) {
+        return new FeedbackDto(f.getMessage(), f.getScoreDelta(), f.getRuleCode());
+    }
+}
+
+public record ActionDto(String message, int expectedGain, String ruleCode) {
+    public static ActionDto from(SkinPlateFeedback f) {
+        return new ActionDto(f.getMessage(), f.getExpectedGain(), f.getRuleCode());
+    }
+}
+
+public record FoodAnalysisDto(
+        Long foodAnalysisId,
+        String foodName,
+        String foodCategory,
+        String cookingMethod,
+        boolean spicy,
+        List<IngredientDto> ingredients,
+        NutritionDto nutrition,
+        String imageUrl
+) {}
+
+public record IngredientDto(String name, String tag) {}
+
+public record NutritionDto(
+        int caloriesKcal, BigDecimal proteinG, BigDecimal fatG,
+        BigDecimal carbG, int sodiumMg, BigDecimal sugarG
+) {}
+```
+
+### 15.6 Flutter DTO (freezed)
+
+```dart
+// lib/features/skin_analysis/data/models/skin_dtos.dart
+@freezed
+class SkinAnalysisDto with _$SkinAnalysisDto {
+  const factory SkinAnalysisDto({
+    required int skinAnalysisId,
+    required int skinScore,
+    required SkinMetricsDto metrics,
+    @Default('') String summary,
+    @Default(<HighlightDto>[]) List<HighlightDto> highlights,
+    required String imageUrl,
+    required DateTime analyzedAt,
+  }) = _SkinAnalysisDto;
+
+  factory SkinAnalysisDto.fromJson(Map<String, dynamic> json) =>
+      _$SkinAnalysisDtoFromJson(json);
+}
+
+extension SkinAnalysisDtoX on SkinAnalysisDto {
+  SkinAnalysis toEntity() => SkinAnalysis(
+        id: skinAnalysisId,
+        skinScore: skinScore,
+        metrics: SkinMetrics(
+          hydration: metrics.hydration,
+          oil: metrics.oil,
+          redness: metrics.redness,
+          trouble: metrics.trouble,
+          barrier: metrics.barrier,
+        ),
+        summary: summary,
+        highlights: highlights
+            .map((h) => Highlight(
+                  label: h.label,
+                  status: HighlightStatus.fromJson(h.status),
+                ))
+            .toList(),
+        imageUrl: imageUrl,
+        analyzedAt: analyzedAt,
+      );
+}
+```
+
+> **`summary`와 `highlights`에 `required` 대신 `@Default`를 쓴 이유** — 서버는 `default-property-inclusion: non_null` 설정이라 값이 없으면 **키 자체를 생략**한다. `required`로 두면 그 순간 파싱 예외가 나고, AI가 요약 문장을 못 만든 한 번의 케이스로 결과 화면이 통째로 뜨지 않는다.
+>
+> **구현 기준은 별도 문서다.** 전체 DTO·도메인 구조(백엔드 Entity/DTO/Rule Engine + Flutter DTO/Entity/Repository)는 **『Skin Plate — DTO & 도메인 구조 설계서』**에 파일 단위로 정리되어 있다. 위 코드는 그 문서의 발췌이며, 두 문서가 어긋나면 설계서를 따른다.
+
+---
+
+## 16. 인증 · 보안 설계
+
+### 16.1 인증 흐름
+
+```mermaid
+sequenceDiagram
+    participant F as Flutter
+    participant SEC as JwtAuthenticationFilter
+    participant AC as AuthController
+    participant AS as AuthService
+    participant PE as PasswordEncoder
+    participant JP as JwtTokenProvider
+    participant D as PostgreSQL
+
+    Note over F,D: ① 회원가입 / 로그인
+    F->>AC: POST /auth/login {email, password}
+    AC->>AS: login(request)
+    AS->>D: findByEmail(email)
+    D-->>AS: AppUser (password 해시)
+    AS->>PE: matches(raw, hash)
+    PE-->>AS: true
+    AS->>JP: createToken(userId, role)
+    JP-->>AS: accessToken (7일)
+    AS->>D: markLoggedIn()
+    AS-->>F: AuthResponse {accessToken, user}
+    F->>F: SecureStorage에 토큰 저장
+
+    Note over F,D: ② 이후 모든 API 호출
+    F->>SEC: GET /skin/analyses/latest<br/>Authorization: Bearer ...
+    SEC->>JP: validate(token)
+    JP-->>SEC: userId
+    SEC->>SEC: SecurityContext에 인증 객체 저장
+    SEC->>AC: 요청 통과 (@CurrentUser Long userId)
+```
+
+### 16.2 SecurityConfig
+
+```java
+@Configuration
+@EnableWebSecurity
+@RequiredArgsConstructor
+public class SecurityConfig {
+
+    private final JwtAuthenticationFilter jwtFilter;
+    private final JwtAuthenticationEntryPoint entryPoint;
+
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        return http
+            .csrf(AbstractHttpConfigurer::disable)          // 토큰 기반이므로 불필요
+            .cors(Customizer.withDefaults())
+            .httpBasic(AbstractHttpConfigurer::disable)
+            .formLogin(AbstractHttpConfigurer::disable)
+            .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers(
+                    "/api/v1/auth/signup",
+                    "/api/v1/auth/login",
+                    "/api/v1/auth/test-login",
+                    "/api/v1/health",
+                    "/uploads/**",
+                    "/swagger-ui/**", "/v3/api-docs/**"
+                ).permitAll()
+                .anyRequest().authenticated()               // ★ 기본이 인증 필요
+            )
+            .exceptionHandling(e -> e.authenticationEntryPoint(entryPoint))
+            .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
+            .build();
+    }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();                 // strength 10 (기본)
+    }
+}
+```
+
+> **`.anyRequest().authenticated()`가 마지막에 오는 것이 핵심이다.** 화이트리스트에 없는 경로는 전부 막힌다. 반대로 `.permitAll()`을 기본값으로 두고 보호할 경로를 나열하는 방식은, 9일차에 컨트롤러를 하나 추가할 때 인증을 빠뜨리게 만든다.
+
+### 16.3 JwtTokenProvider
+
+```java
+@Component
+public class JwtTokenProvider {
+
+    private final SecretKey key;
+    private final long validityMs;
+
+    public JwtTokenProvider(@Value("${app.auth.jwt.secret}") String secret,
+                            @Value("${app.auth.jwt.validity-seconds}") long validitySeconds) {
+        this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        this.validityMs = validitySeconds * 1000;
+    }
+
+    public String createToken(Long userId, Role role) {
+        Instant now = Instant.now();
+        return Jwts.builder()
+                .subject(String.valueOf(userId))
+                .claim("role", role.name())
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(now.plusMillis(validityMs)))
+                .signWith(key)
+                .compact();
+    }
+
+    public Long parseUserId(String token) {
+        return Long.valueOf(
+            Jwts.parser().verifyWith(key).build()
+                .parseSignedClaims(token)
+                .getPayload().getSubject()
+        );
+    }
+}
+```
+
+| 설정 | 값 | 근거 |
+|---|---|---|
+| 알고리즘 | HS256 | 단일 서버, 키 배포 불필요 |
+| Secret 길이 | **32바이트 이상** | HS256 최소 요구. 짧으면 기동 시 예외 |
+| 유효기간 | 7일 (604800초) | 해커톤 기간 전체를 덮어 재로그인 0회 |
+| Secret 관리 | 환경변수 `JWT_SECRET` | **저장소에 커밋 금지** |
+
+### 16.4 JwtAuthenticationFilter · @CurrentUser
+
+```java
+@Component
+@RequiredArgsConstructor
+public class JwtAuthenticationFilter extends OncePerRequestFilter {
+
+    private final JwtTokenProvider tokenProvider;
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest req, HttpServletResponse res,
+                                    FilterChain chain) throws ServletException, IOException {
+        String header = req.getHeader(HttpHeaders.AUTHORIZATION);
+
+        if (header != null && header.startsWith("Bearer ")) {
+            try {
+                Long userId = tokenProvider.parseUserId(header.substring(7));
+                var auth = new UsernamePasswordAuthenticationToken(
+                        userId, null, List.of(new SimpleGrantedAuthority("ROLE_USER")));
+                SecurityContextHolder.getContext().setAuthentication(auth);
+            } catch (ExpiredJwtException e) {
+                req.setAttribute("errorCode", ErrorCode.TOKEN_EXPIRED);
+            } catch (JwtException e) {
+                req.setAttribute("errorCode", ErrorCode.UNAUTHORIZED);
+            }
+        }
+        chain.doFilter(req, res);
+    }
+}
+```
+
+```java
+@Target(ElementType.PARAMETER)
+@Retention(RetentionPolicy.RUNTIME)
+@AuthenticationPrincipal
+public @interface CurrentUser {}
+```
+
+**컨트롤러 사용 예**
+
+```java
+@PostMapping(value = "/skin/analyses", consumes = MULTIPART_FORM_DATA_VALUE)
+public ResponseEntity<ApiResponse<SkinAnalysisResponse>> analyze(
+        @CurrentUser Long userId,                       // ★ 토큰에서 온 값
+        @RequestPart("image") MultipartFile image) {
+
+    return ResponseEntity.status(HttpStatus.CREATED)
+            .body(ApiResponse.ok(skinAnalysisService.analyze(userId, image)));
+}
+```
+
+> 필터가 인증 정보를 못 넣으면 `.anyRequest().authenticated()`에서 걸려 컨트롤러에 도달하지 않는다. 따라서 `@CurrentUser Long userId`는 **절대 null이 아니다.** 컨트롤러에서 null 체크를 쓰지 않는다.
+
+### 16.5 테스트 계정 자동 생성
+
+Flyway seed SQL에 BCrypt 해시를 하드코딩하지 않는다. 해시는 사람이 읽고 검증할 수 없고, 인코더 설정이 바뀌면 조용히 깨진다. 대신 **애플리케이션의 `PasswordEncoder`로 기동 시 생성**한다.
+
+```java
+@Component
+@RequiredArgsConstructor
+@ConditionalOnProperty(name = "app.auth.test-account.enabled", havingValue = "true")
+public class TestAccountInitializer implements ApplicationRunner {
+
+    @Value("${app.auth.test-account.password}")
+    private String password;                       // 기본값 test1234!
+
+    private static final List<String[]> ACCOUNTS = List.of(
+            new String[]{"test@skinplate.app",  "테스트유저"},
+            new String[]{"test2@skinplate.app", "테스트유저2"},
+            new String[]{"test3@skinplate.app", "테스트유저3"}
+    );
+
+    private final AppUserRepository userRepository;
+    private final PasswordEncoder passwordEncoder;
+
+    @Override
+    @Transactional
+    public void run(ApplicationArguments args) {
+        for (String[] acc : ACCOUNTS) {
+            if (userRepository.existsByEmail(acc[0])) continue;      // 멱등
+            userRepository.save(AppUser.createTestAccount(
+                    acc[0], passwordEncoder.encode(password), acc[1]));
+            log.info("테스트 계정 생성: {}", acc[0]);
+        }
+    }
+}
+```
+
+**계정 목록**
+
+| 슬롯 | 이메일 | 비밀번호 | 닉네임 | 용도 |
+|---|---|---|---|---|
+| 1 | `test@skinplate.app` | `test1234!` | 테스트유저 | **발표 시연 전용** · 피부 타입 `OILY` 사전 설정 |
+| 2 | `test2@skinplate.app` | `test1234!` | 테스트유저2 | 팀 내부 테스트 |
+| 3 | `test3@skinplate.app` | `test1234!` | 테스트유저3 | 심사위원 직접 체험용 |
+
+> **슬롯 1은 발표 직전에 데이터를 초기화하고 손대지 않는다.** 리허설로 쌓인 기록이 무대 위 화면에 나타나는 것만큼 김빠지는 일이 없다. 팀원 테스트는 슬롯 2·3에서 한다.
+
+**환경별 활성화**
+
+```yaml
+# application-local.yml / application-dev.yml
+app.auth.test-account.enabled: true
+
+# application-prod.yml
+app.auth.test-account.enabled: false
+```
+
+### 16.6 Flutter 인터셉터
+
+```dart
+class AuthInterceptor extends Interceptor {
+  final TokenStorage storage;
+  AuthInterceptor(this.storage);
+
+  @override
+  void onRequest(RequestOptions options, RequestInterceptorHandler handler) async {
+    final token = await storage.read();
+    if (token != null) options.headers['Authorization'] = 'Bearer $token';
+    handler.next(options);
+  }
+}
+
+class UnauthorizedInterceptor extends Interceptor {
+  final Ref ref;
+  UnauthorizedInterceptor(this.ref);
+
+  @override
+  void onError(DioException err, ErrorInterceptorHandler handler) async {
+    if (err.response?.statusCode == 401) {
+      await ref.read(authNotifierProvider.notifier).logout();   // 토큰 삭제 → 라우터가 로그인으로
+    }
+    handler.next(err);
+  }
+}
+```
+
+> 401을 한 곳에서 처리하면 만료 토큰으로 앱을 열었을 때 화면마다 에러 메시지가 뜨는 대신 조용히 로그인 화면으로 넘어간다.
+
+### 16.7 보안 체크리스트 (해커톤 최소선)
+
+| 항목 | 상태 | 비고 |
+|---|---|---|
+| 비밀번호 BCrypt 해싱 | ✅ | 평문 저장·로그 출력 금지 |
+| JWT Secret 환경변수 분리 | ✅ | 저장소 커밋 금지, 32바이트 이상 |
+| HTTPS 통신 | ✅ | 배포 시 리버스 프록시에서 TLS 종료 |
+| 토큰 기기 보안 저장소 보관 | ✅ | flutter_secure_storage |
+| 로그인 실패 메시지 통일 | ✅ | 계정 존재 여부 노출 방지 |
+| 타 사용자 리소스 접근 차단 | ✅ | 모든 조회에 `userId` 조건 포함 (`findByIdAndUserId`) |
+| 테스트 로그인 prod 차단 | ✅ | `test-account.enabled=false` |
+| 브루트포스 방지 (rate limit) | ⚠️ 미구현 | 해커톤 범위 외. Phase 2에서 IP당 시도 제한 |
+| 토큰 서버측 무효화 | ⚠️ 미구현 | Refresh Token + Redis 도입 시 함께 |
+
+> **`findByIdAndUserId`는 타협하지 않는다.** `GET /plates/{id}`에서 id만으로 조회하면 남의 피부 분석 결과가 노출된다. 인증을 붙여놓고 이 조건을 빠뜨리는 것이 실무에서 가장 흔한 사고이며, 심사위원이 코드를 열어봤을 때 가장 먼저 확인하는 지점이기도 하다.
+
+---
+
+## 17. OpenAI 연동 구조
+
+### 17.1 구조도
+
+```mermaid
+sequenceDiagram
+    participant F as Flutter
+    participant C as Controller
+    participant S as SkinAnalysisService
+    participant ST as ImageStorage
+    participant O as OpenAiVisionClient
+    participant AI as OpenAI gpt-4o
+    participant D as PostgreSQL
+
+    F->>C: POST /skin/analyses (multipart)<br/>Authorization: Bearer …
+    C->>S: analyze(userId, file)
+    S->>ST: store(file)
+    ST-->>S: imageUrl
+    S->>O: analyzeSkin(base64)
+    O->>AI: chat.completions<br/>(image + json_schema)
+    AI-->>O: 구조화 JSON
+    O-->>S: OpenAiSkinResult
+    S->>S: SkinScoreCalculator.calculate()
+    S->>D: save(SkinAnalysis)
+    S-->>C: SkinAnalysisResponse
+    C-->>F: 201 Created
+```
+
+### 17.2 핵심 설계 결정: Structured Outputs
+
+LLM에게 "JSON으로 답해줘"라고 부탁하면 **가끔 마크다운 코드펜스를 붙이거나 설명 문장을 덧붙인다.** 해커톤 데모 중 이 한 번의 파싱 실패가 발표를 망친다.
+
+따라서 `response_format`에 **JSON Schema를 강제**한다.
+
+```java
+@Component
+@RequiredArgsConstructor
+public class OpenAiVisionClient {
+
+    private final WebClient openAiWebClient;
+    private final ObjectMapper objectMapper;
+
+    private static final String MODEL = "gpt-4o";
+
+    public OpenAiSkinResult analyzeSkin(String base64Image) {
+        Map<String, Object> body = Map.of(
+            "model", MODEL,
+            "messages", List.of(
+                Map.of("role", "system", "content", SkinAnalysisPrompt.SYSTEM),
+                Map.of("role", "user", "content", List.of(
+                    Map.of("type", "text", "text", SkinAnalysisPrompt.USER),
+                    Map.of("type", "image_url", "image_url", Map.of(
+                        "url", "data:image/jpeg;base64," + base64Image,
+                        "detail", "high"           // ★ 피부는 high. 아래 설명 참조
+                    ))
+                ))
+            ),
+            "response_format", Map.of(
+                "type", "json_schema",
+                "json_schema", Map.of(
+                    "name", "skin_analysis",
+                    "strict", true,
+                    "schema", SkinAnalysisPrompt.SCHEMA
+                )
+            ),
+            "temperature", 0.2,                    // 재현성 확보
+            "max_tokens", 800
+        );
+
+        return openAiWebClient.post()
+                .uri("/chat/completions")
+                .bodyValue(body)
+                .retrieve()
+                .bodyToMono(JsonNode.class)
+                .timeout(Duration.ofSeconds(18))          // 재시도 없음 — 아래 설명
+                .map(this::extractContent)
+                .map(json -> parse(json, OpenAiSkinResult.class))
+                .onErrorMap(TimeoutException.class,
+                        e -> new OpenAiClientException(ErrorCode.AI_TIMEOUT, e))
+                .onErrorMap(e -> !(e instanceof OpenAiClientException),
+                        e -> new OpenAiClientException(ErrorCode.AI_ANALYSIS_FAILED, e))
+                .block();
+    }
+}
+```
+
+> `extractContent`와 `parse`는 이 클래스의 private 헬퍼다(응답 JSON에서 `choices[0].message.content`를 꺼내 `ObjectMapper`로 역직렬화). 위 코드는 호출 형태를 보이기 위한 발췌이며 헬퍼 본문은 생략했다.
+
+**타임아웃과 재시도를 이렇게 잡은 이유**
+
+| 결정 | 근거 |
+|---|---|
+| 서버 18초 단발 (재시도 제거) | 재시도 포함 최악 `20+2+20 = 42초`인데 앱 타임아웃은 25초다. **서버는 살아서 GPT를 붙들고 있는데 앱은 이미 포기한 상태**가 된다. 사용자가 재시도를 누르면 또 42초가 시작된다. 해커톤에서 재시도는 대기만 늘리고 성공률은 거의 안 올린다 |
+| 클라이언트 25초 | 서버 18초 + 이미지 업로드·응답 여유 |
+| `TimeoutException` 별도 분기 | `onErrorMap`을 무차별로 걸면 타임아웃도 `AI_ANALYSIS_FAILED`(502)가 되어 **`AI_TIMEOUT`(504)이 영영 발생하지 않는다.** 앱의 재시도 UX 분기가 통째로 도달 불가 코드가 된다 |
+| 피부는 `detail: "high"` | `low`는 이미지를 512×512 한 타일로 다운샘플한다. 그 해상도로 홍조 62와 88을 구분하는 건 근거가 없는데, **이 제품의 개인화 전체(severityFactor)가 그 숫자에 얹혀 있다.** 음식은 "김치찌개인가"만 알면 되므로 `low`로 충분하다 |
+
+### 17.3 프롬프트 설계
+
+**피부 분석 System Prompt**
+
+```
+당신은 피부 이미지 분석 어시스턴트입니다.
+얼굴 사진을 보고 아래 5개 지표를 0~100 정수로 평가하세요.
+
+- hydration : 피부 수분감. 높을수록 촉촉함
+- oil       : 유분기. 높을수록 번들거림
+- redness   : 홍조. 높을수록 붉고 자극된 상태
+- trouble   : 여드름/뾰루지/염증. 높을수록 심함
+- barrier   : 피부 장벽 건강. 높을수록 매끄럽고 안정적
+
+규칙
+1. 반드시 주어진 JSON 스키마로만 응답한다.
+2. 의학적 진단이나 질환명을 언급하지 않는다.
+3. 얼굴이 인식되지 않으면 faceDetected를 false로 한다.
+4. summary는 한국어 1문장, 40자 이내로 작성한다.
+5. 판단 근거가 부족한 지표는 50에 가깝게 평가한다.
+```
+
+**JSON Schema**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "faceDetected": { "type": "boolean" },
+    "hydration": { "type": "integer", "minimum": 0, "maximum": 100 },
+    "oil":       { "type": "integer", "minimum": 0, "maximum": 100 },
+    "redness":   { "type": "integer", "minimum": 0, "maximum": 100 },
+    "trouble":   { "type": "integer", "minimum": 0, "maximum": 100 },
+    "barrier":   { "type": "integer", "minimum": 0, "maximum": 100 },
+    "summary":   { "type": "string" }
+  },
+  "required": ["faceDetected","hydration","oil","redness","trouble","barrier","summary"],
+  "additionalProperties": false
+}
+```
+
+**음식 분석 JSON Schema**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "foodDetected":  { "type": "boolean" },
+    "foodName":      { "type": "string" },
+    "foodCategory":  { "type": "string" },
+    "cookingMethod": { "type": "string",
+                       "enum": ["FRIED","BOILED","GRILLED","RAW","STEAMED","ETC"] },
+    "spicy":         { "type": "boolean" },
+    "ingredients": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "tag":  { "type": "string",
+                    "enum": ["VITAMIN_C","VITAMIN_A","OMEGA3","ANTIOXIDANT",
+                             "PROBIOTIC","DAIRY","GLUTEN","CAPSAICIN",
+                             "CAFFEINE","ALCOHOL","HIGH_GI","ETC"] }
+        },
+        "required": ["name","tag"],
+        "additionalProperties": false
+      }
+    },
+    "nutrition": {
+      "type": "object",
+      "properties": {
+        "caloriesKcal": { "type": "integer" },
+        "proteinG":     { "type": "number" },
+        "fatG":         { "type": "number" },
+        "carbG":        { "type": "number" },
+        "sodiumMg":     { "type": "integer" },
+        "sugarG":       { "type": "number" }
+      },
+      "required": ["caloriesKcal","proteinG","fatG","carbG","sodiumMg","sugarG"],
+      "additionalProperties": false
+    }
+  },
+  "required": ["foodDetected","foodName","foodCategory","cookingMethod",
+               "spicy","ingredients","nutrition"],
+  "additionalProperties": false
+}
+```
+
+> **`tag` enum이 Rule Engine의 인터페이스다.** AI가 자유롭게 재료 태그를 만들면 룰이 매칭되지 않는다. enum으로 강제해야 `hasTag(VITAMIN_C)` 같은 판정이 항상 동작한다. 이것이 "AI는 인식, Backend는 로직"을 실제로 구현하는 지점이다.
+
+### 17.4 장애 대응
+
+| 상황 | 처리 |
+|---|---|
+| 타임아웃 (18초 초과) | `AI_TIMEOUT`(504) 반환, 앱은 재시도 버튼 노출 |
+| 5xx / 429 | **재시도 없이** 즉시 `AI_ANALYSIS_FAILED`(502) |
+| `faceDetected: false` | `FACE_NOT_DETECTED` 422 → "밝은 곳에서 다시 촬영" 안내 |
+| `foodDetected: false` | `FOOD_NOT_DETECTED` 422 |
+| 스키마 파싱 실패 | 원본을 `raw_ai_response`에 기록 후 `AI_ANALYSIS_FAILED` |
+| **Mock 모드** | `app.ai.mock=true` 이면 고정 응답 반환 (**발표 백업 플랜**) |
+
+```java
+@Component
+@Primary
+@ConditionalOnProperty(name = "app.ai.mock", havingValue = "true")
+public class MockOpenAiVisionClient implements VisionClient {
+    // 네트워크 없이 사전 정의된 결과 반환 — 시연 안전장치
+}
+```
+
+> **스위치는 하나여야 한다.** 프로퍼티(`app.ai.mock`)와 프로파일(`@Profile("mock")`)을 섞어 두면, 발표장에서 `AI_MOCK=true`를 넣고 재기동해도 아무 일도 일어나지 않는다. 올바른 명령이 `--spring.profiles.active=mock`인데 그러면 `local` 프로파일이 대체되어 `application-local.yml`이 안 읽힌다. **백업 플랜이 무대 위에서 처음 실패하는 종류의 버그다.**
+>
+> 상속(`extends OpenAiVisionClient`) 대신 **인터페이스 구현**으로 둔다. 상속하면 부모의 `WebClient` 생성자를 억지로 만족시켜야 하고 부모 빈도 같이 뜬다.
+>
+> **Day 8에 Mock 모드로 전체 플로우를 한 번 완주해 볼 것.** 안 해보면 그날 처음 안다.
+
+### 17.5 비용 관리
+
+| 항목 | 설정 | 효과 |
+|---|---|---|
+| 이미지 detail | 음식 `low` / 피부 `high` | 음식은 고정 85토큰. 피부는 얼굴 크롭 후 전송해 타일 수를 줄인다 |
+| 클라이언트 리사이즈 | 1024px / q80 | 업로드 트래픽 1/5 |
+| max_tokens | 800 | 출력 폭주 방지 |
+
+**실제 비용 산정 (gpt-4o · $2.50 / $10 per 1M)**
+
+| 항목 | 토큰 | 비용 |
+|---|---|---|
+| 피부 분석 (얼굴 크롭 `high` = 85 + 170×4타일) | 1,265 in / 250 out | $0.0057 |
+| 음식 분석 (`low` = 85) | 785 in / 500 out | $0.0070 |
+| 추천 문장 생성 (텍스트) | 600 in / 400 out | $0.0055 |
+| **플로우 1회** | | **$0.018 (약 25원)** |
+
+조직 크레딧 **$100 기준 약 5,500회**를 돌릴 수 있다. 개발 10일간 하루 80회(800회) + 리허설 50회 + 심사위원 체험 30회를 다 합쳐도 **$16, 예산의 16%**다.
+
+> **예산은 제약이 아니다.** 그래서 피부 분석을 `detail:"high"`로 올리는 결정에 비용 부담이 없고, 일일 호출 제한(30회)도 개발을 방해하기만 한다. 제한 로직을 만드는 데 쓸 반나절을 다른 데 쓰는 편이 낫다.
+| 호출 제한 | 사용자당 일 30회 | **미구현.** 아래 산정대로 예산이 남으므로 해커톤 범위에서는 불필요하다 |
+
+---
+
+## 18. Skin Plate Rule Engine 설계
+
+### 18.1 설계 목표
+
+| 목표 | 구현 방식 |
+|---|---|
+| **재현성** | 동일 입력 → 동일 점수. LLM에 점수를 맡기지 않는다 |
+| **설명 가능성** | 점수마다 어떤 룰이 몇 점 기여했는지 기록 |
+| **확장성** | 룰 추가 = 클래스 1개 추가. 기존 코드 수정 없음 |
+| **행동 연결** | 감점 룰은 **반드시** 개선 행동을 함께 제시 |
+
+### 18.2 점수 산식
+
+```
+PlateScore = clamp( BASE + Σ(ruleDelta × severityFactor) , 0 , 100 )
+
+BASE = 70
+severityFactor = 해당 피부 지표의 심각도에 따른 가중치 (1.0 ~ 1.5)
+```
+
+**severityFactor 산출**
+
+```java
+// 예: 홍조 지표가 심할수록 매운 음식 감점이 커진다
+double severity(int metricValue, boolean higherIsWorse) {
+    int v = higherIsWorse ? metricValue : (100 - metricValue);
+    if (v >= 80) return 1.5;
+    if (v >= 60) return 1.2;
+    return 1.0;
+}
+```
+
+> **왜 가중치가 필요한가** — 홍조 지수 62인 사람과 88인 사람에게 같은 라면 점수를 주면 "개인화"라는 말이 무너진다. 심사에서 가장 먼저 나올 질문이 "이게 진짜 내 피부에 맞춘 건가요?"이다. severityFactor 하나로 그 질문에 답할 수 있다.
+
+### 18.3 클래스 구조
+
+```mermaid
+classDiagram
+    class PlateRuleEngine {
+        -List~PlateRule~ rules
+        +evaluate(PlateContext) PlateEvaluation
+    }
+    class PlateRule {
+        <<interface>>
+        +code() String
+        +priority() int
+        +supports(PlateContext) boolean
+        +apply(PlateContext) RuleResult
+    }
+    class PlateContext {
+        +SkinMetrics skin
+        +FoodAnalysis food
+        +Nutrition nutrition
+    }
+    class RuleResult {
+        +String ruleCode
+        +int delta
+        +FeedbackType type
+        +String message
+        +String actionMessage
+        +int expectedGain
+    }
+    class PlateEvaluation {
+        +int score
+        +List~RuleResult~ results
+        +String summary
+    }
+
+    PlateRuleEngine --> PlateRule
+    PlateRuleEngine --> PlateContext
+    PlateRuleEngine --> PlateEvaluation
+    PlateRule --> RuleResult
+```
+
+### 18.4 인터페이스
+
+```java
+public interface PlateRule {
+
+    String code();                              // "R04"
+
+    default int priority() { return 100; }      // 낮을수록 먼저 평가
+
+    boolean supports(PlateContext ctx);         // 이 룰이 적용되는 상황인가
+
+    RuleResult apply(PlateContext ctx);         // 점수 델타 + 메시지
+}
+```
+
+```java
+public record RuleResult(
+        String ruleCode,
+        int delta,                  // + 가점 / - 감점
+        FeedbackType type,          // GOOD | CAUTION
+        String message,             // "나트륨 과다" — 짧은 명사구로 통일
+        String actionMessage,       // "국물을 절반만 남기면…"  (nullable)
+        int expectedGain            // 행동 시 회복 점수
+) {
+    public static RuleResult good(String code, int delta, String msg) {
+        return new RuleResult(code, delta, FeedbackType.GOOD, msg, null, 0);
+    }
+    public static RuleResult caution(String code, int delta, String msg,
+                                     String action, int gain) {
+        return new RuleResult(code, delta, FeedbackType.CAUTION, msg, action, gain);
+    }
+}
+```
+
+### 18.5 엔진
+
+```java
+@Component
+@RequiredArgsConstructor
+public class PlateRuleEngine {
+
+    private static final int BASE_SCORE = 70;
+    private final List<PlateRule> rules;     // Spring이 모든 구현체 주입
+
+    public PlateEvaluation evaluate(PlateContext ctx) {
+
+        List<RuleResult> applied = rules.stream()
+                .sorted(Comparator.comparingInt(PlateRule::priority))
+                .filter(r -> r.supports(ctx))
+                .map(r -> r.apply(ctx))
+                .toList();
+
+        int raw = BASE_SCORE + applied.stream().mapToInt(RuleResult::delta).sum();
+        int score = Math.max(0, Math.min(100, raw));
+
+        return new PlateEvaluation(score, applied, buildSummary(applied));
+    }
+}
+```
+
+> **핵심** — 룰을 추가하려면 `PlateRule`을 구현한 `@Component` 클래스를 하나 만들면 끝이다. 엔진 코드도, 기존 룰도 건드리지 않는다. 이것이 "확장 가능한 아키텍처"의 실질적 의미다.
+
+### 18.6 룰 정의표 (MVP 9종 + 확장 1종)
+
+| 코드 | 조건 (피부 × 음식) | Δ | 타입 | 메시지 | 추천 행동 |
+|---|---|---|---|---|---|
+| **R01** | 건조(hydration<40) × 수분/오메가3 재료 | **+8** | GOOD | 수분 보충 재료 | — |
+| **R02** | 홍조(redness>60) × 매운 음식/CAPSAICIN | **-10** | CAUTION | 매운맛 자극 | 매운 양념을 덜어내고 드셔보세요 (+6) |
+| **R03** | 트러블(trouble>60) × 당류>25g | **-12** | CAUTION | 당류 과다 | 단 음료 대신 물을 곁들이세요 (+7) |
+| **R04** | 나트륨 > 1500mg | **-8** | CAUTION | 나트륨 과다 | **국물을 절반만 남기면 점수가 상승합니다 (+8)** |
+| **R05** | 단백질 ≥ 20g | **+6** | GOOD | 단백질 충분 | — |
+| **R06** | VITAMIN_C / ANTIOXIDANT 재료 포함 | **+5** | GOOD | 비타민 풍부 | — |
+| **R07** | 유분(oil>70) × 튀김(FRIED) | **-10** | CAUTION | 튀김 조리 | 튀김옷을 일부 제거해 보세요 (+5) |
+| **R08** | 장벽 약화(barrier<40) × OMEGA3 | **+7** | GOOD | 오메가3 함유 | — |
+| **R09** | PROBIOTIC 재료 포함 (김치·된장·요거트) | **+4** | GOOD | 발효식품 포함 | — |
+| R10 *(확장)* | 칼로리 > 900kcal | -5 | CAUTION | 열량이 높음 | 밥을 2/3만 드셔보세요 (+4) |
+
+### 18.7 예시 계산 — 같은 사람, 다른 한 끼
+
+두 예시 모두 **동일한 피부 상태**를 기준으로 한다.
+`hydration 38 (건조)` · `oil 52` · `redness 64 (홍조)` · `trouble 25` · `barrier 78 (양호)`
+
+**예시 A — 돼지고기 김치찌개 (나트륨 1850mg, 단백질 28.5g, 매운맛)**
+
+```
+BASE                                          70
+R05  단백질 28.5g ≥ 20g                       +6
+R09  김치 = PROBIOTIC                         +4
+R04  나트륨 1850mg > 1500mg                   -8
+R02  매운 음식 × 홍조 64 (factor 1.2)        -12    (-10 × 1.2)
+──────────────────────────────────────────────────
+최종 Skin Plate Score                         60
+
+추천 행동 : "국물을 절반만 남기면 점수가 상승합니다." (+8)
+            "매운 양념을 덜어내고 드셔보세요."         (+6)
+```
+
+**예시 B — 연어구이 정식 (연어·브로콜리·된장국, 나트륨 1600mg, 단백질 32g)**
+
+```
+BASE                                          70
+R01  건조 38 × OMEGA3 (연어, factor 1.2)     +10    (+8 × 1.2)
+R05  단백질 32g ≥ 20g                         +6
+R06  브로콜리 = ANTIOXIDANT                   +5
+R09  된장 = PROBIOTIC                         +4
+R04  나트륨 1600mg > 1500mg                   -8
+──────────────────────────────────────────────────
+최종 Skin Plate Score                         87
+```
+
+> **같은 사람, 다른 한 끼 — 60점과 87점.** 이 27점 차이가 제품이 존재하는 이유다. 두 음식 모두 나트륨은 높지만, 오늘의 피부가 건조하고 홍조가 있기 때문에 매운 찌개는 더 크게 감점되고 오메가3는 더 크게 가점된다.
+>
+> **원문 PRD의 "Skin Plate 87점" 예시가 예시 B에 해당한다.**
+
+> 임계값과 델타는 **Day 8에 표준 음식 10종으로 캘리브레이션**하며 조정한다. 조정 대상 상수는 전부 `RuleConstants` 한 파일에 모아 두어, 튜닝이 룰 클래스 수정으로 번지지 않게 한다.
+
+### 18.8 룰 구현 예시
+
+```java
+@Component
+public class SodiumRule implements PlateRule {
+
+    private static final int THRESHOLD_MG = 1500;
+
+    @Override public String code() { return "R04"; }
+    @Override public int priority() { return 10; }
+
+    @Override
+    public boolean supports(PlateContext ctx) {
+        return ctx.nutrition().getSodiumMg() > THRESHOLD_MG;
+    }
+
+    @Override
+    public RuleResult apply(PlateContext ctx) {
+        int excess = ctx.nutrition().getSodiumMg() - THRESHOLD_MG;
+        int delta = -Math.min(15, 8 + excess / 500);   // 초과량 비례, 최대 -15
+
+        String action = ctx.food().getCookingMethod() == CookingMethod.BOILED
+                ? "국물을 절반만 남기면 Skin Plate 점수가 상승합니다."
+                : "간이 센 반찬은 절반만 드셔보세요.";
+
+        return RuleResult.caution(code(), delta, "나트륨 과다", action, GAIN_SOUP_HALF);
+    }
+}
+```
+
+```java
+@Component
+@RequiredArgsConstructor
+public class SpicyRednessRule implements PlateRule {
+
+    @Override public String code() { return "R02"; }
+
+    @Override
+    public boolean supports(PlateContext ctx) {
+        return ctx.skin().hasRedness()
+            && (ctx.food().isSpicy() || ctx.food().hasTag(IngredientTag.CAPSAICIN));
+    }
+
+    @Override
+    public RuleResult apply(PlateContext ctx) {
+        double factor = SeverityCalculator.of(ctx.skin().getRedness(), true);
+        int delta = (int) Math.round(-10 * factor);
+
+        return RuleResult.caution(code(), delta,
+                "매운맛 자극",
+                "매운 양념을 덜어내고 드셔보세요.", 6);
+    }
+}
+```
+
+### 18.9 추천(Recommendation) 생성 구조
+
+Skin Plate Score와 달리 **추천 문구는 자연어 품질이 중요**하므로 하이브리드로 간다.
+
+```
+[Backend] 피부 지표 → 취약 항목 Top 2 선정 (규칙 기반)
+                    → 후보 음식 풀 선택 (규칙 기반, 사전 정의 매핑)
+                    ↓
+[OpenAI]  후보 + 피부 상태 → 추천 이유 문장 생성 (자연어만)
+                    ↓
+[Backend] recommendation 테이블 저장
+```
+
+**취약 항목 → 후보 음식 매핑 (정적 테이블)**
+
+| 취약 항목 | 추천 후보 | 주의 후보 |
+|---|---|---|
+| 건조 (hydration↓) | 연어, 아보카도, 오이, 견과류 | 커피, 술 |
+| 홍조 (redness↑) | 브로콜리, 녹차, 토마토 | 매운 음식, 술 |
+| 트러블 (trouble↑) | 키위, 고구마, 견과류 | 탄산음료, 초콜릿, 튀김 |
+| 유분 (oil↑) | 채소, 두부, 흰살생선 | 튀김, 라면, 패스트푸드 |
+| 장벽 (barrier↓) | 연어, 달걀, 아몬드 | 인스턴트, 가공육 |
+
+> **왜 후보를 코드로 고정하는가** — LLM이 매번 다른 음식을 추천하면 데모마다 결과가 달라져 설명이 어렵다. **음식 선정은 규칙, 문장 생성은 AI.** 이 분리로 "재현 가능하면서도 자연스러운" 추천이 나온다.
+
+---
+
+## 19. 개발 우선순위 · 10일 일정
+
+### 19.1 우선순위 분류
+
+| 등급 | 정의 | 항목 |
+|---|---|---|
+| **P0** | 없으면 데모 불가 | **로그인/회원가입 + 테스트 계정 원탭 로그인**, 피부 분석 API, 음식 분석 API, Plate Score 산출, 추천 조회, 촬영 화면, 결과 화면 3종 |
+| **P1** | 있으면 완성도 상승 | 홈 화면 Score 카드, 로딩 단계 애니메이션, 에러 처리 UX, Swagger 문서 |
+| **P2** | 시간 남으면 | 히스토리 화면, 결과 공유, 온보딩 애니메이션, 지표 추이 차트 |
+
+### 19.2 Day-by-Day 일정
+
+```mermaid
+gantt
+    title Skin Plate 10일 개발 일정
+    dateFormat YYYY-MM-DD
+    axisFormat %m/%d
+
+    section 기반
+    설계 확정 · 스켈레톤 · DB       :a1, 2026-08-08, 1d
+    인증 (JWT · 로그인 · 테스트계정) :a1b, 2026-08-09, 1d
+    section 피부 분석
+    OpenAI 연동 · 피부 API          :a2, 2026-08-10, 2d
+    Flutter 촬영/결과 화면          :a3, 2026-08-10, 2d
+    section 음식 · Plate
+    음식 분석 API · Rule Engine     :a4, 2026-08-12, 2d
+    Plate 결과 화면                 :a5, 2026-08-12, 2d
+    section 추천
+    추천 생성 · 화면                :a6, 2026-08-14, 1d
+    section 마무리
+    UI 다듬기 · 통합                :a7, 2026-08-15, 1d
+    안정화 · 데모 리허설            :a8, 2026-08-16, 1d
+    발표 준비                       :a9, 2026-08-17, 1d
+```
+
+**팀 구성 전제** — Flutter **2명**(FE-A · FE-B), Backend 1~2명.
+
+| Day | Backend | FE-A | FE-B | 게이트 |
+|---|---|---|---|---|
+| **1** | 스켈레톤, Docker Compose(PG), Flyway V1, Entity 7종 | 프로젝트 생성, 테마, 라우터, 공통 위젯 | (합류) | |
+| **2** | Security+JWT, `/auth/*` 5종, 업로드/저장, Swagger | **S00·S01·S01b·S01c 인증 화면**, TokenStorage, 라우트 가드 | Dio·인터셉터·`build_runner` DTO 생성 | **로그인 E2E** ✅ |
+| **3** | OpenAI 연동 + **Mock 클라이언트 동시 작성** | S03·S06 촬영 화면, 이미지 압축 | S02 홈, S04 로딩 | 피부 분석 로컬 성공 |
+| **4** | `POST /skin/analyses`, ScoreCalculator·HighlightBuilder·GapAnalyzer 조립 | **ML Kit 게이트 착수** | **S05 결과 + 갭 카드** | **피부 분석 E2E** ✅ |
+| **5** | 음식 프롬프트, `FoodAnalysisService`, **StandardNutrition 확정** | ML Kit 게이트 마무리 + 크롭 | S07 골격 | 음식 인식 확인 |
+| **6** | Rule Engine 9종, `POST /plates`, **`/plates/{id}/simulate`** | **1차 배포 (서버 컨테이너화)** | **S07 계산 내역 카드 + 시뮬 버튼** | **Plate Score E2E** ✅ |
+| **7** | 추천 lazy 동기 생성, `GET /recommendations` | **릴리즈 빌드 + 실기기에서 배포 서버 호출** | S08 추천 화면 | **전체 플로우 관통** ✅ |
+| **8** | 룰 임계값 튜닝(표준 10종), 에러 코드 정비 | **배포본 E2E 1회 완주** — 시연에 쓸 바로 그 빌드 | UI 폴리시, 에러 UX | **배포본 E2E** ✅ · **기능 동결** |
+| **9** | 안정화, 로그 | **영상 촬영** (재촬영 자유) | 영상 촬영 보조, 크래시 수정 | 촬영 완료 |
+| **10** | 대기 | **영상 편집·제출** | 편집 보조, 발표 자료 | 발표 |
+
+> **Day 8이 진짜 마감이다.** 발표가 영상이므로 Day 9~10은 촬영과 편집에 쓰인다. 이 이틀은 코드 작업이 아니라 **제작 시간**이고, 아무도 일정표에 넣지 않았던 항목이다. 영상 촬영 반나절 + 편집 반나절이 최소치이고, 컷 편집·자막·나레이션까지 하면 하루가 더 든다.
+>
+> **영상 발표는 두 가지를 공짜로 준다.** 로딩 8초를 편집으로 잘라낼 수 있고(대기시간 리스크 소멸), 조명이 나쁘면 다시 찍으면 된다(게이트 리스크 완화). 대신 **현장 배포본 시연은 통제 불가**이므로 게이트 우회로(§9.5)와 배포 검증(Day 8)이 그만큼 더 중요하다.
+
+**FE 분업 원칙**
+
+| | 담당 | 이유 |
+|---|---|---|
+| FE-A | 인증 · 촬영 · **ML Kit 게이트** · 배포/릴리즈 빌드 | **네이티브 의존성은 한 사람이 전담한다.** 둘이 동시에 `pubspec.yaml`과 iOS `Podfile`을 건드리면 충돌이 나고, 그 복구가 반나절이다 |
+| FE-B | 네트워크 레이어 · 결과 화면 3종(S05·S07·S08) | 순수 Dart 영역이라 병렬이 안전하다 |
+
+### 19.3 마일스톤 게이트
+
+각 게이트를 통과하지 못하면 **다음 단계로 넘어가지 않고 범위를 줄인다.**
+
+| 게이트 | 시점 | 통과 조건 | 미통과 시 |
+|---|---|---|---|
+| G1 | Day 2 종료 | API 명세 확정, **로그인·회원가입 E2E 동작**, 이미지 업로드 성공 | 회원가입 화면을 빼고 **테스트 계정 로그인만** 남긴다 (인증 골격은 유지) |
+| G2 | Day 4 종료 | 피부 분석 E2E 동작 | 지표 5개 → 3개로 축소 |
+| G3 | Day 6 종료 | Plate Score E2E 동작 | **룰은 자르지 않는다.** 9종은 각각 20줄이고 이미 다 작성돼 있어 잘라도 아끼는 시간이 없는데, 발표 숫자(60점/87점)만 깨진다. 대신 화면을 자른다 — S09 히스토리 · 결과 공유 · 지표 추이 차트 |
+| G4 | Day 7 종료 | 전체 플로우 관통 | 추천을 정적 문구로 대체(AI 문장 생성 제외) |
+| G5 | **Day 8 종료** | **배포본 E2E 1회 완주** | 기능을 더 넣지 않고 동결. Day 9~10은 영상 촬영·편집 전용 |
+| G6 | Day 9 종료 | 영상 촬영 완료 | 미완성 기능은 촬영에서 제외하고 완성된 것만 찍는다 |
+
+### 19.4 병렬 작업 규칙
+
+- **Day 2에 API 계약을 고정**한다. 이후 프론트는 Mock 서버(또는 하드코딩 JSON)로 독립 개발.
+- 백엔드는 `/swagger-ui`를 항상 최신으로 유지한다. 구두 합의 금지.
+- DTO 변경이 필요하면 Slack에 **변경 전** 공지 → 양쪽 동시 수정.
+
+---
+
+## 20. 리스크 · 대응 방안 [보강]
+
+| # | 리스크 | 영향 | 확률 | 대응 |
+|---|---|---|---|---|
+| R1 | **OpenAI 응답 지연/실패** | 데모 중단 | 중 | **18초 단발 타임아웃(재시도 없음)**, `app.ai.mock=true`로 즉시 전환, 로딩 단계 UI로 체감 대기 완화 |
+| R2 | **AI 응답 파싱 실패** | 기능 불가 | 중 | Structured Outputs(json_schema, strict) 강제, 원본 jsonb 저장 후 폴백 |
+| R3 | **의료 자문으로 오해** | 신뢰/법적 리스크 | 중 | 모든 결과 화면 하단 고정 문구: *"본 서비스는 의료 진단이 아니며 참고용 정보입니다."* 프롬프트에서 질환명 언급 금지 |
+| R4 | **촬영 조명·화질 편차로 결과 요동** | 신뢰도 하락 | 높 | 촬영 가이드 오버레이, 조도 안내 문구, `temperature 0.2`로 변동 축소, 재촬영 유도 |
+| R5 | **OpenAI 비용 초과** | 개발 중단 | 중 | 음식 `detail:low` + 피부는 얼굴 크롭 후 `high` + `max_tokens:800` + 사용자당 일 30회 제한, 예산 알림 설정 |
+| R6 | **카메라 권한 거부** | 진입 불가 | 중 | 갤러리 업로드 폴백 항상 제공, 권한 재요청 안내 화면 |
+| R7 | **발표장 네트워크 장애** | 현장 시연 실패 | 중 | **발표가 영상이므로 발표 자체는 영향 없다.** 현장 시연이 실패하면 영상으로 대체한다. `app.ai.mock=true`는 개발·리허설용으로만 남긴다 |
+| R8 | **10일 일정 초과** | 미완성 | 높 | 19.3 마일스톤 게이트로 단계별 범위 축소 결정 |
+| R9 | **Rule 임계값이 비현실적** | 점수 신뢰도 하락 | 중 | Day 8에 표준 음식 10종으로 캘리브레이션, 상수는 `RuleConstants` 한 파일 집중 |
+| R10 | **팀 간 API 불일치** | 통합 지연 | 중 | Day 2 계약 고정 + Swagger 단일 진실 공급원 |
+| R11 | **로그인 추가로 시연 마찰 발생** | 발표 흐름 끊김 | 높 | **"테스트 계정으로 시작하기" 원탭 버튼**, 자동 로그인(토큰 7일), 발표 전 로그인 상태로 대기 |
+| R12 | **JWT Secret 저장소 커밋** | 보안 사고 | 중 | `.env` / 환경변수로만 주입, `.gitignore` 등록, 커밋 훅으로 `JWT_SECRET` 문자열 차단 |
+| R13 | **테스트 계정이 운영 환경에 노출** | 보안 사고 | 중 | `app.auth.test-account.enabled=false`(prod 기본), `/auth/test-login` 403 처리 |
+| R14 | **리허설 데이터가 시연 계정에 누적** | 발표 품질 저하 | 중 | 슬롯 1은 시연 전용, 팀 테스트는 슬롯 2·3. 발표 직전 슬롯 1 데이터 초기화 |
+| R15 | **인증 누락 API로 타 사용자 데이터 노출** | 보안 사고 | 중 | `.anyRequest().authenticated()` 기본 차단 + 모든 조회에 `findByIdAndUserId` 강제 |
+| R16 | ~~릴리즈 빌드 cleartext 차단~~ | — | — | **소멸.** HTTPS를 자동 발급하는 PaaS에 배포하므로 cleartext 자체가 없다(§9.6) |
+| R17 | ~~이미지 URL 호스트 불일치~~ | — | — | **소멸.** 결과 화면이 서버 `imageUrl` 대신 **앱 로컬 파일**을 표시한다(§9.6). 배포 환경 이미지 유실도 함께 해결 |
+| R18 | **AI 영양 추정치 변동으로 점수가 흔들림** | 재현성 주장 붕괴 | 높 | 시연 음식 3종은 음식명 매칭으로 표준 영양값을 덮어쓴다. 화면에 "표준 영양 DB 기준" 라벨 표기 |
+| R19 | **첫 배포가 Day 10에 몰림** | 발표 당일 배포 실패 | 높 | **Day 6에 1차 배포**한다. 기능이 절반만 돌아도 올린다 — 목적은 파이프라인을 뚫는 것이다. 첫 배포는 예외 없이 반나절을 먹는다 |
+| R20 | **영상 촬영·편집 시간이 일정에 없음** | 발표물 미완성 | 높 | Day 9 촬영 / Day 10 편집으로 이틀을 확보하고, **Day 8을 기능 동결일**로 못 박는다 |
+| R21 | **얼굴 게이트가 촬영을 막음** | 현장 시연 중단 | 중 | 갤러리 업로드는 게이트 우회, 3회 연속 실패 시 "그래도 촬영" 버튼(§9.5). 영상은 재촬영 가능하나 현장 시연은 통제 불가 |
+| R22 | **시뮬레이션이 원본 엔티티를 변경** | 시연 데이터 파괴 | 중 | detached 복사본으로만 계산 + `@Transactional(readOnly = true)` 안전망 (설계서 §1.19.2) |
+
+### 안전 문구 (전 화면 공통)
+
+> 본 서비스는 의료 진단이나 치료를 목적으로 하지 않으며, 제공되는 분석 결과와 식품 정보는 참고용입니다. 피부 질환이 의심되는 경우 전문의와 상담하시기 바랍니다.
+
+---
+
+## 21. 최종 발표 메시지
+
+> ### "피부를 분석하는 AI는 많습니다.
+> ### 하지만 저희는 피부를 분석한 후,
+> ### 오늘 먹는 한 끼까지 AI가 함께 선택해주는 서비스를 만들었습니다."
+
+### 발표 시연 시나리오 (3분)
+
+**형식: 사전 제작 영상.** 로딩 대기는 편집으로 잘라내고, 그 시간을 실제 내용에 쓴다.
+
+| 시간 | 내용 |
+|---|---|
+| 0:00~0:20 | 문제 제기 — "피부가 안 좋으면 화장품부터 바꾸시죠?" |
+| 0:20~0:25 | **"테스트 계정으로 시작하기" 원탭 로그인** (5초) |
+| 0:25~1:00 | 얼굴 촬영 → Skin Score 55 → **"지성이라고 생각하셨지만…" 갭 카드** |
+| 1:00~1:40 | **김치찌개 촬영** → Plate Score 60, "나트륨 과다·매운맛 자극" |
+| 1:40~1:50 | **"왜 60점인가" 카드 펼치기** → 기본 70 · 단백질 +6 · 발효식품 +4 · 나트륨 −8 · 매운맛×홍조 −12 |
+| 1:50~2:00 | **[국물 절반 남기기] 버튼** → **60 → 68 애니메이션** ★클라이맥스 |
+| 2:00~2:20 | 추천 화면 — 키위·브로콜리·연어 / 라면·탄산음료 + 이유 |
+| 2:20~3:00 | 차별점 정리 + 확장 방향 (기록 축적 → 식습관 리포트) |
+
+### 심사 예상 질문 대비
+
+| 질문 | 답변 요지 |
+|---|---|
+| "점수는 어떻게 계산되나요?" | AI는 인식만, 점수는 Backend Rule Engine이 계산. 동일 입력 → 동일 결과. 적용된 룰 코드를 응답에 포함해 설명 가능 |
+| "개인화가 진짜 되나요?" | 같은 음식도 피부 지표 심각도에 따라 감점폭이 달라짐(severityFactor). 홍조 88인 사람과 62인 사람의 라면 점수가 다름 |
+| "의학적 근거는?" | 진단이 아닌 식습관 가이드. 나트륨·당류·오메가3 등 일반 영양 기준 기반, 면책 문구 명시 |
+| "확장 계획은?" | 기록 축적 → 주간 피부 리포트 → 식단 코칭 → 제품 추천으로 자연스럽게 확장 |
+| "왜 로그인을 넣었나요?" | 기록이 쌓여야 "어제보다 나아졌다"를 보여줄 수 있음. 다만 시연 마찰을 없애려 테스트 계정 원탭 로그인을 별도 구현 |
+| "보안은요?" | BCrypt 해싱, JWT 환경변수 분리, 기본 전면 차단 후 화이트리스트 방식, 모든 조회에 `userId` 조건. 테스트 로그인은 prod에서 자동 차단 |
+| "같은 사진 두 번 찍으면 같은 점수 나옵니까?" | 룰 엔진은 결정론적이다. 다만 영양값 추정은 AI가 하므로 흔들릴 수 있어, **시연 음식 3종은 음식명 매칭으로 표준 영양 DB 값을 사용**한다(화면에 라벨 표기). AI는 "무슨 음식인가"만 판단한다 |
+| "저해상도로 홍조를 판별할 수 있습니까?" | 온디바이스 ML Kit으로 **얼굴만 잘라서** 올린다(§9.5). 같은 전송량으로 얼굴 실효 해상도가 3배 이상 올라가고, 피부 분석만 `detail:high`로 보낸다 |
+| "총점 55는 어떻게 나온 겁니까?" | 5개 지표의 방향을 통일해 평균낸다. 산식이 §4.1에 공개되어 있고, S05 화면에서 지표 바와 총점을 함께 보여주므로 검산이 가능하다 |
+| "피부 타입을 받으면 결국 고정 타입 개인화 아닙니까?" | **점수에는 쓰지 않는다.** `PlateContext`는 지표와 음식만 받는다. 자가 신고는 "알고 계셨던 것과 오늘 측정이 다르다"를 보여주는 데만 쓴다 — 오히려 고정 타입의 한계를 드러내는 장치다 |
+
+---
+
+## 부록 A. 환경 변수
+
+```yaml
+# application.yml
+app:
+  auth:
+    jwt:
+      secret: ${JWT_SECRET}            # 32바이트 이상. 저장소 커밋 금지
+      validity-seconds: 604800         # 7일
+    test-account:
+      enabled: ${TEST_ACCOUNT_ENABLED:true}   # prod 에서는 false
+      password: ${TEST_ACCOUNT_PASSWORD:test1234!}
+  ai:
+    api-key: ${OPENAI_API_KEY}
+    model: gpt-4o
+    timeout-seconds: 18
+    mock: ${AI_MOCK:false}
+  storage:
+    type: local              # local | s3
+    base-path: ./uploads
+    base-url: ${STORAGE_BASE_URL:http://10.0.2.2:8080/uploads}   # ★ API와 같은 호스트
+  rate-limit:
+    daily-per-user: 30        # ⚠️ 프로퍼티만 존재. 구현·카운터 테이블 없음 (Phase 2)
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/skinplate
+    username: ${DB_USER:skinplate}
+    password: ${DB_PASSWORD}
+  jpa:
+    hibernate.ddl-auto: validate
+    properties.hibernate.format_sql: true
+  servlet.multipart:
+    max-file-size: 5MB
+    max-request-size: 10MB
+```
+
+## 부록 B. 로컬 실행
+
+```bash
+# 1) DB 기동
+docker compose up -d postgres
+
+# 2) 백엔드 — .env 를 만들어 팀이 공유한다 (.gitignore 등록 필수)
+#    JWT_SECRET 은 한 번만 만들어 고정한다. 매번 새로 만들면 재기동 때마다 전원 로그아웃된다.
+cat > .env <<'EOF'
+OPENAI_API_KEY=sk-...
+JWT_SECRET=<openssl rand -base64 48 로 한 번 생성한 고정값>
+STORAGE_BASE_URL=http://10.0.2.2:8080/uploads   # ★ API_BASE_URL 과 같은 호스트여야 한다
+TEST_ACCOUNT_ENABLED=true
+EOF
+
+set -a && source .env && set +a
+./gradlew bootRun --args='--spring.profiles.active=local'
+#   → 기동 로그에 "테스트 계정 생성: test@skinplate.app" 이 찍히면 정상
+
+# 3) 프론트
+flutter pub get
+dart run build_runner build --delete-conflicting-outputs
+flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8080/api/v1
+```
+
+**로그인 동작 확인**
+
+```bash
+# 테스트 계정 원탭 로그인
+curl -X POST http://localhost:8080/api/v1/auth/test-login \
+     -H 'Content-Type: application/json' -d '{"slot":1}'
+
+# 일반 로그인
+curl -X POST http://localhost:8080/api/v1/auth/login \
+     -H 'Content-Type: application/json' \
+     -d '{"email":"test@skinplate.app","password":"test1234!"}'
+
+# 발급받은 토큰으로 보호된 API 호출
+curl http://localhost:8080/api/v1/auth/me \
+     -H "Authorization: Bearer $TOKEN"
+```
+
+| 계정 | 비밀번호 |
+|---|---|
+| `test@skinplate.app` | `test1234!` |
+| `test2@skinplate.app` | `test1234!` |
+| `test3@skinplate.app` | `test1234!` |
+
+> **호스트를 두 곳에서 관리하지 마라.** Android 에뮬레이터에서 `localhost`는 에뮬레이터 자신이므로, `STORAGE_BASE_URL`을 기본값(`localhost:8080`)으로 두면 **API는 잘 되는데 방금 찍은 얼굴 사진만 회색 박스**가 된다. S05와 S07 두 화면에 동시에 나타나고, 원인 찾는 데 한 시간이 든다.
+>
+> 더 안전한 구조는 **서버가 상대경로(`/uploads/...`)를 내리고 앱이 `Env.apiBaseUrl`의 호스트를 붙이는 것**이다. 호스트가 한 곳에서만 관리된다. 실기기 시연이면 노트북 LAN IP로 바꾸는 것도 한 줄이면 끝난다.
+>
+> `JWT_SECRET`은 **한 번 만들어 고정**한다. 매번 새로 생성하면 서버를 재기동할 때마다 기존 토큰이 전부 무효가 되어, Day 9 리허설 중 시연 폰 세 대가 동시에 로그아웃된다. 아무도 시크릿을 의심하지 않아서 원인 찾기가 오래 걸린다.
+
+## 부록 C. 용어 정의
+
+| 용어 | 정의 |
+|---|---|
+| **Skin Score** | 얼굴 사진 기반 5개 지표를 종합한 0~100 점수 |
+| **Skin Plate** | 특정 음식 1건 × 특정 피부 분석 1건의 매칭 결과 |
+| **Skin Plate Score** | 해당 음식이 현재 피부 상태에 얼마나 적합한지 나타내는 0~100 점수 |
+| **Rule** | 피부 지표와 음식 속성의 조합에 점수 델타와 메시지를 부여하는 단위 규칙 |
+| **추천 행동** | 감점 룰에 연결된, 사용자가 지금 실행 가능한 한 문장 제안 |
+| **severityFactor** | 피부 지표 심각도에 따라 룰 델타를 증폭하는 계수 (1.0~1.5) |
+| **Access Token** | 로그인 시 발급되는 JWT. 유효기간 7일, 모든 보호 API에 `Bearer`로 첨부 |
+| **테스트 계정** | 서버 기동 시 자동 생성되는 시연·검증용 고정 계정 (슬롯 1~3) |
+| **원탭 로그인** | `POST /auth/test-login` 호출로 입력 없이 테스트 계정에 로그인하는 시연용 동작 |
+
+---
+
+## 부록 D. v1.1 변경 이력
+
+| 구분 | v1.0 | v1.1 |
+|---|---|---|
+| 인증 | 없음 (`X-Device-Id` 헤더) | **JWT Bearer** (이메일 + 비밀번호) |
+| 사용자 식별 | 디바이스 UUID | `app_user.id` (토큰에서 추출) |
+| MVP 범위 | 로그인 Out of Scope | **로그인/회원가입 In Scope** |
+| 화면 | S01~S09 | **S00·S01·S01b 추가** (총 11) |
+| 엔드포인트 | 9개 | **12개** (`/auth/*` 4종 추가, `/users/device` 삭제) |
+| DB | `app_user(device_id)` | `app_user(email, password, role, is_test_account, last_login_at)` |
+| 기술 스택 | — | **Spring Security 6.3 + jjwt 0.12, flutter_secure_storage 9.x** |
+| 신규 섹션 | — | **§16 인증 · 보안 설계** |
+| 리스크 | R1~R10 | **R11~R15 추가** (시연 마찰, Secret 유출, 테스트 계정 노출 등) |
+| 일정 | Day 1~2 기반 작업 | **Day 2를 인증 전담일로 배정**, G1 게이트에 로그인 E2E 추가 |
+
+---
+
+## 부록 F. v1.4 변경 이력 (2026-08-09 · 2차 리뷰 + 팀 조건 확정)
+
+확정된 조건 3가지가 여러 결론을 바꿨다.
+
+| 조건 | 값 | 바뀐 것 |
+|---|---|---|
+| Flutter 인원 | **2명** | ML Kit 게이트를 **살린다**. FE 8.3일 ÷ 2 = 4.2일씩이라 여유가 있다. 1명이었다면 잘라야 했다 |
+| 발표 형식 | **사전 영상 + 현장 배포본 시연** | **§9.6 배포 구성 신설.** 노트북 `bootRun` 전제가 무효가 되고 HTTPS·릴리즈 빌드·이미지 서빙이 전부 재설계됐다. **Day 9~10이 촬영·편집으로 확정**되어 실질 마감이 Day 8로 당겨졌다 |
+| OpenAI 예산 | **$100 크레딧** | 플로우 1회 $0.018 → 전체 사용 예상 $16(16%). **예산은 제약이 아니다.** `detail:"high"` 유지, 일일 호출 제한은 불필요 |
+
+### 새 결함 수정 (2차 리뷰 N1~N15)
+
+| # | 문제 | 수정 |
+|---|---|---|
+| N1 | 시뮬레이션 스케치 `food.with()`가 존재하지 않는 메서드. 짧게 짜면 `orphanRemoval`이 재료 행을 DELETE | detached 복사본 + `@Transactional(readOnly=true)` (설계서 §1.19.2) |
+| N2 | Highlights가 **위치만으로 상태 결정** → 18점 화면에 초록 GOOD, 94점 화면에 빨강 CAUTION | 위치는 선택만, **상태는 값(60/40 임계)이 결정**. 임계를 `SkinMetrics` 기준과 일치 |
+| N3 | `FaceGate.check(..., int luminance)` 순환 의존 — 얼굴 영역을 호출자가 모른다 | 콜백 `int Function(Rect)`로 변경 |
+| N4 | 휘도 계산이 `img.Image` 요구 → 매 프레임 YUV→RGB 변환 | **YUV `planes[0]`이 곧 휘도.** 8픽셀 샘플링, 변환 없음 |
+| N5 | 게이트에 탈출구 없음 | 갤러리 우회 + 3회 실패 시 "그래도 촬영" |
+| N6 | 신규 4건이 Day 표에 없음 | Day 표를 **FE 2인 분업 기준으로 재작성** |
+| N7 | R1·R7이 "20초+재시도", "mock 프로파일" | 18초 단발 / 영상 발표 기준으로 갱신 |
+| N8 | 파일 목록에 신규 클래스 9개 누락 | 양쪽 문서 목록 갱신 |
+| N9 | §13.3 오참조 | 설계서 §1.12.1로 |
+| N10 | `StandardNutrition`이 `Map.of` → 순회 순서 무작위 | `LinkedHashMap` + 명시적 우선순위 |
+| N11 | `LESS_RICE` → R10(미구현) | 액션에서 제거 |
+| N12 | `REMOVE_BATTER`의 `fatG × 0.7`이 점수에 영향 0 | 조정표에서 삭제 |
+| N13 | 계산 내역 카드가 쓸 `baseScore`가 응답에 없음 | `SkinPlateResponse.baseScore` 추가 |
+| N14 | 부록 A 비밀번호 하드코딩 | 환경변수로 |
+| N15 | §2.12가 §2.11보다 앞 | 순서 교정 |
+
+### 신설
+
+| 항목 | 내용 |
+|---|---|
+| **§9.6 배포 구성** | HTTPS 자동 발급 PaaS 채택 · Dockerfile · **결과 화면은 로컬 파일 표시** · Day 6 1차 배포 |
+| **R19~R22** | 배포 지연 · 영상 제작 시간 · 게이트 차단 · 시뮬레이션 데이터 파괴 |
+| **G5/G6** | Day 8 기능 동결 · Day 9 촬영 완료 |
+
+---
+
+## 부록 E. v1.2 / v1.3 변경 이력 (2026-08-09)
+
+리뷰 30건을 검증해 **유효 20건 / 유령 6건 / 부분 4건**으로 판정하고, 유효 건을 반영했다.
+유령 6건은 리뷰어가 v1.0 사본을 읽어서 생긴 것으로, v1.1에서 이미 해소된 항목이었다.
+
+### Blocker
+
+| 항목 | v1.1 | v1.2 |
+|---|---|---|
+| Skin Score 산식 | **없음.** 예시 86점이 지표(38/52/64/25/78)로 산출 불가능 | 산식 확정(§4.1). 예시 **55점**. 시연 대본도 함께 수정 |
+| Highlights 규칙 | **없음.** "→ highlights 생성"이라고만 | 위치 기반 규칙 확정 — 항상 GOOD 1 + WARN 1 + CAUTION 1 |
+| Mock 스위치 | 표는 `app.ai.mock`, 코드는 `@Profile("mock")` — **백업 플랜이 작동 안 함** | `@ConditionalOnProperty` 하나로 통일 |
+
+### Major
+
+| 항목 | v1.2 |
+|---|---|
+| 이미지 해상도 | 피부만 `detail:"high"`. 온디바이스 얼굴 크롭 후 전송(§9.5) |
+| 재현성 | 시연 음식 3종은 표준 영양값으로 덮어쓴다. AI는 "무슨 음식인가"만 판단 |
+| 타임아웃 | 서버 20초+재시도(최악 42초) → **18초 단발**. `TimeoutException` 별도 분기로 `AI_TIMEOUT` 복구 |
+| 이미지 URL | `STORAGE_BASE_URL`을 API와 같은 호스트로 강제 (R17) |
+| 트랜잭션 | AI 호출은 트랜잭션 밖, DTO 변환은 `readOnly` 트랜잭션 안 (§11.3) |
+| 추천 생성 | 비동기 → **lazy 동기**. S08이 빈 화면일 가능성 제거 |
+| 릴리즈 빌드 | cleartext 차단 리스크 추가(R16), 실기기 검증을 Day 9 → **Day 8**로 |
+| 룰 메시지 | 전부 명사구로 통일 (요약 문장이 비문이 되던 문제) |
+
+### 신규
+
+| 항목 | 내용 |
+|---|---|
+| **§4.4.1 피부 타입 선택 (S01c)** | 가입 직후 1탭 선택 + 건너뛰기. **Rule Engine에는 넣지 않는다** — 표시·비교 전용. S05에서 "알고 계셨던 것과 오늘 측정이 다르다"를 보여주는 갭 카드로 쓰인다 |
+| **§9.5 온디바이스 얼굴 게이트** | ML Kit 기반 게이트 + 크롭. OpenCV·MediaPipe는 채택하지 않음 |
+| **⑦-b `POST /plates/{id}/simulate`** | 추천 행동 실행 시 점수 재계산. `60 → 68`이 화면에서 움직인다 |
+| **S07 계산 내역 카드** | "왜 60점인가"를 펼쳐 보여준다 — 차별점을 문서에서 화면으로 |
+
+### 축소
+
+`GET /plates?date=` · S09 히스토리 · 결과 공유 · 지표 추이 차트 · API 컨테이너화.
+**G3 미통과 시 축소 대상을 룰 → 화면으로 변경** (룰은 잘라도 시간이 안 아껴지는데 발표 숫자만 깨진다).
+
+---
+
+*문서 끝 · Skin Plate PRD & Technical Design v1.4*

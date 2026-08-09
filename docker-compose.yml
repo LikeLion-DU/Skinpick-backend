@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: skinplate-db
+    environment:
+      POSTGRES_DB: skinplate
+      POSTGRES_USER: skinplate
+      POSTGRES_PASSWORD: skinplate
+    ports:
+      - "5432:5432"
+    volumes:
+      - skinplate-pgdata:/var/lib/postgresql/data
+
+volumes:
+  skinplate-pgdata:

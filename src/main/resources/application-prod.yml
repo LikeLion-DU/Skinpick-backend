@@ -1,0 +1,5 @@
+app:
+  auth.test-account.enabled: false     # ★ 운영에서는 테스트 계정 비활성화
+
+logging.level:
+  com.skinplate.api: INFO
