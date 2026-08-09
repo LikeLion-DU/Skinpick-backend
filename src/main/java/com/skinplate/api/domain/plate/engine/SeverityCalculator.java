@@ -31,8 +31,15 @@ public final class SeverityCalculator {
         return NORMAL;
     }
 
-    /** 델타에 계수를 적용하고 반올림한다. */
+    /**
+     * 델타에 계수를 적용하고 반올림한다.
+     *
+     * Math.round 는 floor(x+0.5) 라 음수 .5 에서 0 쪽으로 붙는다 — Math.round(-16.5) 는 -16 이다.
+     * 감점 룰에서 이러면 룰표에 적힌 것보다 1점 약하게 적용되고, 그 사실이 어디에도 드러나지 않는다.
+     * 절댓값으로 반올림한 뒤 부호를 되돌리면 "감점 상수는 짝수로 유지" 같은 관례가 필요 없어진다.
+     */
     public static int apply(int delta, int metricValue, boolean higherIsWorse) {
-        return (int) Math.round(delta * of(metricValue, higherIsWorse));
+        double raw = delta * of(metricValue, higherIsWorse);
+        return (int) (raw < 0 ? -Math.round(-raw) : Math.round(raw));
     }
 }

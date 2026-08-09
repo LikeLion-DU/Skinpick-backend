@@ -4,8 +4,8 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | v1.3 |
-| 기준 문서 | Skin Plate PRD & Technical Design **v1.4** |
+| 문서 버전 | v1.4 |
+| 기준 문서 | Skin Plate PRD & Technical Design **v1.5** |
 | 범위 | 설정, 마이그레이션, Entity, Enum, Repository, DTO, Rule Engine 골격 (Backend) / DTO, Entity, Repository 인터페이스 (Flutter) |
 | 제외 | Service·Controller 구현체, OpenAI 호출 구현, UI 위젯 |
 
@@ -89,6 +89,7 @@ skinplate-api/
     │       ├── repository/  RecommendationRepository
     │       └── dto/         RecommendationResponse · RecommendedFoodDto
     └── infra/openai/dto/    OpenAiSkinResult · OpenAiFoodResult
+                             (infra/storage 없음 — 이미지를 저장하지 않는다)
 
 src/test/java/com/skinplate/api/domain/plate/engine/
 └── PlateRuleEngineTest.java        # PRD 예시 60점 / 87점 재현
@@ -230,14 +231,8 @@ app:
     api-key: ${OPENAI_API_KEY:}
     base-url: https://api.openai.com/v1
     model: gpt-4o
-    timeout-seconds: 18            # 재시도 없는 단발. 클라이언트 25초보다 반드시 짧아야 한다
+    timeout-seconds: 18            # 타임아웃은 재시도 없음. 429만 1회 재시도
     mock: ${AI_MOCK:false}
-  storage:
-    base-path: ${STORAGE_BASE_PATH:./uploads}
-    # ★ API_BASE_URL 과 반드시 같은 호스트. localhost 로 두면 에뮬레이터에서 사진만 안 뜬다
-    base-url: ${STORAGE_BASE_URL:http://10.0.2.2:8080/uploads}
-  rate-limit:
-    daily-per-user: 30            # ⚠️ 프로퍼티만 존재. 카운터 구현 없음 (Phase 2)
 
 springdoc:
   swagger-ui.path: /swagger-ui/index.html
@@ -297,7 +292,6 @@ CREATE UNIQUE INDEX idx_app_user_email ON app_user (lower(email));
 CREATE TABLE skin_analysis (
     id               BIGSERIAL PRIMARY KEY,
     user_id          BIGINT       NOT NULL REFERENCES app_user (id),
-    image_url        VARCHAR(500) NOT NULL,
     skin_score       INT          NOT NULL,
     hydration        INT          NOT NULL,
     oil              INT          NOT NULL,
@@ -320,7 +314,6 @@ CREATE INDEX idx_skin_analysis_user_created ON skin_analysis (user_id, created_a
 CREATE TABLE food_analysis (
     id              BIGSERIAL PRIMARY KEY,
     user_id         BIGINT       NOT NULL REFERENCES app_user (id),
-    image_url       VARCHAR(500) NOT NULL,
     food_name       VARCHAR(100) NOT NULL,
     food_category   VARCHAR(50),
     calories_kcal   INT          NOT NULL DEFAULT 0,
@@ -855,7 +848,6 @@ public class SecurityConfig {
             "/api/v1/auth/login",
             "/api/v1/auth/test-login",
             "/api/v1/health",
-            "/uploads/**",
             "/swagger-ui/**",
             "/v3/api-docs/**"
     };
@@ -923,20 +915,12 @@ public class JpaConfig {}
 ```java
 package com.skinplate.api.global.config;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
-import org.springframework.web.servlet.config.annotation.ResourceHandlerRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
-
-import java.nio.file.Path;
-import java.nio.file.Paths;
 
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
-
-    @Value("${app.storage.base-path}")
-    private String storageBasePath;
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {
@@ -945,14 +929,6 @@ public class WebConfig implements WebMvcConfigurer {
                 .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
                 .maxAge(3600);
-    }
-
-    /** 로컬 파일 시스템에 저장한 업로드 이미지를 /uploads/** 로 서빙한다. */
-    @Override
-    public void addResourceHandlers(ResourceHandlerRegistry registry) {
-        Path uploadDir = Paths.get(storageBasePath).toAbsolutePath().normalize();
-        registry.addResourceHandler("/uploads/**")
-                .addResourceLocations("file:" + uploadDir + "/");
     }
 }
 ```
@@ -1412,9 +1388,6 @@ public class SkinAnalysis extends BaseTimeEntity {
     @JoinColumn(name = "user_id", nullable = false)
     private AppUser user;
 
-    @Column(nullable = false, length = 500)
-    private String imageUrl;
-
     @Column(nullable = false)
     private int skinScore;
 
@@ -1430,14 +1403,12 @@ public class SkinAnalysis extends BaseTimeEntity {
     private String rawAiResponse;
 
     public static SkinAnalysis create(AppUser user,
-                                      String imageUrl,
                                       SkinMetrics metrics,
                                       int skinScore,
                                       String summary,
                                       String rawAiResponse) {
         SkinAnalysis analysis = new SkinAnalysis();
         analysis.user = user;
-        analysis.imageUrl = imageUrl;
         analysis.metrics = metrics;
         analysis.skinScore = Math.max(0, Math.min(100, skinScore));
         analysis.summary = summary;
@@ -1553,7 +1524,10 @@ public class SkinHighlightBuilder {
     //                            key             GOOD           WARN             CAUTION
     private static final Map<String, String[]> LABELS = Map.of(
             "hydration", new String[]{"수분 충분",      "약간 건조",      "건조 주의"},
-            "oil",       new String[]{"유분 균형",      "약간 번들거림",  "유분 과다"},
+            // "유분 과다"가 아니라 "유분 많음". isOily 임계(70 초과)와 CAUTION 경계(정렬점수 40 미만
+            // = 유분 60 초과)가 어긋나므로, 유분 65면 R07 은 안 켜지는데 뱃지만 빨강이 된다.
+            // "유분 과다라면서 왜 튀김 감점이 없죠?"에 답할 수 없다. 문구를 약하게 둔다.
+            "oil",       new String[]{"유분 균형",      "약간 번들거림",  "유분 많음"},
             "redness",   new String[]{"홍조 없음",      "약간 붉음",      "홍조 주의"},
             "trouble",   new String[]{"트러블 없음",    "약간의 트러블",  "트러블 주의"},
             "barrier",   new String[]{"피부 장벽 양호", "장벽 다소 약함", "장벽 손상 주의"});
@@ -1892,9 +1866,6 @@ public class FoodAnalysis extends BaseTimeEntity {
     @JoinColumn(name = "user_id", nullable = false)
     private AppUser user;
 
-    @Column(nullable = false, length = 500)
-    private String imageUrl;
-
     @Column(nullable = false, length = 100)
     private String foodName;
 
@@ -1919,7 +1890,6 @@ public class FoodAnalysis extends BaseTimeEntity {
     private String rawAiResponse;
 
     public static FoodAnalysis create(AppUser user,
-                                      String imageUrl,
                                       String foodName,
                                       String foodCategory,
                                       Nutrition nutrition,
@@ -1928,7 +1898,6 @@ public class FoodAnalysis extends BaseTimeEntity {
                                       String rawAiResponse) {
         FoodAnalysis food = new FoodAnalysis();
         food.user = user;
-        food.imageUrl = imageUrl;
         food.foodName = foodName;
         food.foodCategory = foodCategory;
         food.nutrition = nutrition;
@@ -2189,6 +2158,17 @@ public interface SkinPlateRepository extends JpaRepository<SkinPlate, Long> {
     Optional<SkinPlate> findByIdAndUserId(Long id, Long userId);
 
     List<SkinPlate> findByUserIdOrderByCreatedAtDesc(Long userId);
+
+    @Query("""
+           select p from SkinPlate p
+            where p.user.id = :userId
+              and p.createdAt >= :from
+              and p.createdAt <  :to
+            order by p.createdAt desc
+           """)
+    List<SkinPlate> findByUserIdAndCreatedAtBetween(@Param("userId") Long userId,
+                                                    @Param("from") LocalDateTime from,
+                                                    @Param("to") LocalDateTime to);
 }
 ```
 
@@ -2555,7 +2535,6 @@ public record SkinAnalysisResponse(
         String summary,
         List<HighlightDto> highlights,
         SkinTypeGapDto skinTypeGap,       // 선언 타입이 없으면 null → 키 생략
-        String imageUrl,
         LocalDateTime analyzedAt
 ) {
     public static SkinAnalysisResponse from(SkinAnalysis entity,
@@ -2568,7 +2547,6 @@ public record SkinAnalysisResponse(
                 entity.getSummary(),
                 highlights,
                 skinTypeGap,
-                entity.getImageUrl(),
                 entity.getCreatedAt());
     }
 }
@@ -2638,8 +2616,7 @@ public record FoodAnalysisDto(
         String cookingMethod,
         boolean spicy,
         List<IngredientDto> ingredients,
-        NutritionDto nutrition,
-        String imageUrl
+        NutritionDto nutrition
 ) {
     public static FoodAnalysisDto from(FoodAnalysis entity) {
         return new FoodAnalysisDto(
@@ -2649,8 +2626,7 @@ public record FoodAnalysisDto(
                 entity.getCookingMethod().name(),
                 entity.isSpicy(),
                 entity.getIngredients().stream().map(IngredientDto::from).toList(),
-                NutritionDto.from(entity.getNutrition()),
-                entity.getImageUrl());
+                NutritionDto.from(entity.getNutrition()));
     }
 }
 ```
@@ -2943,11 +2919,22 @@ public PlateSimulateResponse simulate(Long userId, Long plateId, List<PlateActio
     FoodAnalysis copy = simulate(origin, actions);          // 아래 헬퍼
 
     SkinMetrics skin = plate.getSkinAnalysis().getMetrics();
-    PlateEvaluation after = engine.evaluate(new PlateContext(skin, copy));
+
+    // plate.getAppliedRules()는 JSON 문자열이다. 파싱하는 것보다 원본으로 한 번 더 부르는 게 싸다.
+    // 엔진은 DB를 건드리지 않는 순수 계산이므로 재호출이 사실상 공짜다.
+    PlateEvaluation before = engine.evaluate(new PlateContext(skin, origin));
+    PlateEvaluation after  = engine.evaluate(new PlateContext(skin, copy));
 
     return PlateSimulateResponse.of(
             plate.getId(), plate.getPlateScore(), after.score(),
-            actions, removedRuleCodes(plate, after), buildActionSummary(actions));
+            actions, removedRules(before, after), buildActionSummary(actions));
+}
+
+/** 행동으로 사라진 감점 룰. S07 에서 "나트륨 과다 카드가 없어졌다"를 보여주는 데 쓴다. */
+private List<String> removedRules(PlateEvaluation before, PlateEvaluation after) {
+    return before.appliedRuleCodes().stream()
+            .filter(code -> !after.appliedRuleCodes().contains(code))
+            .toList();
 }
 
 /** user = null 인 복사본. 영속성 컨텍스트에 들어가지 않으므로 저장될 길이 없다. */
@@ -2957,7 +2944,6 @@ private FoodAnalysis simulate(FoodAnalysis origin, List<PlateActionCode> actions
 
     FoodAnalysis copy = FoodAnalysis.create(
             null,                                   // ← 저장 불가 상태로 만든다
-            origin.getImageUrl(),
             origin.getFoodName(),
             origin.getFoodCategory(),
             adjustNutrition(origin.getNutrition(), actions),
@@ -3076,14 +3062,18 @@ public final class RuleConstants {
     public static final int R07_FRIED_OIL        = -10;  // 유분 × 튀김
     public static final int R08_OMEGA3_BARRIER   =  7;   // 장벽 약화 × 오메가3
     public static final int R09_PROBIOTIC        =  4;   // 발효식품
-    public static final int R10_HIGH_CALORIE     = -5;   // 고열량 (확장)
+    // ---- R10(고열량)은 미구현이다. 델타와 회복 점수를 쌍으로 남겨둔다. ----
+    // 문서 §18.6 룰표가 R10을 "확장"으로 명시하고 있으므로 상수도 함께 남긴다.
+    // 나중에 넣을 때 값을 다시 정하지 않아도 되고, 지금 지우면 GAIN_LESS_RICE 만
+    // 고아가 되거나(둘은 한 쌍이다) 룰표와 코드가 또 어긋난다.
+    public static final int R10_HIGH_CALORIE     = -5;   // 고열량 (확장 · 미구현)
 
     // ---- 추천 행동 시 회복 점수 ----
     public static final int GAIN_SOUP_HALF       = 8;
     public static final int GAIN_LESS_SPICY      = 6;
     public static final int GAIN_WATER_NOT_SODA  = 7;
     public static final int GAIN_REMOVE_BATTER   = 5;
-    public static final int GAIN_LESS_RICE       = 4;
+    public static final int GAIN_LESS_RICE       = 4;   // R10 쌍 (확장 · 미구현)
 
     // ---- 나트륨 초과량 비례 감점 ----
     public static final int SODIUM_STEP_MG       = 500;  // 500mg 초과마다 1점 추가 감점
@@ -3133,9 +3123,24 @@ public final class SeverityCalculator {
         return NORMAL;
     }
 
-    /** 델타에 계수를 적용하고 반올림한다. */
+    /**
+     * 델타에 계수를 적용하고 반올림한다.
+     *
+     * Math.round 는 .5 를 항상 양의 무한대 쪽으로 올린다(-16.5 → -16).
+     * 그래서 감점에서 .5 가 나오면 의도보다 1점 약해진다.
+     *
+     * 지금은 안전하다 — ×1.2 는 정수에 곱해 .5 가 나올 수 없고(6n/5 는 항상 .0/.2/.4/.6/.8),
+     * ×1.5 에서 .5 가 나오려면 델타가 홀수여야 하는데 현재 홀수 델타는 R08(+7)뿐이고
+     * 양수라 무해하다.
+     *
+     * 문제는 Day 8 튜닝이다. R02 를 -10 → -11 로 바꾸는 순간 -16.5 → -16 이 되어
+     * 룰표보다 1점 약해지고, 그 사실이 아무 데도 안 나타난다.
+     * "감점 상수는 짝수로 유지" 같은 관례는 밤 11시에 기억나지 않는다.
+     * 절댓값으로 반올림하고 부호를 되돌리면 관례 자체가 필요 없어진다.
+     */
     public static int apply(int delta, int metricValue, boolean higherIsWorse) {
-        return (int) Math.round(delta * of(metricValue, higherIsWorse));
+        double raw = delta * of(metricValue, higherIsWorse);
+        return (int) (raw < 0 ? -Math.round(-raw) : Math.round(raw));
     }
 }
 ```
@@ -3712,6 +3717,24 @@ class PlateRuleEngineTest {
     }
 
     @Test
+    @DisplayName("나트륨 초과량에 비례해 감점이 커지고 -15에서 잘린다")
+    void sodiumScalesWithExcess() {
+        // 두 예시(1850·1600)는 초과량이 500 미만이라 비례 분기가 한 번도 돌지 않는다.
+        // Day 8 에 만질 로직이므로 여기서 덮어둔다.
+        FoodAnalysis mild = food("간장국", CookingMethod.BOILED, false,
+                nutrition(300, "5.0", 2100, "2.0"), List.of());     // excess 600 → 8 + 1 = 9
+        FoodAnalysis extreme = food("소금덩어리", CookingMethod.BOILED, false,
+                nutrition(300, "5.0", 9000, "2.0"), List.of());     // excess 7500 → 8 + 15 → 15로 잘림
+
+        SkinMetrics neutral = SkinMetrics.of(50, 50, 50, 50, 50);   // 다른 룰이 안 걸리는 지표
+
+        assertThat(engine.evaluate(new PlateContext(neutral, mild)).score())
+                .isEqualTo(70 - 9);
+        assertThat(engine.evaluate(new PlateContext(neutral, extreme)).score())
+                .isEqualTo(70 - 15);
+    }
+
+    @Test
     @DisplayName("같은 음식이라도 홍조가 심하면 더 크게 감점된다")
     void severityMatters() {
         FoodAnalysis spicy = food("라면", CookingMethod.BOILED, true,
@@ -3728,7 +3751,7 @@ class PlateRuleEngineTest {
     private static FoodAnalysis food(String name, CookingMethod method, boolean spicy,
                                      Nutrition nutrition, List<FoodIngredient> ingredients) {
         FoodAnalysis food = FoodAnalysis.create(
-                null, "http://x/img.jpg", name, "한식", nutrition, method, spicy, "{}");
+                null, name, "한식", nutrition, method, spicy, "{}");
         food.addIngredients(ingredients);
         return food;
     }
@@ -4690,7 +4713,6 @@ class SkinAnalysis {
     required this.summary,
     required this.highlights,
     this.skinTypeGap,
-    required this.imageUrl,
     required this.analyzedAt,
   });
 
@@ -4704,7 +4726,6 @@ class SkinAnalysis {
   /// 이 경우 S05 는 갭 카드 대신 "평소 본인 피부는?" 선택 칩을 띄운다.
   final SkinTypeGap? skinTypeGap;
 
-  final String imageUrl;
   final DateTime analyzedAt;
 }
 
@@ -4818,7 +4839,6 @@ class SkinAnalysisDto with _$SkinAnalysisDto {
     @Default('') String summary,
     @Default(<HighlightDto>[]) List<HighlightDto> highlights,
     SkinTypeGapDto? skinTypeGap,        // 미선택이면 서버가 키를 생략한다
-    required String imageUrl,
     required DateTime analyzedAt,
   }) = _SkinAnalysisDto;
 
@@ -4845,7 +4865,6 @@ extension SkinAnalysisDtoX on SkinAnalysisDto {
                 ))
             .toList(),
         skinTypeGap: skinTypeGap?.toEntity(),
-        imageUrl: imageUrl,
         analyzedAt: analyzedAt,
       );
 }
@@ -4966,7 +4985,6 @@ class FoodAnalysis {
     required this.spicy,
     required this.ingredients,
     required this.nutrition,
-    required this.imageUrl,
   });
 
   final int id;
@@ -4976,7 +4994,6 @@ class FoodAnalysis {
   final bool spicy;
   final List<Ingredient> ingredients;
   final Nutrition nutrition;
-  final String imageUrl;
 }
 
 class Ingredient {
@@ -5104,7 +5121,6 @@ class FoodAnalysisDto with _$FoodAnalysisDto {
     @Default(false) bool spicy,
     @Default(<IngredientDto>[]) List<IngredientDto> ingredients,
     required NutritionDto nutrition,
-    required String imageUrl,
   }) = _FoodAnalysisDto;
 
   factory FoodAnalysisDto.fromJson(Map<String, dynamic> json) =>
@@ -5220,7 +5236,6 @@ extension FoodAnalysisDtoX on FoodAnalysisDto {
           sodiumMg: nutrition.sodiumMg,
           sugarG: nutrition.sugarG.toDouble(),
         ),
-        imageUrl: imageUrl,
       );
 }
 ```
@@ -5552,7 +5567,7 @@ if (_consecutiveFailures >= 3) {
 |---|---|---|---|
 | `POST /auth/signup`<br>`POST /auth/login`<br>`POST /auth/test-login` | `AuthResponse` | `accessToken` · `tokenType` · `expiresIn` · `user{userId,email,nickname}` | `AuthResponseDto` |
 | `GET /auth/me`<br>`PATCH /auth/me` | `MeResponse` | `userId` · `email` · `nickname` · **`declaredSkinType`**(미선택 시 키 생략) · **`isTestAccount`** · `joinedAt` | `MeResponseDto` |
-| `POST /skin/analyses`<br>`GET /skin/analyses/latest`<br>`GET /skin/analyses/{id}` | `SkinAnalysisResponse` | `skinAnalysisId` · `skinScore` · `metrics{5}` · `summary` · `highlights[{label,status}]` · **`skinTypeGap{declared,observed,matched,message}`**(미선택 시 키 생략) · `imageUrl` · `analyzedAt` | `SkinAnalysisDto` |
+| `POST /skin/analyses`<br>`GET /skin/analyses/latest`<br>`GET /skin/analyses/{id}` | `SkinAnalysisResponse` | `skinAnalysisId` · `skinScore` · `metrics{5}` · `summary` · `highlights[{label,status}]` · **`skinTypeGap{declared,observed,matched,message}`**(미선택 시 키 생략) · `analyzedAt` | `SkinAnalysisDto` |
 | `POST /plates`<br>`GET /plates/{id}` | `SkinPlateResponse` | `plateId` · `plateScore` · **`baseScore`** · `summary` · `food{...}` · `feedbacks{good,caution,action}` · `appliedRules[]` · `createdAt` | `SkinPlateDto` |
 | `POST /plates/{id}/simulate` | `PlateSimulateResponse` | `plateId` · `beforeScore` · `afterScore` · `appliedActions[]` · `removedRules[]` · `summary` | `PlateSimulationDto` |
 | `GET /recommendations` | `RecommendationResponse` | `skinAnalysisId` · `recommend[]` · `avoid[]` · `generatedAt` | `RecommendationDto` |
@@ -5577,7 +5592,6 @@ if (_consecutiveFailures >= 3) {
 | 순서 | 만들 것 | 위치 | Day | 비고 |
 |---|---|---|---|---|
 | 1 | `AuthService` · `AuthController` | `domain/auth/` | 2 | `/auth/*` 5종(`PATCH /auth/me` 포함). `testLogin()` 첫 줄에 `if (!enabled) throw TEST_LOGIN_DISABLED` |
-| 2 | `ImageStorage` · `LocalImageStorage` | `infra/storage/` | 2 | 인터페이스로 두면 S3 교체가 구현체 하나 |
 | 3 | `OpenAiVisionClient` + 프롬프트 · JSON Schema | `infra/openai/` | 3~4 | 피부는 `detail:"high"`, 음식은 `"low"`. 18초 단발, 재시도 없음 |
 | 4 | `MockOpenAiVisionClient` | `infra/openai/` | 3 | `@ConditionalOnProperty("app.ai.mock")`. **3번과 같은 날 만든다** — 발표 백업 플랜은 나중에 붙이면 안 붙는다 |
 | 5 | `SkinAnalysisService` | `domain/skin/` | 4 | `SkinScoreCalculator`·`SkinHighlightBuilder`(§1.12.1)·`SkinTypeGapAnalyzer`(§1.12.2)는 완성돼 있다. 조립만. **AI 호출은 트랜잭션 밖** |
@@ -5603,7 +5617,6 @@ docker compose up -d postgres
 cat > .env <<'EOF'
 OPENAI_API_KEY=sk-...
 JWT_SECRET=<openssl rand -base64 48 로 한 번 생성한 고정값>
-STORAGE_BASE_URL=http://10.0.2.2:8080/uploads   # ★ API_BASE_URL 과 같은 호스트
 SPRING_PROFILES_ACTIVE=local
 TEST_ACCOUNT_ENABLED=true
 EOF
@@ -5621,7 +5634,7 @@ dart run build_runner build --delete-conflicting-outputs
 flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8080/api/v1
 ```
 
-> **`STORAGE_BASE_URL`을 빠뜨리면 점수는 뜨는데 방금 찍은 사진만 회색 박스가 된다.** 에뮬레이터에서 `localhost`는 에뮬레이터 자신이기 때문이다. S05·S07 두 화면에 동시에 나타나고 원인 찾는 데 한 시간이 든다.
+> **`android/app/src/main/res/xml/network_security_config.xml`을 Day 2에 넣어라.** 로컬 개발은 HTTP이고 Flutter 디버그 매니페스트는 cleartext를 켜주지 않는다. 빠뜨리면 Day 3 첫 API 호출이 막히고, 그때는 서버를 뒤지게 된다(PRD §9.6).
 
 ---
 
@@ -5640,7 +5653,7 @@ flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8080/api/v1
 | Mock 스위치 | `@Profile("mock")` → **`@ConditionalOnProperty("app.ai.mock")`** 로 통일 |
 | OpenAI | 피부만 `detail:"high"`. 서버 18초 **단발**(재시도 제거), `TimeoutException` 별도 분기 |
 | Flutter 타임아웃 | 30초 → **25초** (서버 18초보다 길되 과하지 않게) |
-| 이미지 URL | `STORAGE_BASE_URL` 기본값을 `10.0.2.2`로. API와 같은 호스트 강제 |
+| 이미지 저장 | **v1.4에서 제거.** 서버는 이미지를 저장하지 않고 Base64로 OpenAI에 보내고 버린다. `imageUrl`·`ImageStorage`·리소스 핸들러·`STORAGE_BASE_URL` 전부 삭제 (PRD §9.6) |
 | 401 처리 | `/auth/` 요청은 인터셉터에서 제외 — 로그인 실패가 리다이렉트를 유발하던 문제 |
 | 트랜잭션 | AI 호출은 트랜잭션 밖, DTO 변환은 `@Transactional(readOnly=true)` 안 |
 | 룰 메시지 | 전부 명사구로 통일 — `buildSummary`가 "…자극합니다입니다" 비문을 만들던 문제 |
@@ -5653,4 +5666,4 @@ flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8080/api/v1
 
 ---
 
-*문서 끝 · Skin Plate DTO & 도메인 구조 v1.3 (PRD v1.4 기준)*
+*문서 끝 · Skin Plate DTO & 도메인 구조 v1.4 (PRD v1.5 기준) — 구현 착수본*
