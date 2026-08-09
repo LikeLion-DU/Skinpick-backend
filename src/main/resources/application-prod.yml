@@ -1,5 +1,8 @@
 app:
-  auth.test-account.enabled: false     # ★ 운영에서는 테스트 계정 비활성화
+  # 리터럴 false 로 두면 프로파일 전용 파일이 application.yml 의 ${TEST_ACCOUNT_ENABLED} 를 이겨서
+  # 환경변수를 켜도 반영되지 않는다. 시연 배포는 prod 프로파일이면서 테스트 계정은 켜야 한다(§9.6).
+  # 기본값은 그대로 꺼진 채로 두고, 환경변수로만 켤 수 있게 한다.
+  auth.test-account.enabled: ${TEST_ACCOUNT_ENABLED:false}
 
 logging.level:
   com.skinplate.api: INFO
