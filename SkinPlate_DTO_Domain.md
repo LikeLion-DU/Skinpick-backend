@@ -514,6 +514,10 @@ public enum ErrorCode {
     FOOD_ANALYSIS_NOT_FOUND(HttpStatus.NOT_FOUND, "음식 분석 결과를 찾을 수 없습니다."),
     PLATE_NOT_FOUND        (HttpStatus.NOT_FOUND, "Skin Plate를 찾을 수 없습니다."),
 
+    // ---- 요청 형식 ----
+    RESOURCE_NOT_FOUND (HttpStatus.NOT_FOUND,          "요청한 경로를 찾을 수 없습니다."),
+    METHOD_NOT_ALLOWED (HttpStatus.METHOD_NOT_ALLOWED, "허용되지 않은 요청 방식입니다."),
+
     // ---- 기타 ----
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "일시적인 오류가 발생했습니다.");
 
@@ -561,10 +565,16 @@ package com.skinplate.api.global.exception;
 import com.skinplate.api.global.common.ApiResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.stream.Collectors;
 
@@ -592,6 +602,47 @@ public class GlobalExceptionHandler {
 
         return ResponseEntity.status(ErrorCode.INVALID_INPUT.getStatus())
                 .body(ApiResponse.fail(ErrorCode.INVALID_INPUT, message));
+    }
+
+    /**
+     * 존재하지 않는 경로. Spring Boot 3.2+ 는 NoResourceFoundException 을 던지는데,
+     * 아래 포괄 핸들러가 이걸 삼키면 모든 오타 경로가 500 이 된다.
+     * 프론트는 "일시적인 오류가 발생했습니다"를 보고 원인을 백엔드에서 찾게 되고,
+     * PRD §8.2 의 "5xx 에러율 ≤ 1%" 지표도 404 로 오염된다.
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNoResource(NoResourceFoundException e) {
+        log.warn("존재하지 않는 경로: {}", e.getResourcePath());
+        return ResponseEntity.status(ErrorCode.RESOURCE_NOT_FOUND.getStatus())
+                .body(ApiResponse.fail(ErrorCode.RESOURCE_NOT_FOUND));
+    }
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMethodNotSupported(
+            HttpRequestMethodNotSupportedException e) {
+        log.warn("허용되지 않은 메서드: {}", e.getMethod());
+        return ResponseEntity.status(ErrorCode.METHOD_NOT_ALLOWED.getStatus())
+                .body(ApiResponse.fail(ErrorCode.METHOD_NOT_ALLOWED));
+    }
+
+    /**
+     * 요청이 잘못된 경우들. 전부 클라이언트 잘못이므로 400 이고 log.warn 이다.
+     * 포괄 핸들러에 맡기면 500 + 스택트레이스가 되어, 프론트 통합 중
+     * 로그가 남의 오타로 가득 찬다.
+     *
+     * MissingServletRequestPartException 이 특히 중요하다 —
+     * multipart 의 파트 이름을 "image" 가 아닌 것으로 보내면 여기 걸린다.
+     */
+    @ExceptionHandler({
+            HttpMessageNotReadableException.class,          // 본문이 없거나 깨진 JSON
+            MethodArgumentTypeMismatchException.class,      // /plates/abc 같은 타입 불일치
+            MissingServletRequestPartException.class,       // multipart 파트 누락
+            MissingServletRequestParameterException.class   // 필수 쿼리 파라미터 누락
+    })
+    public ResponseEntity<ApiResponse<Void>> handleBadRequest(Exception e) {
+        log.warn("잘못된 요청: {}", e.getMessage());
+        return ResponseEntity.status(ErrorCode.INVALID_INPUT.getStatus())
+                .body(ApiResponse.fail(ErrorCode.INVALID_INPUT));
     }
 
     @ExceptionHandler(MaxUploadSizeExceededException.class)
@@ -1043,13 +1094,36 @@ import java.util.List;
 @ConditionalOnProperty(name = "app.auth.test-account.enabled", havingValue = "true")
 public class TestAccountInitializer implements ApplicationRunner {
 
-    /** 슬롯 1 = 발표 시연 전용 / 슬롯 2·3 = 팀 테스트 및 심사위원 체험 */
-    private static final List<TestAccount> ACCOUNTS = List.of(
-            // 슬롯 1은 시연 전용 — 피부 타입을 지성으로 미리 박아둔다.
-            // 실측이 건조(DRY)로 나오므로 S05 에서 자가 진단 갭 코멘트가 바로 뜬다.
-            new TestAccount(1, "test@skinplate.app",  "테스트유저",  SkinType.OILY),
-            new TestAccount(2, "test2@skinplate.app", "테스트유저2", null),
-            new TestAccount(3, "test3@skinplate.app", "테스트유저3", null)
+    /**
+     * ① 슬롯 계정 — 원탭 로그인(POST /auth/test-login) 대상. is_test_account = true
+     * 슬롯 1은 시연 전용이라 피부 타입을 지성으로 미리 박아둔다.
+     * 실측이 건조(DRY)로 나오므로 S05 에서 갭 코멘트가 바로 뜬다.
+     */
+    private static final List<SlotAccount> SLOT_ACCOUNTS = List.of(
+            new SlotAccount(1, "test@skinplate.app",  "테스트유저",  SkinType.OILY),
+            new SlotAccount(2, "test2@skinplate.app", "테스트유저2", null),
+            new SlotAccount(3, "test3@skinplate.app", "테스트유저3", null)
+    );
+
+    /**
+     * ② 개발 계정 — 로그인 폼으로 이메일·비밀번호를 실제 입력해 테스트한다.
+     *    is_test_account = false 라 일반 사용자와 동일한 경로를 탄다.
+     *
+     * 원탭 로그인만 쓰면 S01 로그인 폼과 실패 응답이 한 번도 안 돌아본다.
+     * 피부 타입을 서로 다르게 둬서, 계정만 바꿔 로그인하면
+     * S05 갭 카드의 네 분기를 전부 확인할 수 있다.
+     *
+     *   시연 지표(38/52/64/25/78) → observe() = DRY 기준
+     *     slot 2·3  declared = null   → 갭 카드 없음, 인라인 선택 칩
+     *     dev1      DRY == DRY        → 일치 메시지
+     *     slot 1    OILY vs DRY       → SPECIAL["OILY→DRY"] 전용 문구
+     *     dev2      SENSITIVE vs DRY  → SPECIAL 에 없음 → 폴백 문구
+     *     dev3      UNKNOWN           → "오늘 측정 기준으로는 …에 가깝습니다"
+     */
+    private static final List<DevAccount> DEV_ACCOUNTS = List.of(
+            new DevAccount("dev1@skinplate.app", "개발계정1", SkinType.DRY),
+            new DevAccount("dev2@skinplate.app", "개발계정2", SkinType.SENSITIVE),
+            new DevAccount("dev3@skinplate.app", "개발계정3", SkinType.UNKNOWN)
     );
 
     private final AppUserRepository userRepository;
@@ -1061,37 +1135,70 @@ public class TestAccountInitializer implements ApplicationRunner {
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
-        String encoded = passwordEncoder.encode(password);
+        String encoded = passwordEncoder.encode(password);   // 6개 계정이 같은 해시를 공유한다
 
-        for (TestAccount account : ACCOUNTS) {
-            if (userRepository.existsByEmail(account.email())) continue;
-
-            AppUser user = AppUser.createTestAccount(account.email(), encoded, account.nickname());
-            if (account.skinType() != null) user.declareSkinType(account.skinType());
-
-            userRepository.save(user);
-            log.info("테스트 계정 생성: {} (슬롯 {})", account.email(), account.slot());
+        for (SlotAccount a : SLOT_ACCOUNTS) {
+            create(a.email(), encoded, a.nickname(), a.skinType(), true, "슬롯 " + a.slot());
+        }
+        for (DevAccount a : DEV_ACCOUNTS) {
+            create(a.email(), encoded, a.nickname(), a.skinType(), false, "개발 계정");
         }
     }
 
-    /** slot 번호로 이메일을 찾는다. AuthService의 test-login에서 사용. */
-    public static String emailOfSlot(int slot) {
-        return ACCOUNTS.stream()
-                .filter(a -> a.slot() == slot)
-                .findFirst()
-                .map(TestAccount::email)
-                .orElse(ACCOUNTS.get(0).email());
+    private void create(String email, String encodedPassword, String nickname,
+                        SkinType skinType, boolean testAccount, String label) {
+
+        if (userRepository.existsByEmail(email)) return;      // 멱등
+
+        AppUser user = testAccount
+                ? AppUser.createTestAccount(email, encodedPassword, nickname)
+                : AppUser.create(email, encodedPassword, nickname);
+
+        if (skinType != null) user.declareSkinType(skinType);
+
+        userRepository.save(user);
+        log.info("계정 생성: {} ({})", email, label);
     }
 
-    public record TestAccount(int slot, String email, String nickname, SkinType skinType) {}
+    /**
+     * slot 번호로 이메일을 찾는다. AuthService 의 test-login 에서만 쓴다.
+     * 개발 계정(dev*)은 원탭 로그인 대상이 아니다 — 로그인 폼으로만 들어간다.
+     */
+    public static String emailOfSlot(int slot) {
+        return SLOT_ACCOUNTS.stream()
+                .filter(a -> a.slot() == slot)
+                .findFirst()
+                .map(SlotAccount::email)
+                .orElse(SLOT_ACCOUNTS.get(0).email());
+    }
+
+    public record SlotAccount(int slot, String email, String nickname, SkinType skinType) {}
+
+    public record DevAccount(String email, String nickname, SkinType skinType) {}
 }
 ```
 
-| 슬롯 | 이메일 | 비밀번호 | 용도 |
+**① 슬롯 계정 — 원탭 로그인용** (`is_test_account = true`)
+
+| 슬롯 | 이메일 | 비밀번호 | 피부 타입 | 용도 |
+|---|---|---|---|---|
+| 1 | `test@skinplate.app` | `test1234!` | `OILY` | **발표 시연 전용** — 리허설 데이터를 남기지 않는다 |
+| 2 | `test2@skinplate.app` | `test1234!` | 미설정 | 팀 내부 테스트 |
+| 3 | `test3@skinplate.app` | `test1234!` | 미설정 | 심사위원 직접 체험 |
+
+**② 개발 계정 — 로그인 폼 입력용** (`is_test_account = false`)
+
+| 이메일 | 비밀번호 | 피부 타입 | 확인 가능한 갭 분기 |
 |---|---|---|---|
-| 1 | `test@skinplate.app` | `test1234!` | **발표 시연 전용** — 리허설 데이터를 남기지 않는다 |
-| 2 | `test2@skinplate.app` | `test1234!` | 팀 내부 테스트 |
-| 3 | `test3@skinplate.app` | `test1234!` | 심사위원 직접 체험 |
+| `dev1@skinplate.app` | `test1234!` | `DRY` | **일치** — "평소 생각하신 건성 그대로입니다" |
+| `dev2@skinplate.app` | `test1234!` | `SENSITIVE` | **불일치 폴백** — "평소 민감성이라고 생각하셨지만, 오늘 측정은 건성에…" |
+| `dev3@skinplate.app` | `test1234!` | `UNKNOWN` | **모름** — "오늘 측정 기준으로는 건성에 가깝습니다" |
+
+> **여섯 개가 같은 비밀번호를 쓴다.** 계정별로 다르게 두면 아무도 못 외우고 결국 어딘가에 적어두게 된다. `TEST_ACCOUNT_ENABLED=false`면 전부 안 생긴다.
+>
+> **개발 계정이 따로 필요한 이유** — 원탭 로그인만 쓰면 **S01 로그인 폼이 한 번도 안 돌아본다.** 이메일 형식 검증, 비밀번호 불일치 응답(`INVALID_CREDENTIALS`), 폼 에러 표시가 전부 미검증인 채로 Day 8까지 갈 수 있다. `dev*` 계정이 그 경로를 강제로 지나가게 한다.
+>
+> 피부 타입을 셋 다 다르게 둔 덕에 **계정만 바꿔 로그인하면 S05 갭 카드의 네 분기를 전부 눈으로 확인**할 수 있다. 분기마다 지표를 조작할 필요가 없다.
 
 ---
 
