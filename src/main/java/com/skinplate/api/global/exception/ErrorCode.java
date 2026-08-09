@@ -30,6 +30,10 @@ public enum ErrorCode {
     FOOD_ANALYSIS_NOT_FOUND(HttpStatus.NOT_FOUND, "음식 분석 결과를 찾을 수 없습니다."),
     PLATE_NOT_FOUND        (HttpStatus.NOT_FOUND, "Skin Plate를 찾을 수 없습니다."),
 
+    // ---- 요청 오류 ----
+    RESOURCE_NOT_FOUND (HttpStatus.NOT_FOUND,          "요청한 경로를 찾을 수 없습니다."),
+    METHOD_NOT_ALLOWED (HttpStatus.METHOD_NOT_ALLOWED, "허용되지 않은 요청 방식입니다."),
+
     // ---- 기타 ----
     INTERNAL_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "일시적인 오류가 발생했습니다.");
 

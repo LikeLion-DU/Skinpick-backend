@@ -1703,7 +1703,11 @@ public class Recommendation extends BaseTimeEntity {
 | `SKIN_ANALYSIS_NOT_FOUND` | 404 | 기준 피부 분석 없음 |
 | `AI_ANALYSIS_FAILED` | 502 | OpenAI 호출 실패 |
 | `AI_TIMEOUT` | 504 | OpenAI 타임아웃 |
+| `RESOURCE_NOT_FOUND` | 404 | 존재하지 않는 경로 |
+| `METHOD_NOT_ALLOWED` | 405 | 허용되지 않은 HTTP 메서드 |
 | `INTERNAL_ERROR` | 500 | 기타 |
+
+> **`@ExceptionHandler(Exception.class)` 포괄 핸들러가 요청 오류를 삼키지 않게 한다.** 경로 오타·메서드 오류·multipart 파트 이름 오타는 전부 클라이언트 잘못인데, 포괄 핸들러에 맡기면 500 + 스택트레이스가 된다. 프론트는 "일시적인 오류가 발생했습니다"를 보고 원인을 백엔드에서 찾고, §8.2의 **5xx 에러율 ≤ 1% 지표도 오염**된다. 구현은 설계서 §1.7 참조.
 
 ---
 
@@ -2574,11 +2578,27 @@ public class TestAccountInitializer implements ApplicationRunner {
 
 **계정 목록**
 
-| 슬롯 | 이메일 | 비밀번호 | 닉네임 | 용도 |
+**① 슬롯 계정 — 원탭 로그인용** (`is_test_account = true`)
+
+| 슬롯 | 이메일 | 비밀번호 | 피부 타입 | 용도 |
 |---|---|---|---|---|
-| 1 | `test@skinplate.app` | `test1234!` | 테스트유저 | **발표 시연 전용** · 피부 타입 `OILY` 사전 설정 |
-| 2 | `test2@skinplate.app` | `test1234!` | 테스트유저2 | 팀 내부 테스트 |
-| 3 | `test3@skinplate.app` | `test1234!` | 테스트유저3 | 심사위원 직접 체험용 |
+| 1 | `test@skinplate.app` | `test1234!` | `OILY` | **발표 시연 전용** — 리허설 데이터를 남기지 않는다 |
+| 2 | `test2@skinplate.app` | `test1234!` | 미설정 | 팀 내부 테스트 |
+| 3 | `test3@skinplate.app` | `test1234!` | 미설정 | 심사위원 직접 체험 |
+
+**② 개발 계정 — 로그인 폼 입력용** (`is_test_account = false`)
+
+| 이메일 | 비밀번호 | 피부 타입 | 확인 가능한 갭 분기 |
+|---|---|---|---|
+| `dev1@skinplate.app` | `test1234!` | `DRY` | **일치** — "평소 생각하신 건성 그대로입니다" |
+| `dev2@skinplate.app` | `test1234!` | `SENSITIVE` | **불일치 폴백** — "평소 민감성이라고 생각하셨지만, 오늘 측정은 건성에…" |
+| `dev3@skinplate.app` | `test1234!` | `UNKNOWN` | **모름** — "오늘 측정 기준으로는 건성에 가깝습니다" |
+
+> **여섯 개가 같은 비밀번호를 쓴다.** 계정별로 다르게 두면 아무도 못 외우고 결국 어딘가에 적어두게 된다. `TEST_ACCOUNT_ENABLED=false`면 전부 안 생긴다.
+>
+> **개발 계정이 따로 필요한 이유** — 원탭 로그인만 쓰면 **S01 로그인 폼이 한 번도 안 돌아본다.** 이메일 형식 검증, 비밀번호 불일치 응답(`INVALID_CREDENTIALS`), 폼 에러 표시가 전부 미검증인 채로 Day 8까지 갈 수 있다. `dev*` 계정이 그 경로를 강제로 지나가게 한다.
+>
+> 피부 타입을 셋 다 다르게 둔 덕에 **계정만 바꿔 로그인하면 S05 갭 카드의 네 분기를 전부 눈으로 확인**할 수 있다. 분기마다 지표를 조작할 필요가 없다.
 
 > **슬롯 1은 발표 직전에 데이터를 초기화하고 손대지 않는다.** 리허설로 쌓인 기록이 무대 위 화면에 나타나는 것만큼 김빠지는 일이 없다. 팀원 테스트는 슬롯 2·3에서 한다.
 
