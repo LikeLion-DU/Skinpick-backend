@@ -11,6 +11,7 @@ Flutter 앱은 별도 저장소. 배포는 Docker + PaaS(HTTPS 자동 발급).
 | `SkinPlate_PRD.md` (v1.4) | 요구사항 · API 명세 · 룰 정의표 · 10일 일정 · 리스크 |
 | `SkinPlate_DTO_Domain.md` | Entity · DTO · Rule Engine 스켈레톤 (파일 단위 코드) |
 
+- **문서 원본은 저장소의 이 파일들이다.** 작업 전 **버전 헤더를 확인**하고, 손에 든 사본이 더 최신이면 저장소를 먼저 교체한다 — 오래된 사본으로 리뷰하면 이미 고친 것이 계속 지적된다.
 - **두 문서가 어긋나면 설계서(`_DTO_Domain`)를 따른다.**
 - 설계서에 이미 있는 클래스는 새로 쓰지 말고 **그대로 옮긴다.** 개선하지 마라.
 - 코드가 문서와 어긋나면 그 자리에서 문서를 고친다. 어긋난 채로 두지 않는다.
@@ -67,6 +68,13 @@ docker compose up -d postgres
 set -a && source .env && set +a      # JWT_SECRET 은 한 번 만들어 고정
 ./gradlew bootRun                    # "테스트 계정 생성: test@skinplate.app" 이 뜨면 정상
 ./gradlew test --tests '*PlateRuleEngineTest'   # 60점 / 87점 재현
+
+# 스키마 불변식 확인 — validate 는 테이블·컬럼·타입만 본다. 인덱스·CHECK·UNIQUE 는 안 본다.
+# idx_app_user_email(lower(email)) = 대소문자 중복 가입 차단 / food_analysis_id UNIQUE = 음식 1장 = Plate 1건
+docker exec -i skinplate-db psql -U skinplate -d skinplate -tAc \
+  "select indexname from pg_indexes where schemaname='public' order by 1;
+   select conname, contype::text from pg_constraint
+    where connamespace='public'::regnamespace and contype in ('c','u') order by conname;"
 ```
 
 ## Git / PR
