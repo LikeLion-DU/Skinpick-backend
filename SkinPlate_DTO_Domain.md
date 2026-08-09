@@ -4614,6 +4614,8 @@ enum RecommendationType {
 **`lib/features/auth/domain/entities/auth_user.dart`**
 
 ```dart
+import '../../../../shared/enums/skin_type.dart';
+
 class AuthUser {
   const AuthUser({
     required this.userId,
@@ -5016,6 +5018,7 @@ abstract interface class SkinRepository {
 ```dart
 import '../../../../shared/enums/cooking_method.dart';
 import '../../../../shared/enums/ingredient_tag.dart';
+import '../../../../shared/enums/plate_action_code.dart';
 
 class SkinPlate {
   const SkinPlate({
@@ -5187,6 +5190,7 @@ import 'package:freezed_annotation/freezed_annotation.dart';
 
 import '../../../../shared/enums/cooking_method.dart';
 import '../../../../shared/enums/ingredient_tag.dart';
+import '../../../../shared/enums/plate_action_code.dart';
 import '../../domain/entities/skin_plate.dart' as domain;
 
 part 'plate_dtos.freezed.dart';
@@ -5355,6 +5359,7 @@ extension FoodAnalysisDtoX on FoodAnalysisDto {
 import 'dart:io';
 
 import '../../../../core/result/result.dart';
+import '../../../../shared/enums/plate_action_code.dart';
 import '../entities/skin_plate.dart';
 
 abstract interface class PlateRepository {
