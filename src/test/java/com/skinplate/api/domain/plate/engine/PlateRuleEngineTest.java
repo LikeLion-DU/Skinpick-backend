@@ -56,6 +56,24 @@ class PlateRuleEngineTest {
     }
 
     @Test
+    @DisplayName("나트륨 초과량에 비례해 감점이 커지고 -15에서 잘린다")
+    void sodiumScalesWithExcess() {
+        // 두 예시(1850·1600)는 초과량이 500 미만이라 비례 분기가 한 번도 돌지 않는다.
+        // Day 8 에 만질 로직이므로 여기서 덮어둔다.
+        FoodAnalysis mild = food("간장국", CookingMethod.BOILED, false,
+                nutrition(300, "5.0", 2100, "2.0"), List.of());     // excess 600 → 8 + 1 = 9
+        FoodAnalysis extreme = food("소금덩어리", CookingMethod.BOILED, false,
+                nutrition(300, "5.0", 9000, "2.0"), List.of());     // excess 7500 → 8 + 15 → 15로 잘림
+
+        SkinMetrics neutral = SkinMetrics.of(50, 50, 50, 50, 50);   // 다른 룰이 안 걸리는 지표
+
+        assertThat(engine.evaluate(new PlateContext(neutral, mild)).score())
+                .isEqualTo(70 - 9);
+        assertThat(engine.evaluate(new PlateContext(neutral, extreme)).score())
+                .isEqualTo(70 - 15);
+    }
+
+    @Test
     @DisplayName("같은 음식이라도 홍조가 심하면 더 크게 감점된다")
     void severityMatters() {
         FoodAnalysis spicy = food("라면", CookingMethod.BOILED, true,

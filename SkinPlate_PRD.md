@@ -5,8 +5,8 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | v1.4 |
-| 작성일 | 2026-08-07 · **v1.4 개정 2026-08-09** (2차 리뷰 반영 + 배포 전제 확정) |
+| 문서 버전 | v1.5 |
+| 작성일 | 2026-08-07 · **v1.5 개정 2026-08-09** (3차 리뷰 반영 · **구현 착수 승인본**) |
 | 문서 범위 | 제품 요구사항(PRD) + 기술 설계(Architecture / API / DB / Rule Engine) |
 | 개발 기간 | 10일 (해커톤) |
 | 대상 플랫폼 | Android / iOS (Flutter) |
@@ -589,8 +589,7 @@ flowchart TB
    → multipart 업로드
 [Backend] 수신
    → 검증 (MIME, ≤5MB)
-   → 저장 (Local FS: /uploads/{yyyy}/{MM}/{uuid}.jpg)
-   → Base64 인코딩
+   → Base64 인코딩        ★ 저장하지 않는다 (§9.6)
    → OpenAI Vision 호출 (피부 detail: "high" / 음식 detail: "low")
    → JSON 파싱 → DB 저장
 ```
@@ -649,7 +648,11 @@ flowchart TB
 | iOS 추가 작업 | `pod install` + 카메라 권한 문구 — 30분 |
 | 런타임 | 프레임당 20~40ms, 온디바이스 |
 
-> **Day 8 이후에는 붙이지 마라.** 네이티브 의존성이 추가되는 작업이라 빌드가 깨지면 복구에 시간이 든다. Day 5~6이 마지노선이다.
+> **컷오프: Day 6 종료 시점, FE-A가 판단해 팀에 통보한다.** 게이트가 그때까지 안 끝나면 **정적 얼굴 가이드 오버레이(원형 프레임 + "밝은 곳에서 정면으로 찍어주세요", 1시간)** 로 전환하고 게이트는 Phase 2로 넘긴다.
+>
+> 사람과 시각을 박아두지 않으면 Day 7까지 끌다가 **둘 다 못 한다.** 네이티브 의존성이 추가되는 작업이라 빌드가 깨지면 복구에 시간이 들고, Day 8은 기능 동결일이다.
+>
+> 오버레이로 전환해도 `detail:"high"`는 그대로 유지한다. 크롭이 없어도 `low`보다는 확실히 낫고, 심사 답변은 "온디바이스 크롭은 Phase 2, 지금은 촬영 가이드로 입력 분산을 줄입니다"로 정직하게 간다.
 
 #### 심사 포인트
 
@@ -682,7 +685,20 @@ flowchart TB
 | 클라우드 VM(EC2 등) + nginx | ❌ 인증서 발급·갱신·리버스 프록시 설정에 반나절. 해커톤에서 그 시간은 없다 |
 | 노트북 + ngrok | ⚠️ 백업으로만. HTTPS는 되지만 무료 플랜은 URL이 재기동마다 바뀌어 릴리즈 빌드에 못 박을 수 없다 |
 
-> **HTTPS를 자동으로 받는 것이 이 선택의 전부다.** 그것 하나로 `network_security_config.xml`, cleartext 예외, 인증서 작업이 전부 불필요해진다. 리스크 R16이 소멸한다.
+> **HTTPS를 자동으로 받는 것이 이 선택의 전부다.** 배포본에서는 인증서 작업도, cleartext 예외도 필요 없다.
+>
+> **단, 로컬 개발은 여전히 HTTP다.** Day 2~5의 `http://10.0.2.2:8080`이 그대로 남아 있고, Flutter 디버그 매니페스트는 `INTERNET` 권한만 추가할 뿐 `usesCleartextTraffic`을 켜지 않는다. **Day 3 첫 API 호출에서 막히면 "서버가 안 떴나" 하고 백엔드를 뒤진다.** 10분이면 끝나므로 Day 2에 미리 넣는다.
+
+```xml
+<!-- android/app/src/main/res/xml/network_security_config.xml -->
+<!-- 개발 호스트만 예외. 배포 도메인은 HTTPS이므로 여기 넣지 않는다. -->
+<network-security-config>
+  <domain-config cleartextTrafficPermitted="true">
+    <domain includeSubdomains="false">10.0.2.2</domain>
+    <domain includeSubdomains="false">localhost</domain>
+  </domain-config>
+</network-security-config>
+```
 
 이에 따라 **API도 컨테이너화한다.** §9.3에서 "API는 컨테이너화하지 않는다"고 적었던 것은 노트북 시연 전제였고, 지금은 무효다.
 
@@ -703,19 +719,36 @@ ENTRYPOINT ["java","-jar","/app.jar"]
 
 배포 환경에서 로컬 파일 시스템은 컨테이너를 재시작하면 사라진다. 볼륨을 붙이거나 S3를 쓰면 되지만, **더 간단한 답이 있다.**
 
-> **결과 화면은 서버가 준 `imageUrl`이 아니라 앱이 방금 찍은 로컬 파일을 표시한다.**
+> **서버는 이미지를 저장하지 않는다.** 받아서 Base64로 OpenAI에 보내고 버린다.
 
-- S05·S07에서 보여줄 사진은 **사용자가 30초 전에 촬영한 것**이고, 그 파일은 앱 안에 이미 있다
-- 히스토리(S09)를 잘라냈으므로 **서버 이미지를 다시 꺼내 볼 화면이 없다**
-- `imageUrl`은 응답에 남기되 **시연 경로가 그것에 의존하지 않는다**
+두 결정이 이미 내려진 뒤라 **저장된 이미지를 읽을 소비자가 하나도 남지 않았다.**
 
-이 결정 하나로 **호스트 불일치(R17)와 배포 환경 이미지 유실이 동시에 사라진다.** 서버는 이미지를 저장하되, 저장이 깨져도 시연은 멀쩡하다.
+| 결정 | 결과 |
+|---|---|
+| 결과 화면은 앱이 30초 전에 찍은 **로컬 파일**을 표시 | S05·S07이 서버 이미지를 안 쓴다 |
+| 히스토리(S09) 제외 | 과거 사진을 다시 꺼내 볼 화면이 없다 |
+
+그런데도 `ImageStorage` · 리소스 핸들러 · `/uploads/**` 공개 · `STORAGE_BASE_URL`을 만들면, **아무도 안 읽는 데이터를 PaaS 컨테이너 재배포마다 잃는 코드**를 유지하게 된다.
+
+```java
+byte[] bytes = image.getBytes();            // 저장하지 않는다
+String base64 = Base64.getEncoder().encodeToString(bytes);
+OpenAiSkinResult ai = visionClient.analyzeSkin(base64);
+```
+
+**이 결정이 주는 것 세 가지**
+
+1. **반나절 회수** — `ImageStorage`·`LocalImageStorage`·`WebConfig` 리소스 핸들러·`STORAGE_BASE_URL` 전부 불필요
+2. **리스크 소멸** — 호스트 불일치(R17)와 배포 환경 이미지 유실이 함께 사라진다
+3. **심사 답변 확보** — *"얼굴 사진은 서버에 저장하지 않습니다. 분석에만 쓰고 버립니다."* 피부 사진이라 이 답이 실제로 세다
+
+디버깅은 `raw_ai_response`(jsonb)가 DB에 남으므로 그대로 된다. Phase 2에서 히스토리를 만들 때 저장을 붙이면 되고, **지금 안 만들 거면 지금 없는 게 맞다.**
 
 #### 환경별 설정 3벌
 
 | 환경 | `SPRING_PROFILES_ACTIVE` | 테스트 계정 | `API_BASE_URL` |
 |---|---|---|---|
-| 로컬 개발 | `local` | 활성 | `http://10.0.2.2:8080/api/v1` |
+| 로컬 개발 | `local` | 활성 | `http://10.0.2.2:8080/api/v1` (cleartext 예외 필요) |
 | 배포 (시연) | `prod` + `TEST_ACCOUNT_ENABLED=true` | **활성** | `https://{도메인}/api/v1` |
 | 배포 (실서비스) | `prod` | 비활성 | 〃 |
 
@@ -1127,9 +1160,7 @@ src/main/java/com/skinplate/api/
     │   │   ├── OpenAiSkinResult.java
     │   │   └── OpenAiFoodResult.java
     │   └── exception/OpenAiClientException.java
-    └── storage/
-        ├── ImageStorage.java                   # 인터페이스
-        └── LocalImageStorage.java              # 구현 (S3 교체 지점)
+    # infra/storage 는 만들지 않는다 — 서버가 이미지를 저장하지 않는다 (§9.6)
 
 src/main/resources/
 ├── application.yml
@@ -1189,7 +1220,6 @@ erDiagram
     SKIN_ANALYSIS {
         bigint id PK
         bigint user_id FK
-        varchar image_url
         int skin_score "0-100"
         int hydration "0-100"
         int oil "0-100"
@@ -1204,7 +1234,6 @@ erDiagram
     FOOD_ANALYSIS {
         bigint id PK
         bigint user_id FK
-        varchar image_url
         varchar food_name
         varchar food_category
         int calories_kcal
@@ -1396,9 +1425,6 @@ public class SkinAnalysis extends BaseTimeEntity {
     @JoinColumn(name = "user_id", nullable = false)
     private AppUser user;
 
-    @Column(nullable = false, length = 500)
-    private String imageUrl;
-
     @Column(nullable = false)
     private int skinScore;
 
@@ -1412,12 +1438,11 @@ public class SkinAnalysis extends BaseTimeEntity {
     @Column(columnDefinition = "jsonb")
     private String rawAiResponse;
 
-    public static SkinAnalysis create(AppUser user, String imageUrl,
+    public static SkinAnalysis create(AppUser user,
                                       SkinMetrics metrics, int skinScore,
                                       String summary, String raw) {
         SkinAnalysis s = new SkinAnalysis();
         s.user = user;
-        s.imageUrl = imageUrl;
         s.metrics = metrics;
         s.skinScore = skinScore;
         s.summary = summary;
@@ -1464,9 +1489,6 @@ public class FoodAnalysis extends BaseTimeEntity {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
     private AppUser user;
-
-    @Column(nullable = false, length = 500)
-    private String imageUrl;
 
     @Column(nullable = false, length = 100)
     private String foodName;
@@ -1638,7 +1660,7 @@ public class Recommendation extends BaseTimeEntity {
 |---|---|
 | Base URL | `https://{host}/api/v1` |
 | 인증 | **JWT Bearer.** 헤더 `Authorization: Bearer {accessToken}` |
-| 인증 예외 경로 | `/auth/signup`, `/auth/login`, `/auth/test-login`, `/health`, `/uploads/**`, `/swagger-ui/**`, `/v3/api-docs/**` |
+| 인증 예외 경로 | `/auth/signup`, `/auth/login`, `/auth/test-login`, `/health`, `/swagger-ui/**`, `/v3/api-docs/**` |
 | Content-Type | `application/json` / 업로드는 `multipart/form-data` |
 | 문자 인코딩 | UTF-8 |
 | 이미지 제한 | JPEG/PNG, 최대 5MB |
@@ -1903,7 +1925,6 @@ public class Recommendation extends BaseTimeEntity {
       "matched": false,
       "message": "지성이라고 생각하셨지만 오늘은 유분보다 수분 부족이 두드러집니다. 유분기는 수분이 모자랄 때도 늘어날 수 있습니다."
     },
-    "imageUrl": "https://.../uploads/2026/08/abc.jpg",
     "analyzedAt": "2026-08-07T12:30:00"
   },
   "error": null
@@ -1974,7 +1995,6 @@ public class Recommendation extends BaseTimeEntity {
         "sodiumMg": 1850,
         "sugarG": 6.2
       },
-      "imageUrl": "https://.../uploads/2026/08/def.jpg"
     },
     "feedbacks": {
       "good": [
@@ -2207,7 +2227,6 @@ public record SkinAnalysisResponse(
         String summary,
         List<HighlightDto> highlights,
         SkinTypeGapDto skinTypeGap,      // 선언 타입이 없으면 null → 키 생략
-        String imageUrl,
         LocalDateTime analyzedAt
 ) {
     public static SkinAnalysisResponse from(SkinAnalysis e,
@@ -2220,7 +2239,6 @@ public record SkinAnalysisResponse(
                 e.getSummary(),
                 highlights,
                 gap,
-                e.getImageUrl(),
                 e.getCreatedAt()
         );
     }
@@ -2286,8 +2304,7 @@ public record FoodAnalysisDto(
         String cookingMethod,
         boolean spicy,
         List<IngredientDto> ingredients,
-        NutritionDto nutrition,
-        String imageUrl
+        NutritionDto nutrition
 ) {}
 
 public record IngredientDto(String name, String tag) {}
@@ -2310,7 +2327,6 @@ class SkinAnalysisDto with _$SkinAnalysisDto {
     required SkinMetricsDto metrics,
     @Default('') String summary,
     @Default(<HighlightDto>[]) List<HighlightDto> highlights,
-    required String imageUrl,
     required DateTime analyzedAt,
   }) = _SkinAnalysisDto;
 
@@ -2336,7 +2352,6 @@ extension SkinAnalysisDtoX on SkinAnalysisDto {
                   status: HighlightStatus.fromJson(h.status),
                 ))
             .toList(),
-        imageUrl: imageUrl,
         analyzedAt: analyzedAt,
       );
 }
@@ -2408,7 +2423,6 @@ public class SecurityConfig {
                     "/api/v1/auth/login",
                     "/api/v1/auth/test-login",
                     "/api/v1/health",
-                    "/uploads/**",
                     "/swagger-ui/**", "/v3/api-docs/**"
                 ).permitAll()
                 .anyRequest().authenticated()               // ★ 기본이 인증 필요
@@ -2636,15 +2650,12 @@ sequenceDiagram
     participant F as Flutter
     participant C as Controller
     participant S as SkinAnalysisService
-    participant ST as ImageStorage
     participant O as OpenAiVisionClient
     participant AI as OpenAI gpt-4o
     participant D as PostgreSQL
 
     F->>C: POST /skin/analyses (multipart)<br/>Authorization: Bearer …
     C->>S: analyze(userId, file)
-    S->>ST: store(file)
-    ST-->>S: imageUrl
     S->>O: analyzeSkin(base64)
     O->>AI: chat.completions<br/>(image + json_schema)
     AI-->>O: 구조화 JSON
@@ -2701,7 +2712,9 @@ public class OpenAiVisionClient {
                 .bodyValue(body)
                 .retrieve()
                 .bodyToMono(JsonNode.class)
-                .timeout(Duration.ofSeconds(18))          // 재시도 없음 — 아래 설명
+                .timeout(Duration.ofSeconds(18))          // 타임아웃은 재시도하지 않는다
+                .retryWhen(Retry.fixedDelay(1, Duration.ofSeconds(2))
+                        .filter(e -> e instanceof WebClientResponseException.TooManyRequests))
                 .map(this::extractContent)
                 .map(json -> parse(json, OpenAiSkinResult.class))
                 .onErrorMap(TimeoutException.class,
@@ -2719,7 +2732,8 @@ public class OpenAiVisionClient {
 
 | 결정 | 근거 |
 |---|---|
-| 서버 18초 단발 (재시도 제거) | 재시도 포함 최악 `20+2+20 = 42초`인데 앱 타임아웃은 25초다. **서버는 살아서 GPT를 붙들고 있는데 앱은 이미 포기한 상태**가 된다. 사용자가 재시도를 누르면 또 42초가 시작된다. 해커톤에서 재시도는 대기만 늘리고 성공률은 거의 안 올린다 |
+| **타임아웃은 재시도하지 않는다** | 재시도 포함 최악 `20+2+20 = 42초`인데 앱 타임아웃은 25초다. **서버는 살아서 GPT를 붙들고 있는데 앱은 이미 포기한 상태**가 된다. 사용자가 재시도를 누르면 또 42초가 시작된다 |
+| **429는 재시도한다** | 예산이 남는 것과 초당 처리량 상한(TPM)은 다른 축이다. `detail:"high"`로 요청당 토큰이 커진 만큼 상한에 더 빨리 닿는다. 팀 4명이 동시에 개발하는 Day 3~5, 표준 10종을 반복 호출하는 Day 8 캘리브레이션이 위험 구간이다. **429는 응답이 즉시 오므로 재시도해도 최악 `0.1+2+18 ≈ 20초`** — 클라이언트 25초 안에 들어온다. 재시도가 유일한 정답인 에러를 타임아웃과 같이 묶어 없애면, 예산이 84% 남은 채로 "분석에 실패했습니다"가 뜬다 |
 | 클라이언트 25초 | 서버 18초 + 이미지 업로드·응답 여유 |
 | `TimeoutException` 별도 분기 | `onErrorMap`을 무차별로 걸면 타임아웃도 `AI_ANALYSIS_FAILED`(502)가 되어 **`AI_TIMEOUT`(504)이 영영 발생하지 않는다.** 앱의 재시도 UX 분기가 통째로 도달 불가 코드가 된다 |
 | 피부는 `detail: "high"` | `low`는 이미지를 512×512 한 타일로 다운샘플한다. 그 해상도로 홍조 62와 88을 구분하는 건 근거가 없는데, **이 제품의 개인화 전체(severityFactor)가 그 숫자에 얹혀 있다.** 음식은 "김치찌개인가"만 알면 되므로 `low`로 충분하다 |
@@ -2819,7 +2833,8 @@ public class OpenAiVisionClient {
 | 상황 | 처리 |
 |---|---|
 | 타임아웃 (18초 초과) | `AI_TIMEOUT`(504) 반환, 앱은 재시도 버튼 노출 |
-| 5xx / 429 | **재시도 없이** 즉시 `AI_ANALYSIS_FAILED`(502) |
+| 5xx | **재시도 없이** 즉시 `AI_ANALYSIS_FAILED`(502) |
+| **429 (rate limit)** | **2초 후 1회 재시도.** 실패하면 `AI_ANALYSIS_FAILED` |
 | `faceDetected: false` | `FACE_NOT_DETECTED` 422 → "밝은 곳에서 다시 촬영" 안내 |
 | `foodDetected: false` | `FOOD_NOT_DETECTED` 422 |
 | 스키마 파싱 실패 | 원본을 `raw_ai_response`에 기록 후 `AI_ANALYSIS_FAILED` |
@@ -2860,7 +2875,7 @@ public class MockOpenAiVisionClient implements VisionClient {
 조직 크레딧 **$100 기준 약 5,500회**를 돌릴 수 있다. 개발 10일간 하루 80회(800회) + 리허설 50회 + 심사위원 체험 30회를 다 합쳐도 **$16, 예산의 16%**다.
 
 > **예산은 제약이 아니다.** 그래서 피부 분석을 `detail:"high"`로 올리는 결정에 비용 부담이 없고, 일일 호출 제한(30회)도 개발을 방해하기만 한다. 제한 로직을 만드는 데 쓸 반나절을 다른 데 쓰는 편이 낫다.
-| 호출 제한 | 사용자당 일 30회 | **미구현.** 아래 산정대로 예산이 남으므로 해커톤 범위에서는 불필요하다 |
+| ~~호출 제한~~ | — | **만들지 않는다.** 아래 산정대로 예산의 16%만 쓴다. 제한 로직은 개발만 방해한다 |
 
 ---
 
@@ -3009,7 +3024,7 @@ public class PlateRuleEngine {
 | **R03** | 트러블(trouble>60) × 당류>25g | **-12** | CAUTION | 당류 과다 | 단 음료 대신 물을 곁들이세요 (+7) |
 | **R04** | 나트륨 > 1500mg | **-8** | CAUTION | 나트륨 과다 | **국물을 절반만 남기면 점수가 상승합니다 (+8)** |
 | **R05** | 단백질 ≥ 20g | **+6** | GOOD | 단백질 충분 | — |
-| **R06** | VITAMIN_C / ANTIOXIDANT 재료 포함 | **+5** | GOOD | 비타민 풍부 | — |
+| **R06** | VITAMIN_C / **VITAMIN_A** / ANTIOXIDANT 재료 포함 | **+5** | GOOD | 비타민 풍부 | — |
 | **R07** | 유분(oil>70) × 튀김(FRIED) | **-10** | CAUTION | 튀김 조리 | 튀김옷을 일부 제거해 보세요 (+5) |
 | **R08** | 장벽 약화(barrier<40) × OMEGA3 | **+7** | GOOD | 오메가3 함유 | — |
 | **R09** | PROBIOTIC 재료 포함 (김치·된장·요거트) | **+4** | GOOD | 발효식품 포함 | — |
@@ -3171,31 +3186,45 @@ gantt
     발표 준비                       :a9, 2026-08-17, 1d
 ```
 
-**팀 구성 전제** — Flutter **2명**(FE-A · FE-B), Backend 1~2명.
+**팀 구성 전제** — Flutter **2명**(FE-A · FE-B), Backend 1~2명, **기획/디자인 1명(PD)**.
 
-| Day | Backend | FE-A | FE-B | 게이트 |
-|---|---|---|---|---|
-| **1** | 스켈레톤, Docker Compose(PG), Flyway V1, Entity 7종 | 프로젝트 생성, 테마, 라우터, 공통 위젯 | (합류) | |
-| **2** | Security+JWT, `/auth/*` 5종, 업로드/저장, Swagger | **S00·S01·S01b·S01c 인증 화면**, TokenStorage, 라우트 가드 | Dio·인터셉터·`build_runner` DTO 생성 | **로그인 E2E** ✅ |
-| **3** | OpenAI 연동 + **Mock 클라이언트 동시 작성** | S03·S06 촬영 화면, 이미지 압축 | S02 홈, S04 로딩 | 피부 분석 로컬 성공 |
-| **4** | `POST /skin/analyses`, ScoreCalculator·HighlightBuilder·GapAnalyzer 조립 | **ML Kit 게이트 착수** | **S05 결과 + 갭 카드** | **피부 분석 E2E** ✅ |
-| **5** | 음식 프롬프트, `FoodAnalysisService`, **StandardNutrition 확정** | ML Kit 게이트 마무리 + 크롭 | S07 골격 | 음식 인식 확인 |
-| **6** | Rule Engine 9종, `POST /plates`, **`/plates/{id}/simulate`** | **1차 배포 (서버 컨테이너화)** | **S07 계산 내역 카드 + 시뮬 버튼** | **Plate Score E2E** ✅ |
-| **7** | 추천 lazy 동기 생성, `GET /recommendations` | **릴리즈 빌드 + 실기기에서 배포 서버 호출** | S08 추천 화면 | **전체 플로우 관통** ✅ |
-| **8** | 룰 임계값 튜닝(표준 10종), 에러 코드 정비 | **배포본 E2E 1회 완주** — 시연에 쓸 바로 그 빌드 | UI 폴리시, 에러 UX | **배포본 E2E** ✅ · **기능 동결** |
-| **9** | 안정화, 로그 | **영상 촬영** (재촬영 자유) | 영상 촬영 보조, 크래시 수정 | 촬영 완료 |
-| **10** | 대기 | **영상 편집·제출** | 편집 보조, 발표 자료 | 발표 |
+> **Day 1 산출물이 0인 상태에서 시작한다.** 저장소에 문서 2개와 `Initial commit` 하나뿐이고 오늘이 Day 2다. Day 1을 Day 2에 얹으면 원래도 가장 무거운 날이 두 배가 되고 G1이 통과하지 못한다. **Day 1+2를 이틀로 펴고, 회수는 이미지 저장 제거(§9.6, 반나절)로 메운다.**
 
-> **Day 8이 진짜 마감이다.** 발표가 영상이므로 Day 9~10은 촬영과 편집에 쓰인다. 이 이틀은 코드 작업이 아니라 **제작 시간**이고, 아무도 일정표에 넣지 않았던 항목이다. 영상 촬영 반나절 + 편집 반나절이 최소치이고, 컷 편집·자막·나레이션까지 하면 하루가 더 든다.
->
-> **영상 발표는 두 가지를 공짜로 준다.** 로딩 8초를 편집으로 잘라낼 수 있고(대기시간 리스크 소멸), 조명이 나쁘면 다시 찍으면 된다(게이트 리스크 완화). 대신 **현장 배포본 시연은 통제 불가**이므로 게이트 우회로(§9.5)와 배포 검증(Day 8)이 그만큼 더 중요하다.
+| Day | Backend | FE-A | FE-B | PD | 게이트 |
+|---|---|---|---|---|---|
+| **2** *(오늘)* | 스켈레톤, Compose(PG), Flyway V1, Entity 7종 | 프로젝트·테마·라우터·공통 위젯, **`network_security_config.xml`(10분)** | 합류, 환경 세팅 | 화면 와이어프레임 | 앱이 뜬다 |
+| **3** | Security+JWT, `/auth/*` 5종, Swagger | **S00·S01·S01b·S01c 인증 화면**, TokenStorage, 라우트 가드 | Dio·인터셉터·`build_runner` DTO | 시연 음식 3종 확정 | **로그인 E2E** ✅ |
+| **4** | OpenAI 연동 + **Mock 동시 작성**(429 재시도 포함) | S03·S06 촬영 화면 | S02 홈, S04 로딩 | 촬영 대본 초안 | 피부 분석 로컬 성공 |
+| **5** | `POST /skin/analyses`, Score·Highlight·Gap 조립, **1차 배포** | **ML Kit 게이트 착수** | **S05 결과 + 갭 카드** | 발표 자료 골격 | **피부 분석 E2E** ✅ |
+| **6** | 음식 API, **StandardNutrition 확정** | ML Kit 마무리 + 크롭 · **컷오프 판단** | S07 골격 | 자막·나레이션 초안 | 배포 서버에서 피부 E2E |
+| **7** | Rule Engine 9종, `/plates`, **`/simulate`** | **릴리즈 빌드 + 실기기에서 배포 서버 호출** | **S07 계산 내역 + 시뮬 버튼** | 촬영 대본 확정 | **Plate Score E2E** ✅ |
+| **8** | 추천 lazy 생성, 룰 임계값 튜닝 | **배포본 E2E 완주** — 시연에 쓸 바로 그 빌드 | S08 추천, UI 폴리시 | 촬영 준비(장소·조명·음식) | **전체 관통 + 배포본 E2E** ✅ · **기능 동결** |
+| **9** | 안정화, 로그 | 촬영 **출연·조작** | 크래시 수정 | **촬영 진행** | 촬영 완료 |
+| **10** | 대기 | 대기 | 대기 | **편집·제출·발표 자료** | 발표 |
+
+**바뀐 배정 세 가지**
+
+| | 이전 | 지금 | 이유 |
+|---|---|---|---|
+| 1차 배포 | Day 6 · FE-A | **Day 5 · BE** | Dockerfile·PaaS·DB 연결 문자열·헬스체크는 전부 백엔드 작업이다. FE-A는 그날 ML Kit을 막 시작한 참이고 이 스택을 처음 만진다. Day 5 BE 칸이 상대적으로 가볍고, **배포는 기능 완성도와 무관하다** — 절반만 돌아도 올린다 |
+| 영상 촬영·편집 | FE-A | **PD** | FE-A가 Day 8 배포본 E2E → Day 9 촬영 → Day 10 편집으로 **사흘 연속 단독 크리티컬 패스**였다. 배포에서 문제 하나만 나와도 촬영이 밀린다. 영상 편집은 개발자가 할 일도 아니다 |
+| PD | 표에 없음 | **4번째 열** | 팀 구성(§문서 정보)에 기획/디자인 1명이 있는데 Day 표에 없어서, 그 사람 몫 이틀이 개발자에게 붙어 있었다 |
 
 **FE 분업 원칙**
 
 | | 담당 | 이유 |
 |---|---|---|
-| FE-A | 인증 · 촬영 · **ML Kit 게이트** · 배포/릴리즈 빌드 | **네이티브 의존성은 한 사람이 전담한다.** 둘이 동시에 `pubspec.yaml`과 iOS `Podfile`을 건드리면 충돌이 나고, 그 복구가 반나절이다 |
+| FE-A | 인증 · 촬영 · **ML Kit 게이트** · 릴리즈 빌드 | **네이티브 의존성은 한 사람이 전담한다.** 둘이 동시에 `pubspec.yaml`과 iOS `Podfile`을 건드리면 충돌이 나고 복구가 반나절이다 |
 | FE-B | 네트워크 레이어 · 결과 화면 3종(S05·S07·S08) | 순수 Dart 영역이라 병렬이 안전하다 |
+
+**회수한 하루**
+
+| 항목 | 회수 |
+|---|---|
+| 이미지 서버 저장 제거 (§9.6) | BE 반나절 — `ImageStorage`·리소스 핸들러·`STORAGE_BASE_URL` 전부 불필요 |
+| 일일 호출 제한 미구현 (§17.5) | BE 반나절 — $100 크레딧 대비 16%만 쓰므로 상한이 필요 없다 |
+
+**더 잘라야 하면 이 순서로** — ① 추천 AI 문장 생성을 정적 문구로(G4 축소 경로, 후보 음식은 이미 코드에 있다) → ② S01b 회원가입 화면 제거(API는 유지, G1 축소 경로) → ③ S02 홈 제거(S05에서 S06 직행) → ④ S04 로딩 애니메이션을 단순 스피너로.
 
 ### 19.3 마일스톤 게이트
 
@@ -3226,7 +3255,7 @@ gantt
 | R2 | **AI 응답 파싱 실패** | 기능 불가 | 중 | Structured Outputs(json_schema, strict) 강제, 원본 jsonb 저장 후 폴백 |
 | R3 | **의료 자문으로 오해** | 신뢰/법적 리스크 | 중 | 모든 결과 화면 하단 고정 문구: *"본 서비스는 의료 진단이 아니며 참고용 정보입니다."* 프롬프트에서 질환명 언급 금지 |
 | R4 | **촬영 조명·화질 편차로 결과 요동** | 신뢰도 하락 | 높 | 촬영 가이드 오버레이, 조도 안내 문구, `temperature 0.2`로 변동 축소, 재촬영 유도 |
-| R5 | **OpenAI 비용 초과** | 개발 중단 | 중 | 음식 `detail:low` + 피부는 얼굴 크롭 후 `high` + `max_tokens:800` + 사용자당 일 30회 제한, 예산 알림 설정 |
+| R5 | ~~OpenAI 비용 초과~~ | — | 낮 | **$100 크레딧 대비 예상 사용 $16(16%)** — 상한 로직 불필요(§17.5). `max_tokens:800`으로 출력 폭주만 막는다 |
 | R6 | **카메라 권한 거부** | 진입 불가 | 중 | 갤러리 업로드 폴백 항상 제공, 권한 재요청 안내 화면 |
 | R7 | **발표장 네트워크 장애** | 현장 시연 실패 | 중 | **발표가 영상이므로 발표 자체는 영향 없다.** 현장 시연이 실패하면 영상으로 대체한다. `app.ai.mock=true`는 개발·리허설용으로만 남긴다 |
 | R8 | **10일 일정 초과** | 미완성 | 높 | 19.3 마일스톤 게이트로 단계별 범위 축소 결정 |
@@ -3237,8 +3266,8 @@ gantt
 | R13 | **테스트 계정이 운영 환경에 노출** | 보안 사고 | 중 | `app.auth.test-account.enabled=false`(prod 기본), `/auth/test-login` 403 처리 |
 | R14 | **리허설 데이터가 시연 계정에 누적** | 발표 품질 저하 | 중 | 슬롯 1은 시연 전용, 팀 테스트는 슬롯 2·3. 발표 직전 슬롯 1 데이터 초기화 |
 | R15 | **인증 누락 API로 타 사용자 데이터 노출** | 보안 사고 | 중 | `.anyRequest().authenticated()` 기본 차단 + 모든 조회에 `findByIdAndUserId` 강제 |
-| R16 | ~~릴리즈 빌드 cleartext 차단~~ | — | — | **소멸.** HTTPS를 자동 발급하는 PaaS에 배포하므로 cleartext 자체가 없다(§9.6) |
-| R17 | ~~이미지 URL 호스트 불일치~~ | — | — | **소멸.** 결과 화면이 서버 `imageUrl` 대신 **앱 로컬 파일**을 표시한다(§9.6). 배포 환경 이미지 유실도 함께 해결 |
+| R16 | **로컬 개발에서 cleartext 차단** | Day 3 첫 API 호출이 막힘 | 중 | 배포본은 HTTPS라 무관하지만 **Day 2~5는 로컬 HTTP다.** `network_security_config.xml`에 `10.0.2.2`·`localhost`만 예외 등록 — **Day 2에 10분**(§9.6) |
+| R17 | ~~이미지 URL 호스트 불일치~~ | — | — | **소멸.** 서버가 이미지를 저장하지 않고, 결과 화면은 앱 로컬 파일을 쓴다(§9.6) |
 | R18 | **AI 영양 추정치 변동으로 점수가 흔들림** | 재현성 주장 붕괴 | 높 | 시연 음식 3종은 음식명 매칭으로 표준 영양값을 덮어쓴다. 화면에 "표준 영양 DB 기준" 라벨 표기 |
 | R19 | **첫 배포가 Day 10에 몰림** | 발표 당일 배포 실패 | 높 | **Day 6에 1차 배포**한다. 기능이 절반만 돌아도 올린다 — 목적은 파이프라인을 뚫는 것이다. 첫 배포는 예외 없이 반나절을 먹는다 |
 | R20 | **영상 촬영·편집 시간이 일정에 없음** | 발표물 미완성 | 높 | Day 9 촬영 / Day 10 편집으로 이틀을 확보하고, **Day 8을 기능 동결일**로 못 박는다 |
@@ -3306,12 +3335,6 @@ app:
     model: gpt-4o
     timeout-seconds: 18
     mock: ${AI_MOCK:false}
-  storage:
-    type: local              # local | s3
-    base-path: ./uploads
-    base-url: ${STORAGE_BASE_URL:http://10.0.2.2:8080/uploads}   # ★ API와 같은 호스트
-  rate-limit:
-    daily-per-user: 30        # ⚠️ 프로퍼티만 존재. 구현·카운터 테이블 없음 (Phase 2)
 
 spring:
   datasource:
@@ -3337,7 +3360,6 @@ docker compose up -d postgres
 cat > .env <<'EOF'
 OPENAI_API_KEY=sk-...
 JWT_SECRET=<openssl rand -base64 48 로 한 번 생성한 고정값>
-STORAGE_BASE_URL=http://10.0.2.2:8080/uploads   # ★ API_BASE_URL 과 같은 호스트여야 한다
 TEST_ACCOUNT_ENABLED=true
 EOF
 
@@ -3374,9 +3396,7 @@ curl http://localhost:8080/api/v1/auth/me \
 | `test2@skinplate.app` | `test1234!` |
 | `test3@skinplate.app` | `test1234!` |
 
-> **호스트를 두 곳에서 관리하지 마라.** Android 에뮬레이터에서 `localhost`는 에뮬레이터 자신이므로, `STORAGE_BASE_URL`을 기본값(`localhost:8080`)으로 두면 **API는 잘 되는데 방금 찍은 얼굴 사진만 회색 박스**가 된다. S05와 S07 두 화면에 동시에 나타나고, 원인 찾는 데 한 시간이 든다.
->
-> 더 안전한 구조는 **서버가 상대경로(`/uploads/...`)를 내리고 앱이 `Env.apiBaseUrl`의 호스트를 붙이는 것**이다. 호스트가 한 곳에서만 관리된다. 실기기 시연이면 노트북 LAN IP로 바꾸는 것도 한 줄이면 끝난다.
+> Android 에뮬레이터에서 호스트는 `10.0.2.2`, iOS 시뮬레이터는 `localhost`다. 그리고 **`network_security_config.xml`에 이 두 호스트를 cleartext 예외로 넣어야** Day 3 첫 호출이 막히지 않는다(§9.6).
 >
 > `JWT_SECRET`은 **한 번 만들어 고정**한다. 매번 새로 생성하면 서버를 재기동할 때마다 기존 토큰이 전부 무효가 되어, Day 9 리허설 중 시연 폰 세 대가 동시에 로그아웃된다. 아무도 시크릿을 의심하지 않아서 원인 찾기가 오래 걸린다.
 
@@ -3410,6 +3430,25 @@ curl http://localhost:8080/api/v1/auth/me \
 | 신규 섹션 | — | **§16 인증 · 보안 설계** |
 | 리스크 | R1~R10 | **R11~R15 추가** (시연 마찰, Secret 유출, 테스트 계정 노출 등) |
 | 일정 | Day 1~2 기반 작업 | **Day 2를 인증 전담일로 배정**, G1 게이트에 로그인 E2E 추가 |
+
+---
+
+## 부록 G. v1.5 변경 이력 (2026-08-09 · 3차 리뷰 · **문서 라운드 종료**)
+
+| # | 문제 | 수정 |
+|---|---|---|
+| A1 | 429를 5xx와 묶어 재시도 없이 실패 — 예산과 처리량 상한을 혼동 | **429만 2초 후 1회 재시도.** 최악 20초로 클라 25초 안. 타임아웃은 그대로 재시도 없음 |
+| A2 | R16을 "소멸"로 적어 로컬 개발 HTTP를 놓침 | **"로컬 개발 한정 · Day 2에 10분"**으로 복원. `network_security_config.xml` 제시 |
+| A3 | Day 1 산출물 0인데 Day 표가 반영 안 함 | **Day 1+2를 이틀로 펴고** 이미지 저장 제거로 하루 회수. Day 8 동결일 고정 |
+| A4 | 1차 배포가 FE-A에 배정 | **Day 5 BE로 이동.** Dockerfile·PaaS·DB 연결은 백엔드 작업이다 |
+| A5 | 기획/디자인 1명이 Day 표에 없어 촬영·편집이 FE-A에 | **PD 열 추가.** FE-A의 사흘 연속 크리티컬 패스 해소 |
+| A6 | "임계값이 SkinMetrics와 일치"가 oil만 어긋남 | 문구를 "유분 과다" → **"유분 많음"**. 임계값은 R07 델타에 영향이 있어 안 건드림 |
+| A7 | 삭제한 rate limit이 R5·부록 A에 잔존 | R5를 "$100 대비 16% — 상한 불필요"로, 부록 A 블록 삭제 |
+| **A8** | **이미지 서버 저장의 소비자가 하나도 없음** | **저장 자체를 제거.** `imageUrl`·`ImageStorage`·리소스 핸들러·`/uploads/**`·`STORAGE_BASE_URL` 전부 삭제. **BE 반나절 회수 + 배포 리스크 소멸 + 심사 답변 확보**("얼굴 사진은 저장하지 않습니다") |
+| A9 | `removedRuleCodes` 구현 없음 | 원본으로 엔진 한 번 더 호출해 차집합 |
+| — | ML Kit 컷오프 주체·시각 미명시 | **"Day 6 종료, FE-A가 판단해 팀에 통보"**. 폴백은 정적 가이드 오버레이 |
+
+> **이 라운드로 문서 작업을 종료한다.** 남은 위험은 문서 결함이 아니라 **아직 아무것도 안 돌아간다는 것**이다.
 
 ---
 
@@ -3473,7 +3512,7 @@ curl http://localhost:8080/api/v1/auth/me \
 | 이미지 해상도 | 피부만 `detail:"high"`. 온디바이스 얼굴 크롭 후 전송(§9.5) |
 | 재현성 | 시연 음식 3종은 표준 영양값으로 덮어쓴다. AI는 "무슨 음식인가"만 판단 |
 | 타임아웃 | 서버 20초+재시도(최악 42초) → **18초 단발**. `TimeoutException` 별도 분기로 `AI_TIMEOUT` 복구 |
-| 이미지 URL | `STORAGE_BASE_URL`을 API와 같은 호스트로 강제 (R17) |
+| 이미지 URL | ~~`STORAGE_BASE_URL` 정합~~ → **v1.5에서 이미지 저장 자체를 제거**(§9.6) |
 | 트랜잭션 | AI 호출은 트랜잭션 밖, DTO 변환은 `readOnly` 트랜잭션 안 (§11.3) |
 | 추천 생성 | 비동기 → **lazy 동기**. S08이 빈 화면일 가능성 제거 |
 | 릴리즈 빌드 | cleartext 차단 리스크 추가(R16), 실기기 검증을 Day 9 → **Day 8**로 |
@@ -3495,4 +3534,4 @@ curl http://localhost:8080/api/v1/auth/me \
 
 ---
 
-*문서 끝 · Skin Plate PRD & Technical Design v1.4*
+*문서 끝 · Skin Plate PRD & Technical Design v1.5 — 구현 착수본*

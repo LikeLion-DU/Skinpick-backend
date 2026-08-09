@@ -23,13 +23,18 @@ public final class RuleConstants {
     public static final int R07_FRIED_OIL        = -10;  // 유분 × 튀김
     public static final int R08_OMEGA3_BARRIER   =  7;   // 장벽 약화 × 오메가3
     public static final int R09_PROBIOTIC        =  4;   // 발효식품
-    public static final int R10_HIGH_CALORIE     = -5;   // 고열량 (확장, 미구현)
+    // ---- R10(고열량)은 미구현이다. 델타와 회복 점수를 쌍으로 남겨둔다. ----
+    // 문서 §18.6 룰표가 R10을 "확장"으로 명시하고 있으므로 상수도 함께 남긴다.
+    // 나중에 넣을 때 값을 다시 정하지 않아도 되고, 지금 지우면 GAIN_LESS_RICE 만
+    // 고아가 되거나(둘은 한 쌍이다) 룰표와 코드가 또 어긋난다.
+    public static final int R10_HIGH_CALORIE     = -5;   // 고열량 (확장 · 미구현)
 
     // ---- 추천 행동 시 회복 점수 ----
     public static final int GAIN_SOUP_HALF       = 8;
     public static final int GAIN_LESS_SPICY      = 6;
     public static final int GAIN_WATER_NOT_SODA  = 7;
     public static final int GAIN_REMOVE_BATTER   = 5;
+    public static final int GAIN_LESS_RICE       = 4;   // R10 쌍 (확장 · 미구현)
 
     // ---- 나트륨 초과량 비례 감점 ----
     public static final int SODIUM_STEP_MG       = 500;  // 500mg 초과마다 1점 추가 감점
