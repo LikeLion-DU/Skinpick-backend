@@ -58,7 +58,7 @@ Flutter 앱은 별도 저장소. 배포는 Docker + PaaS(HTTPS 자동 발급).
 - Entity는 `@NoArgsConstructor(PROTECTED)` + 정적 팩토리. setter 금지
 - 모든 연관관계 `FetchType.LAZY`
 - `@Valid` + 한국어 검증 메시지 (그대로 사용자에게 노출된다)
-- HTTP: POST → 201, GET → 200, PATCH/DELETE → 204
+- HTTP: POST → 201, GET → 200, DELETE → 204. **PATCH 는 갱신 결과를 돌려주면 200** (PRD §14.3 ④-b)
 - 예외는 `BusinessException(ErrorCode)` 하나로. 새 상황이면 `ErrorCode`에 추가
 
 ## 명령어
