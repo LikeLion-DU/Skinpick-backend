@@ -1,3 +1,7 @@
+# Railway·Render 는 컨테이너에 PORT 를 주입하고 그 포트로만 트래픽을 보낸다.
+# 8080 에 고정해 두면 배포는 성공하는데 헬스체크가 끝까지 안 붙는다.
+server.port: ${PORT:8080}
+
 spring:
   application.name: skinplate-api
   # 배포 시 SPRING_PROFILES_ACTIVE=prod 를 반드시 넘긴다.

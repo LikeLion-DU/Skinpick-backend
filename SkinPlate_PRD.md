@@ -754,17 +754,35 @@ final gate = faceGate();   // 웹이면 통과만 시키는 스텁이 온다
 이에 따라 **API도 컨테이너화한다.** §9.3에서 "API는 컨테이너화하지 않는다"고 적었던 것은 노트북 시연 전제였고, 지금은 무효다.
 
 ```dockerfile
-# Dockerfile — 멀티스테이지, 30줄이면 끝난다
-FROM gradle:8-jdk21 AS build
-COPY . /src
+# Dockerfile — 멀티스테이지, 20줄이면 끝난다
+FROM eclipse-temurin:21-jdk AS build
 WORKDIR /src
-RUN gradle bootJar --no-daemon
+
+# 빌드 스크립트를 소스보다 먼저 복사해 의존성 레이어를 분리한다.
+# 소스만 고친 재배포에서 내려받기를 건너뛴다 — 첫 배포는 여러 번 다시 올리게 된다.
+COPY gradlew settings.gradle build.gradle ./
+COPY gradle ./gradle
+RUN chmod +x gradlew && ./gradlew dependencies --no-daemon
+
+COPY src ./src
+RUN ./gradlew bootJar --no-daemon
 
 FROM eclipse-temurin:21-jre
-COPY --from=build /src/build/libs/*.jar /app.jar
+WORKDIR /app
+COPY --from=build /src/build/libs/*.jar app.jar
 ENV SPRING_PROFILES_ACTIVE=prod
-ENTRYPOINT ["java","-jar","/app.jar"]
+RUN useradd --system --create-home app && chown -R app /app
+USER app
+ENTRYPOINT ["java", "-jar", "app.jar"]
 ```
+
+> **`.dockerignore` 가 Dockerfile 만큼 중요하다.** 없으면 `COPY` 가 `.env` 를 그대로 이미지에 굽는다. `JWT_SECRET`·`OPENAI_API_KEY`·`DB_PASSWORD` 는 **레이어에 한 번 들어가면 뒤에서 지워도 남는다.** `build/`·`.gradle/` 도 함께 제외한다 — 호스트 캐시가 컨테이너 빌드를 오염시킨다.
+>
+> **`SPRING_PROFILES_ACTIVE=prod` 를 이미지에 박는다.** 기본 프로파일은 `local` 이고 `application-local.yml` 은 테스트 계정을 켜 두므로, 플랫폼에서 이 변수 하나를 빠뜨리면 **공개 배포에서 `POST /auth/test-login` 이 열린 채로 뜬다.** 빈 본문만 보내면 누구나 7일짜리 토큰을 받는데, 로그도 헬스체크도 전부 정상이라 아무도 눈치채지 못한다. `docker run -e` 와 플랫폼 환경변수가 이 값을 덮으므로 **같은 이미지를 로컬에서 `local` 로 띄워 확인하는 것도 그대로 된다** — 박아두는 쪽에 잃는 게 없다.
+>
+> **`PORT` 는 플랫폼이 주입한다.** Railway·Render 모두 컨테이너에 `PORT` 를 넣고 **그 포트로만** 트래픽을 보낸다. `application.yml` 에 `server.port: ${PORT:8080}` 이 없으면 컨테이너는 8080 에서 멀쩡히 뜨는데 헬스체크가 끝까지 안 붙고, 로그에는 아무 에러도 없다.
+>
+> **`EXPOSE` 는 쓰지 않는다.** Railway 는 `EXPOSE` 를 프록시 대상 포트 힌트로 읽는다. 앱은 `${PORT}` 에 바인딩하는데 `EXPOSE 8080` 이 남아 있으면 둘이 어긋나는 순간 트래픽이 닫힌 포트로 가고, **바로 위 문단과 똑같은 방식으로 조용히 실패한다.** 포트의 출처를 `PORT` 하나로 둔다.
 
 #### DB — Supabase 무료 Postgres로 **확정**
 
