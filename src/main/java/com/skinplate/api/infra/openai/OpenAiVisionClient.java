@@ -109,7 +109,7 @@ public class OpenAiVisionClient implements VisionClient {
         JsonNode content = response.path("choices").path(0).path("message").path("content");
         if (content.isMissingNode() || !content.isTextual()) {
             log.warn("OpenAI 응답에서 content 를 찾지 못했다: {}", response);
-            throw new OpenAiClientException(ErrorCode.AI_ANALYSIS_FAILED, null);
+            throw new OpenAiClientException(ErrorCode.AI_ANALYSIS_FAILED, null, response.toString());
         }
         return content.asText();
     }
@@ -118,8 +118,9 @@ public class OpenAiVisionClient implements VisionClient {
         try {
             return objectMapper.readValue(content, type);
         } catch (Exception e) {
+            // 원본을 예외에 실어 보낸다 — Service 가 raw_ai_response 에 남길 수 있어야 한다 (PRD §17.4)
             log.warn("AI 응답 파싱 실패: {}", content);
-            throw new OpenAiClientException(ErrorCode.AI_ANALYSIS_FAILED, e);
+            throw new OpenAiClientException(ErrorCode.AI_ANALYSIS_FAILED, e, content);
         }
     }
 }

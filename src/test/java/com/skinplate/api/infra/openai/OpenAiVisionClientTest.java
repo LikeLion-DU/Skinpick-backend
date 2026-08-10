@@ -13,6 +13,7 @@ import org.springframework.web.reactive.function.client.ExchangeFunction;
 import org.springframework.web.reactive.function.client.WebClient;
 import reactor.core.publisher.Mono;
 
+import java.time.Duration;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -78,6 +79,34 @@ class OpenAiVisionClientTest {
 
         assertThat(result.hydration()).isEqualTo(38);
         assertThat(calls.get()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("타임아웃은 시도마다 새로 걸린다 — 전체에 한 번이 아니다")
+    void timeoutAppliesPerAttempt() {
+        // PRD §17.2 의 "최악 0.1+2+18 ≈ 20초" 계산이 이 전제 위에 서 있다.
+        // 전체에 한 번이라면 재시도 대기 2초만으로도 1초 제한을 넘겨 실패해야 한다.
+        AtomicInteger calls = new AtomicInteger();
+
+        OpenAiSkinResult result = clientOf(request -> Mono.delay(Duration.ofMillis(300))
+                .then(Mono.just(calls.incrementAndGet() == 1
+                        ? json(HttpStatus.TOO_MANY_REQUESTS, "{}")
+                        : json(HttpStatus.OK, ENVELOPE))), 1).analyzeSkin("base64");
+
+        assertThat(result.hydration()).isEqualTo(38);
+        assertThat(calls.get()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("파싱 실패는 원본 응답을 예외에 실어 보낸다 — DB 에 남겨야 한다")
+    void parseFailureCarriesRawResponse() {
+        String broken = """
+                {"choices":[{"message":{"content":"이건 JSON 이 아니다"}}]}""";
+
+        assertThatThrownBy(() -> clientOf(request -> Mono.just(json(HttpStatus.OK, broken)), 5)
+                .analyzeSkin("base64"))
+                .isInstanceOf(OpenAiClientException.class)
+                .extracting("rawResponse").isEqualTo("이건 JSON 이 아니다");
     }
 
     @Test
