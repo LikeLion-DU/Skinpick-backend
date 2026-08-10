@@ -4,8 +4,8 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | v1.4 |
-| 기준 문서 | Skin Plate PRD & Technical Design **v1.5** |
+| 문서 버전 | v1.5 |
+| 기준 문서 | Skin Plate PRD & Technical Design **v1.6** |
 | 범위 | 설정, 마이그레이션, Entity, Enum, Repository, DTO, Rule Engine 골격 (Backend) / DTO, Entity, Repository 인터페이스 (Flutter) |
 | 제외 | Service·Controller 구현체, OpenAI 호출 구현, UI 위젯 |
 
@@ -196,6 +196,9 @@ spring:
   profiles.active: ${SPRING_PROFILES_ACTIVE:local}
 
   datasource:
+    # 기본값은 로컬 Docker Postgres 기준이다.
+    # 배포(Supabase)에서는 DB_NAME 을 반드시 postgres 로 넘긴다 — skinplate 가 아니다.
+    # 안 넘기면 기동이 FATAL: database "skinplate" does not exist 로 끝난다. (PRD §9.6)
     url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:skinplate}
     username: ${DB_USER:skinplate}
     password: ${DB_PASSWORD:skinplate}
@@ -983,6 +986,8 @@ public class WebConfig implements WebMvcConfigurer {
     }
 }
 ```
+
+> **Flutter Web을 붙여도 여기는 고칠 것이 없다.** `/api/**`가 이미 전체 허용이고, 우리는 **쿠키가 아니라 `Authorization` 헤더로 토큰을 보낸다.** 그래서 `allowCredentials(true)`·`SameSite`·프리플라이트 쿠키 같은 함정이 **처음부터 발생하지 않는다.** `allowedOriginPatterns("*")`와 `allowCredentials(true)`를 같이 켜면 스프링이 예외를 던지는데, 우리는 후자가 필요 없어서 그 조합에 닿지 않는다 (PRD §9.6).
 
 **`global/config/OpenAiConfig.java`**
 
@@ -4279,6 +4284,8 @@ class TokenStorage {
 }
 ```
 
+> **웹에서는 보안 저장소가 없다.** `flutter_secure_storage`는 웹에서 브라우저 저장소(localStorage 수준)로 폴백한다 — API는 그대로라 코드를 나눌 필요는 없지만, **보안 등급이 앱과 다르다는 사실은 알고 있어야 한다**(PRD §6.1). 시연 범위에서는 문제가 아니다. 웹은 심사위원 체험용이고 토큰 유효기간이 7일이며, 그 안에 담기는 것은 피부 분석 기록뿐이다.
+
 ---
 
 ## 2.6 core/network
@@ -5506,6 +5513,17 @@ abstract interface class RecommendationRepository {
 
 PRD §9.5의 게이트를 구현한다. **판정이 아니라 게이트와 크롭 전용**이다.
 
+> **웹에서는 적용되지 않는다.** `google_mlkit_face_detection`은 Android/iOS 전용이라 Flutter Web 빌드에 들어가지 않는다. **`kIsWeb`이면 게이트를 건너뛰고 파일 선택 경로를 쓴다** — 아래 `FaceGate`는 호출조차 하지 않는다.
+>
+> ```dart
+> import 'package:flutter/foundation.dart' show kIsWeb;
+>
+> if (kIsWeb) return _pickFromFiles();   // 프리뷰·게이트 없이 업로드
+> return _cameraWithFaceGate();
+> ```
+>
+> 얼굴이 아닌 사진이 올라오면 서버가 `faceDetected:false`로 응답하므로 플로우는 끊기지 않는다(PRD §6.1).
+
 **`lib/features/skin_analysis/domain/entities/face_gate_result.dart`**
 
 ```dart
@@ -5714,8 +5732,11 @@ if (_consecutiveFailures >= 3) {
 | 10 | `FaceGate` + 카메라 프리뷰 연동 | `skin_analysis/data/` | 5~6 | **Day 8 이후에는 붙이지 마라.** 네이티브 의존성이라 빌드가 깨지면 복구에 시간이 든다 |
 | 11 | S01c 피부 타입 선택 화면 + S05 갭 카드 | `auth/presentation/` · `skin_analysis/presentation/` | 2 · 4 | 칩 5개 + 건너뛰기. 갭 카드는 서버가 문장까지 만들어 주므로 렌더링만 |
 | 12 | S07 "왜 60점인가" 카드 + 시뮬레이션 버튼 | `skin_plate/presentation/` | 7~8 | **차별점을 화면으로 옮기는 작업.** 지금은 문서와 백엔드 로그에만 있다 |
+| 13 | **`kIsWeb` 카메라 분기 + `ConstrainedBox(maxWidth: 430)`** | `skin_analysis/` · `app/` | 7 | **웹 대응. 둘 합쳐 반나절**(PRD §19.2). 웹은 게이트·프리뷰를 건너뛰고 파일 선택으로 간다(§2.12) |
 
-**해커톤 범위에서 제외** — `GET /plates?date=` · S09 히스토리 · 결과 공유 · 온보딩 애니메이션 · 지표 추이 차트 · API 컨테이너화.
+**해커톤 범위에서 제외** — `GET /plates?date=` · S09 히스토리 · 결과 공유 · 온보딩 애니메이션 · 지표 추이 차트.
+
+> ~~API 컨테이너화~~ 는 제외 목록에서 **뺐다.** 노트북 시연 전제였고, PaaS 배포로 바뀌면서 **Dockerfile 이 필수가 됐다**(PRD §9.6).
 
 **시작하기**
 
@@ -5744,13 +5765,37 @@ set -a && source .env && set +a
 flutter pub get
 dart run build_runner build --delete-conflicting-outputs
 flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8080/api/v1
+
+# ---------- 웹 (Day 7 · PRD §9.6) ----------
+# <백엔드> 는 Day 4 에 확정된 호스팅 도메인
+flutter build web --release --dart-define=API_BASE_URL=https://<백엔드>/api/v1
+npx wrangler pages deploy build/web --project-name=skinplate
 ```
 
 > **`android/app/src/main/res/xml/network_security_config.xml`을 Day 2에 넣어라.** 로컬 개발은 HTTP이고 Flutter 디버그 매니페스트는 cleartext를 켜주지 않는다. 빠뜨리면 Day 3 첫 API 호출이 막히고, 그때는 서버를 뒤지게 된다(PRD §9.6).
 
 ---
 
-## 부록. 리뷰 반영 이력 (2026-08-09)
+## 부록. 리뷰 반영 이력
+
+### v1.5 (2026-08-10 · PRD v1.6 대응 — 배포 구성 · 웹 추가)
+
+> **백엔드 호스팅은 이 개정에서 확정하지 않았다. Day 4 배포 착수 전 결정한다.**
+
+**코드 변경은 없다.** 배포 구성이 바뀌었고 플랫폼에 웹이 추가되어, 그 사실이 걸리는 자리에만 주석·주기를 달았다.
+
+| 항목 | 변경 |
+|---|---|
+| **§1.3 DB 설정** | **배포는 Supabase 무료 Postgres.** `DB_NAME` 에 주석 추가 — **배포에서는 `postgres`, `skinplate` 가 아니다.** 안 넘기면 기동이 `FATAL: database "skinplate" does not exist` 로 끝난다. 기본값(로컬 Docker 기준)은 그대로 |
+| **§1.9 `WebConfig`** | **코드 변경 없음.** Flutter Web을 붙여도 고칠 것이 없다는 사실을 명시 — `/api/**` 전체 허용이 이미 있고, **쿠키가 아니라 `Authorization` 헤더**를 쓰므로 `allowCredentials`·`SameSite` 함정에 닿지 않는다 |
+| **§2.5 `TokenStorage`** | **코드 변경 없음.** 웹에서는 `flutter_secure_storage` 가 브라우저 저장소(localStorage 수준)로 폴백한다는 주기 추가. API는 동일하므로 분기 불필요 |
+| **§2.12 얼굴 게이트** | **웹에서는 적용되지 않는다.** ML Kit은 Android/iOS 전용. **`kIsWeb` 이면 게이트를 건너뛰고 파일 선택 경로**를 쓴다. 서버의 `faceDetected:false` 폴백이 받쳐 준다 |
+| **Part 4 · 13번** | **`kIsWeb` 분기 + `ConstrainedBox(maxWidth: 430)` 추가.** Day 7, 둘 합쳐 반나절 |
+| **Part 4 · 시작하기** | **웹 빌드·배포 2줄 추가** (`flutter build web` → `wrangler pages deploy`) |
+
+---
+
+### v1.4 이하 (2026-08-09)
 
 외부 리뷰 30건을 검증해 유효 20건을 반영했다. 주요 변경만 적는다.
 
@@ -5778,4 +5823,4 @@ flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8080/api/v1
 
 ---
 
-*문서 끝 · Skin Plate DTO & 도메인 구조 v1.4 (PRD v1.5 기준) — 구현 착수본*
+*문서 끝 · Skin Plate DTO & 도메인 구조 v1.5 (PRD v1.6 기준) — 구현 착수본*
