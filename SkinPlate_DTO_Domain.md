@@ -4,7 +4,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | v1.6 |
+| 문서 버전 | v1.7 |
 | 기준 문서 | Skin Plate PRD & Technical Design **v1.6** |
 | 범위 | 설정, 마이그레이션, Entity, Enum, Repository, DTO, Rule Engine 골격 (Backend) / DTO, Entity, Repository 인터페이스 (Flutter) |
 | 제외 | Service·Controller 구현체, OpenAI 호출 구현, UI 위젯 |
@@ -5695,17 +5695,74 @@ class MlKitFaceGate implements FaceGate {
 }
 ```
 
-**밝기 계산 — YUV Y플레인을 그대로 읽는다** (같은 파일 안)
+**`_toInputImage` — 이 함수가 게이트에서 가장 잘 깨지는 곳이다** (같은 파일 안)
+
+`InputImage.fromBytes` 는 **플랫폼마다 다른 포맷**을 요구한다. 그리고 어긋나도 예외가 안 난다 — 검출이 그냥 0개로 나와서 "얼굴이 화면 안에 들어오게 해주세요"만 계속 뜬다. 카메라는 멀쩡히 사람 얼굴을 비추고 있는데. 원인을 게이트 조건에서 찾게 되는 종류의 실패다.
+
+| 플랫폼 | `ImageFormatGroup` | `planes[0]` |
+|---|---|---|
+| Android | **`nv21`** | 휘도(Y) — 밝기 계산에 그대로 쓴다 |
+| iOS | **`bgra8888`** | BGRA 인터리브 — 밝기는 변환해서 구해야 한다 |
 
 ```dart
-/// CameraImage 의 planes[0] 이 곧 휘도(Y)다. RGB 변환이 필요 없다.
+import 'dart:io' show Platform;
+import 'dart:ui' show Size;
+
+/// CameraController 는 반드시 아래 포맷으로 만든다. 양쪽을 yuv420 으로 통일하면
+/// 밝기 계산은 편해지지만 iOS 에서 ML Kit 이 프레임을 못 읽는다.
 ///
-/// image 패키지로 img.Image 를 만들어 평균을 내면 매 프레임 YUV420 → RGB
-/// 변환이 들어간다. 1080p 면 프레임당 200만 픽셀을 Dart 에서 도는 셈이라
-/// 프리뷰 FPS 가 눈에 띄게 떨어진다.
+///   CameraController(camera, ResolutionPreset.high,
+///       imageFormatGroup: Platform.isAndroid
+///           ? ImageFormatGroup.nv21 : ImageFormatGroup.bgra8888)
+InputImage? _toInputImage(CameraImage frame, CameraDescription camera) {
+  final format = InputImageFormatValue.fromRawValue(frame.format.raw);
+  if (format == null) return null;
+
+  // 센서 방향을 안 넘기면 세로로 든 폰에서 얼굴이 90도 누운 채로 들어가고,
+  // ML Kit 은 누운 얼굴을 잘 못 찾는다. 게이트가 상시 막히는 원인 1순위다.
+  final rotation =
+      InputImageRotationValue.fromRawValue(camera.sensorOrientation);
+  if (rotation == null) return null;
+
+  final plane = frame.planes.first;
+
+  return InputImage.fromBytes(
+    bytes: plane.bytes,
+    metadata: InputImageMetadata(
+      size: Size(frame.width.toDouble(), frame.height.toDouble()),
+      rotation: rotation,
+      format: format,
+      bytesPerRow: plane.bytesPerRow,
+    ),
+  );
+}
+
+/// 검출된 얼굴에 여백을 붙인다. 딱 맞게 자르면 이마와 턱이 잘리는데,
+/// 그 두 곳이 유분·트러블 판정에서 정보량이 가장 많은 영역이다.
+Rect _withMargin(Rect face, double ratio) {
+  final dx = face.width * ratio;
+  final dy = face.height * ratio;
+  return Rect.fromLTRB(
+      face.left - dx, face.top - dy, face.right + dx, face.bottom + dy);
+}
+```
+
+> **`check()` 는 `_toInputImage` 가 `null` 이면 `FaceGateUnavailable` 을 돌려준다.** 포맷을 못 읽는 기기에서 사용자를 가두지 않는다 — 게이트는 열어 주고 서버 폴백에 맡긴다.
+>
+> **완료 조건에 실기기 확인을 넣는다.** 이 함수는 에뮬레이터에서 통과해도 실기기에서 깨질 수 있다. Android 1대 · iOS 1대에서 **얼굴을 비췄을 때 게이트가 실제로 열리는지**를 커밋 조건으로 둔다.
+
+**밝기 계산 — 플랫폼마다 planes[0] 의 의미가 다르다** (같은 파일 안)
+
+```dart
+/// Android(nv21) 는 planes[0] 이 곧 휘도(Y)라 그대로 읽으면 된다.
+/// iOS(bgra8888) 는 인터리브라 픽셀마다 4바이트를 건너뛰며 휘도를 만든다.
+///
+/// image 패키지로 img.Image 를 만들어 평균을 내면 매 프레임 전체 변환이 들어간다.
+/// 1080p 면 프레임당 200만 픽셀을 Dart 에서 도는 셈이라 프리뷰 FPS 가 눈에 띄게 떨어진다.
 /// 8픽셀 간격 샘플링이면 계산량이 1/64 이고, 조도 판정에는 차고 넘친다.
 int _faceLuminance(CameraImage frame, Rect face, {int step = 8}) {
-  final y = frame.planes[0];
+  final plane = frame.planes.first;
+  final isBgra = frame.format.group == ImageFormatGroup.bgra8888;
   var sum = 0, count = 0;
 
   final top    = face.top.toInt().clamp(0, frame.height - 1);
@@ -5714,8 +5771,17 @@ int _faceLuminance(CameraImage frame, Rect face, {int step = 8}) {
   final right  = face.right.toInt().clamp(0, frame.width);
 
   for (var row = top; row < bottom; row += step) {
+    final rowStart = row * plane.bytesPerRow;
     for (var col = left; col < right; col += step) {
-      sum += y.bytes[row * y.bytesPerRow + col];
+      if (isBgra) {
+        final i = rowStart + col * 4;                       // B G R A
+        // Rec.601 근사. 정확한 계수보다 임계값 60 과의 일관성이 중요하다.
+        sum += (plane.bytes[i + 2] * 77 +
+                plane.bytes[i + 1] * 150 +
+                plane.bytes[i]     * 29) >> 8;
+      } else {
+        sum += plane.bytes[rowStart + col];                 // Y 평면
+      }
       count++;
     }
   }
@@ -5723,22 +5789,54 @@ int _faceLuminance(CameraImage frame, Rect face, {int step = 8}) {
 }
 ```
 
-> **iOS 는 `bgra8888` 로 온다.** `CameraController(imageFormatGroup: ImageFormatGroup.yuv420)` 을 명시하면 양 플랫폼 모두 YUV 로 받을 수 있다. 이 한 줄을 빠뜨리면 iOS 에서 `planes[0]` 이 휘도가 아니라 BGRA 인터리브라 판정이 엉뚱해진다.
+> **양 플랫폼을 `yuv420` 으로 통일하지 않는다.** 밝기 계산은 편해지지만 iOS 에서 ML Kit 이 프레임을 못 읽어 검출이 0개가 된다. **밝기 쪽을 분기하는 게 맞다** — 게이트가 아예 안 열리는 것보다 낫다.
 >
 > `image` 패키지는 **업로드 직전 크롭 한 번**에만 쓴다. 실시간 경로에는 넣지 않는다.
 
-**업로드 직전 크롭** — 모바일 전용 경로다
+**업로드 직전 크롭 — 프리뷰 좌표를 사진에 그대로 쓰면 안 된다**
+
+`check()` 가 돌려주는 `faceRect` 는 **프리뷰 스트림**(예: 1280×720) 좌표다. 그런데 실제로 업로드하는 건 `takePicture()` 가 만든 **원본 사진**(예: 4032×3024)이고, 해상도도 방향도 다르다. 프리뷰 좌표를 그대로 넘기면 사진 왼쪽 위 귀퉁이의 엉뚱한 영역이 잘려 나가고, **그 조각이 OpenAI 로 간다.** 게이트는 초록불이었는데 결과만 이상해지는, 원인 찾기 가장 어려운 형태의 버그다.
+
+**배율을 계산해 맞추지 않는다.** 종횡비가 다르면 레터박스를 고려해야 하고, EXIF 방향까지 겹치면 경우의 수가 늘어난다. **사진에서 한 번 더 검출하는 쪽이 짧고 정확하다.** 촬영 1회당 50~100ms 이고 실시간 경로가 아니다.
 
 ```dart
-Future<File> prepareSkinPhoto(File original, FaceGateOk gate) async {
-  final decoded = img.decodeImage(await original.readAsBytes())!;
-  final cropped = img.copyCrop(decoded,
-      x: gate.faceRect.left.toInt(),  y: gate.faceRect.top.toInt(),
-      width: gate.faceRect.width.toInt(), height: gate.faceRect.height.toInt());
+/// faceRect 는 프리뷰 오버레이를 그리는 데만 쓴다. 크롭 좌표로는 쓰지 않는다.
+Future<File> prepareSkinPhoto(File original) async {
+  final detector = FaceDetector(
+      options: FaceDetectorOptions(
+        performanceMode: FaceDetectorMode.accurate,   // 정지 이미지 1장이라 여유가 있다
+      ));
 
-  // 얼굴만 1024px → OpenAI detail:"high" 에서 실효 해상도가 3배 이상 올라간다
-  final resized = img.copyResize(cropped, width: 1024);
-  return File(...)..writeAsBytesSync(img.encodeJpg(resized, quality: 80));
+  try {
+    // fromFilePath 는 EXIF 방향까지 알아서 처리한다.
+    final faces = await detector.processImage(InputImage.fromFilePath(original.path));
+    final decoded = img.decodeImage(await original.readAsBytes())!;
+
+    // 사진에서 얼굴을 못 찾으면 크롭을 포기하고 원본을 올린다.
+    // 게이트를 통과한 사용자를 여기서 막으면 촬영을 처음부터 다시 시키게 된다.
+    final source = faces.isEmpty
+        ? decoded
+        : _crop(decoded, _withMargin(faces.first.boundingBox, 0.2));
+
+    // 얼굴만 1024px → OpenAI detail:"high" 에서 실효 해상도가 3배 이상 올라간다
+    final resized = img.copyResize(source, width: 1024);
+
+    final path = '${original.parent.path}/skin_${original.uri.pathSegments.last}';
+    return File(path)..writeAsBytesSync(img.encodeJpg(resized, quality: 80));
+  } finally {
+    detector.close();   // 안 닫으면 촬영할 때마다 네이티브 검출기가 쌓인다
+  }
+}
+
+/// 여백을 붙인 사각형이 사진 밖으로 나갈 수 있다. 그대로 넘기면 copyCrop 이 던진다.
+img.Image _crop(img.Image photo, Rect rect) {
+  final left   = rect.left.toInt().clamp(0, photo.width - 1);
+  final top    = rect.top.toInt().clamp(0, photo.height - 1);
+  final right  = rect.right.toInt().clamp(left + 1, photo.width);
+  final bottom = rect.bottom.toInt().clamp(top + 1, photo.height);
+
+  return img.copyCrop(photo,
+      x: left, y: top, width: right - left, height: bottom - top);
 }
 ```
 
@@ -5867,6 +5965,21 @@ npx wrangler pages deploy build/web --project-name=skinplate
 ---
 
 ## 부록. 리뷰 반영 이력
+
+### v1.7 (2026-08-10 · §2.12 얼굴 게이트 — 호출되지만 없던 함수 채움)
+
+**PRD 변경 없음.** 게이트 구조(v1.6)는 그대로 두고, `check()` 가 부르는데 정의가 없던 두 함수와 크롭 경로를 채웠다. Day 5 에 FE-A 가 빈칸부터 시작하지 않게 하는 것이 목적이다.
+
+| 항목 | 변경 |
+|---|---|
+| **`_toInputImage` [신설]** | 호출만 있고 본문이 없었다. **플랫폼별 포맷이 다르다** — Android `nv21` · iOS `bgra8888`. 어긋나도 예외가 안 나고 **검출이 0개로 나와** "얼굴이 화면 안에 들어오게 해주세요"만 계속 뜬다. 센서 방향(`rotation`) 누락도 같은 증상이라 원인을 게이트 조건에서 찾게 된다. 포맷을 못 읽으면 `FaceGateUnavailable` 로 열어 준다 |
+| **`_withMargin` [신설]** | 호출만 있고 본문이 없었다. 딱 맞게 자르면 **이마와 턱이 잘리는데 그 둘이 유분·트러블 판정 정보량이 가장 많은 영역**이다 |
+| **`_faceLuminance` 수정** | 기존 주기가 "양 플랫폼을 `yuv420` 으로 통일하라"였는데, 그러면 **iOS 에서 ML Kit 이 프레임을 못 읽는다.** 포맷 통일 대신 **밝기 쪽을 분기**한다 — `nv21` 은 Y 평면, `bgra8888` 은 Rec.601 근사 |
+| **⚠️ 크롭 좌표계 [수정]** | `faceRect` 는 **프리뷰(1280×720) 좌표**인데 크롭 대상은 **원본 사진(4032×3024)** 이라, 그대로 쓰면 사진 귀퉁이의 엉뚱한 조각이 잘려 OpenAI 로 간다. **게이트는 초록불인데 결과만 이상해진다.** 배율 계산 대신 **사진에서 한 번 더 검출**한다 — 촬영 1회당 50~100ms 이고 EXIF 방향까지 `fromFilePath` 가 처리한다. `faceRect` 는 프리뷰 오버레이 전용으로 격하 |
+| **`prepareSkinPhoto` 보강** | `File(...)` 자리표시자를 실제 경로로. 사진에서 얼굴을 못 찾으면 **크롭을 포기하고 원본을 올린다**(게이트 통과한 사용자를 여기서 막지 않는다). 크롭 사각형 경계 클램프, `detector.close()` 를 `finally` 로 |
+| **완료 조건 추가** | **실기기 Android 1대 · iOS 1대에서 게이트가 실제로 열리는지** 확인을 커밋 조건에 포함. 에뮬레이터 통과는 근거가 안 된다 |
+
+---
 
 ### v1.5 (2026-08-10 · PRD v1.6 대응 — 배포 구성 · 웹 추가)
 
