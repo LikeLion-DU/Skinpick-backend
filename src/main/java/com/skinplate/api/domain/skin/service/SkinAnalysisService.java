@@ -13,15 +13,15 @@ import com.skinplate.api.global.exception.ErrorCode;
 import com.skinplate.api.infra.openai.VisionClient;
 import com.skinplate.api.infra.openai.dto.OpenAiSkinResult;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Base64;
-import java.util.Locale;
-import java.util.Set;
 
 /**
  * 피부 분석 흐름 조율. 점수·요약 뱃지·갭 코멘트는 이미 완성된 세 컴포넌트가 계산하고,
@@ -31,9 +31,18 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class SkinAnalysisService {
 
-    /** 서버는 이미지를 저장하지 않는다. 형식만 보고 Base64 로 바꿔 보낸 뒤 버린다. (PRD §9.6) */
-    private static final Set<String> ALLOWED_CONTENT_TYPES =
-            Set.of("image/jpeg", "image/jpg", "image/png");
+    /**
+     * 서버는 이미지를 저장하지 않는다. 형식만 보고 Base64 로 바꿔 보낸 뒤 버린다. (PRD §9.6)
+     *
+     * 형식은 Content-Type 헤더가 아니라 실제 바이트로 판별한다. 헤더는 클라이언트가
+     * 말하는 값이라, 모바일 갤러리가 application/octet-stream 을 보내면 멀쩡한 사진이
+     * 400 으로 막히고, 반대로 헤더만 image/png 인 파일은 그대로 통과한다.
+     */
+    private static final byte[] JPEG_MAGIC = {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF};
+    private static final byte[] PNG_MAGIC  = {(byte) 0x89, 0x50, 0x4E, 0x47};
+
+    /** summary 컬럼이 VARCHAR(300) 이다. */
+    private static final int SUMMARY_MAX_LENGTH = 300;
 
     private final AppUserRepository userRepository;
     private final SkinAnalysisRepository skinAnalysisRepository;
@@ -53,7 +62,8 @@ public class SkinAnalysisService {
      * 트랜잭션이 아예 열리지 않는다 — 그 함정을 피하려고 템플릿을 쓴다.
      */
     public SkinAnalysisResponse analyze(Long userId, MultipartFile image) {
-        OpenAiSkinResult aiResult = visionClient.analyzeSkin(encodeBase64(image));
+        EncodedImage encoded = encode(image);
+        OpenAiSkinResult aiResult = visionClient.analyzeSkin(encoded.base64(), encoded.mediaType());
 
         // 얼굴이 아니면 저장하지 않는다. 남겨두면 /latest 가 얼굴 아닌 사진의 점수를 돌려준다.
         if (!aiResult.faceDetected()) {
@@ -88,7 +98,7 @@ public class SkinAnalysisService {
 
         SkinAnalysis analysis = skinAnalysisRepository.save(SkinAnalysis.create(
                 user, metrics, scoreCalculator.calculate(metrics),
-                aiResult.summary(), toJson(aiResult)));
+                trimSummary(aiResult.summary()), toJson(aiResult)));
 
         return SkinAnalysisResponse.from(analysis,
                 highlightBuilder.build(metrics),
@@ -107,24 +117,57 @@ public class SkinAnalysisService {
                 skinTypeGapAnalyzer.analyze(analysis.getUser().getDeclaredSkinType(), metrics));
     }
 
-    private String encodeBase64(MultipartFile image) {
+    /**
+     * 5MB 원본과 Base64 문자열을 AI 호출이 끝날 때까지 힙에 들고 있으므로
+     * 요청 하나가 최대 12MB 쯤 쓴다. 시연 규모에서는 문제없지만, 동시 업로드가
+     * 스무 건을 넘기면 작은 컨테이너에서는 OOM 이다. 그때는 업로드 상한을 낮춘다.
+     */
+    private EncodedImage encode(MultipartFile image) {
         if (image == null || image.isEmpty()) {
             throw new BusinessException(ErrorCode.INVALID_IMAGE);
         }
 
-        String contentType = image.getContentType();
-        if (contentType == null
-                || !ALLOWED_CONTENT_TYPES.contains(contentType.toLowerCase(Locale.ROOT))) {
-            throw new BusinessException(ErrorCode.INVALID_IMAGE,
-                    "JPEG 또는 PNG 이미지만 업로드할 수 있습니다.");
-        }
+        byte[] bytes = readBytes(image);
 
+        return new EncodedImage(Base64.getEncoder().encodeToString(bytes), detectMediaType(bytes));
+    }
+
+    private byte[] readBytes(MultipartFile image) {
         try {
-            return Base64.getEncoder().encodeToString(image.getBytes());
+            return image.getBytes();
         } catch (IOException e) {
-            throw new BusinessException(ErrorCode.INVALID_IMAGE, e);
+            // 업로드가 잘못된 게 아니라 서버가 파일을 못 읽은 것이다(임시 디렉터리 포화 등).
+            // 400 으로 내리면 사용자는 멀쩡한 사진을 계속 다시 올리고,
+            // 서버가 망가진 동안 5xx 지표(PRD §8.2)는 깨끗한 채로 남는다.
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR, e);
         }
     }
+
+    /** 판별한 타입은 OpenAI 의 data URI 에 그대로 선언된다. 내용과 어긋나면 400 이다. */
+    private String detectMediaType(byte[] bytes) {
+        if (startsWith(bytes, JPEG_MAGIC)) return MediaType.IMAGE_JPEG_VALUE;
+        if (startsWith(bytes, PNG_MAGIC))  return MediaType.IMAGE_PNG_VALUE;
+
+        throw new BusinessException(ErrorCode.INVALID_IMAGE,
+                "JPEG 또는 PNG 이미지만 업로드할 수 있습니다.");
+    }
+
+    private static boolean startsWith(byte[] bytes, byte[] magic) {
+        return bytes.length >= magic.length
+                && Arrays.equals(bytes, 0, magic.length, magic, 0, magic.length);
+    }
+
+    /**
+     * 프롬프트의 "40자 이내"는 권고일 뿐이라 AI 가 길게 답할 수 있다.
+     * 300자를 넘기면 저장에서 터지는데, 그 시점엔 18초짜리 유료 호출이 이미 끝나 있어
+     * 되돌릴 방법이 없다. 잘라서라도 결과를 돌려준다.
+     */
+    private String trimSummary(String summary) {
+        if (summary == null || summary.length() <= SUMMARY_MAX_LENGTH) return summary;
+        return summary.substring(0, SUMMARY_MAX_LENGTH);
+    }
+
+    private record EncodedImage(String base64, String mediaType) {}
 
     /** raw_ai_response 는 jsonb 다. 파싱된 결과를 다시 직렬화해 원본 형태로 남긴다. */
     private String toJson(OpenAiSkinResult aiResult) {

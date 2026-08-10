@@ -52,19 +52,19 @@ public class OpenAiVisionClient implements VisionClient {
     }
 
     @Override
-    public OpenAiSkinResult analyzeSkin(String base64Image) {
+    public OpenAiSkinResult analyzeSkin(String base64Image, String mediaType) {
         return call(SkinAnalysisPrompt.SYSTEM, SkinAnalysisPrompt.USER, SkinAnalysisPrompt.SCHEMA,
-                "skin_analysis", base64Image, SKIN_DETAIL, OpenAiSkinResult.class);
+                "skin_analysis", base64Image, mediaType, SKIN_DETAIL, OpenAiSkinResult.class);
     }
 
     @Override
-    public OpenAiFoodResult analyzeFood(String base64Image) {
+    public OpenAiFoodResult analyzeFood(String base64Image, String mediaType) {
         return call(FoodAnalysisPrompt.SYSTEM, FoodAnalysisPrompt.USER, FoodAnalysisPrompt.SCHEMA,
-                "food_analysis", base64Image, FOOD_DETAIL, OpenAiFoodResult.class);
+                "food_analysis", base64Image, mediaType, FOOD_DETAIL, OpenAiFoodResult.class);
     }
 
     private <T> T call(String system, String user, Map<String, Object> schema, String schemaName,
-                       String base64Image, String detail, Class<T> type) {
+                       String base64Image, String mediaType, String detail, Class<T> type) {
 
         Map<String, Object> body = Map.of(
                 "model", model,
@@ -72,8 +72,10 @@ public class OpenAiVisionClient implements VisionClient {
                         Map.of("role", "system", "content", system),
                         Map.of("role", "user", "content", List.of(
                                 Map.of("type", "text", "text", user),
+                                // 선언한 타입과 실제 바이트가 어긋나면 400 이다.
+                                // image/jpeg 로 고정해 두면 PNG 를 올린 사용자만 "분석 실패"를 본다.
                                 Map.of("type", "image_url", "image_url", Map.of(
-                                        "url", "data:image/jpeg;base64," + base64Image,
+                                        "url", "data:" + mediaType + ";base64," + base64Image,
                                         "detail", detail))))),
                 "response_format", Map.of(
                         "type", "json_schema",

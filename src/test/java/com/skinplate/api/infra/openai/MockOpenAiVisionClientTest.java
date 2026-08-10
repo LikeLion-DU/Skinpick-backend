@@ -34,7 +34,7 @@ class MockOpenAiVisionClientTest {
     @Test
     @DisplayName("피부 응답은 문서의 시연 지표를 그대로 돌려준다")
     void skinMatchesDemoMetrics() {
-        OpenAiSkinResult result = client.analyzeSkin("무시된다");
+        OpenAiSkinResult result = client.analyzeSkin("무시된다", "image/jpeg");
 
         assertThat(result.faceDetected()).isTrue();
         assertThat(List.of(result.hydration(), result.oil(), result.redness(),
@@ -45,8 +45,8 @@ class MockOpenAiVisionClientTest {
     @Test
     @DisplayName("Mock 응답을 룰 엔진에 넣으면 발표에서 말할 60점이 나온다")
     void mockFoodReproducesDemoScore() {
-        OpenAiSkinResult skin = client.analyzeSkin("무시된다");
-        OpenAiFoodResult food = client.analyzeFood("무시된다");
+        OpenAiSkinResult skin = client.analyzeSkin("무시된다", "image/jpeg");
+        OpenAiFoodResult food = client.analyzeFood("무시된다", "image/jpeg");
 
         SkinMetrics metrics = SkinMetrics.of(skin.hydration(), skin.oil(),
                 skin.redness(), skin.trouble(), skin.barrier());
@@ -66,7 +66,9 @@ class MockOpenAiVisionClientTest {
     @Test
     @DisplayName("같은 입력에 항상 같은 값 — 무대에서 두 번 찍어도 같아야 한다")
     void isDeterministic() {
-        assertThat(client.analyzeSkin("a")).isEqualTo(client.analyzeSkin("b"));
-        assertThat(client.analyzeFood("a")).isEqualTo(client.analyzeFood("b"));
+        assertThat(client.analyzeSkin("a", "image/jpeg"))
+                .isEqualTo(client.analyzeSkin("b", "image/png"));
+        assertThat(client.analyzeFood("a", "image/jpeg"))
+                .isEqualTo(client.analyzeFood("b", "image/png"));
     }
 }

@@ -52,7 +52,7 @@ class OpenAiVisionClientTest {
     @DisplayName("정상 응답에서 다섯 지표를 꺼낸다")
     void parsesStructuredOutput() {
         OpenAiSkinResult result = clientOf(request -> Mono.just(json(HttpStatus.OK, ENVELOPE)), 5)
-                .analyzeSkin("base64");
+                .analyzeSkin("base64", "image/jpeg");
 
         assertThat(result.faceDetected()).isTrue();
         assertThat(result.hydration()).isEqualTo(38);
@@ -62,7 +62,7 @@ class OpenAiVisionClientTest {
     @Test
     @DisplayName("타임아웃은 AI_TIMEOUT 으로 구분된다 — 앱이 재시도 버튼을 띄우는 분기다")
     void timeoutMapsToAiTimeout() {
-        assertThatThrownBy(() -> clientOf(request -> Mono.never(), 1).analyzeSkin("base64"))
+        assertThatThrownBy(() -> clientOf(request -> Mono.never(), 1).analyzeSkin("base64", "image/jpeg"))
                 .isInstanceOf(OpenAiClientException.class)
                 .extracting("errorCode").isEqualTo(ErrorCode.AI_TIMEOUT);
     }
@@ -75,7 +75,7 @@ class OpenAiVisionClientTest {
         OpenAiSkinResult result = clientOf(request -> Mono.just(
                 calls.incrementAndGet() == 1
                         ? json(HttpStatus.TOO_MANY_REQUESTS, "{}")
-                        : json(HttpStatus.OK, ENVELOPE)), 5).analyzeSkin("base64");
+                        : json(HttpStatus.OK, ENVELOPE)), 5).analyzeSkin("base64", "image/jpeg");
 
         assertThat(result.hydration()).isEqualTo(38);
         assertThat(calls.get()).isEqualTo(2);
@@ -91,20 +91,20 @@ class OpenAiVisionClientTest {
         OpenAiSkinResult result = clientOf(request -> Mono.delay(Duration.ofMillis(300))
                 .then(Mono.just(calls.incrementAndGet() == 1
                         ? json(HttpStatus.TOO_MANY_REQUESTS, "{}")
-                        : json(HttpStatus.OK, ENVELOPE))), 1).analyzeSkin("base64");
+                        : json(HttpStatus.OK, ENVELOPE))), 1).analyzeSkin("base64", "image/jpeg");
 
         assertThat(result.hydration()).isEqualTo(38);
         assertThat(calls.get()).isEqualTo(2);
     }
 
     @Test
-    @DisplayName("파싱 실패는 원본 응답을 예외에 실어 보낸다 — DB 에 남겨야 한다")
+    @DisplayName("파싱 실패는 원본 응답을 예외에 실어 보낸다 — 진단에 이것 말고는 단서가 없다")
     void parseFailureCarriesRawResponse() {
         String broken = """
                 {"choices":[{"message":{"content":"이건 JSON 이 아니다"}}]}""";
 
         assertThatThrownBy(() -> clientOf(request -> Mono.just(json(HttpStatus.OK, broken)), 5)
-                .analyzeSkin("base64"))
+                .analyzeSkin("base64", "image/jpeg"))
                 .isInstanceOf(OpenAiClientException.class)
                 .extracting("rawResponse").isEqualTo("이건 JSON 이 아니다");
     }
@@ -117,7 +117,7 @@ class OpenAiVisionClientTest {
         assertThatThrownBy(() -> clientOf(request -> {
             calls.incrementAndGet();
             return Mono.just(json(HttpStatus.INTERNAL_SERVER_ERROR, "{}"));
-        }, 5).analyzeSkin("base64"))
+        }, 5).analyzeSkin("base64", "image/jpeg"))
                 .isInstanceOf(OpenAiClientException.class)
                 .extracting("errorCode").isEqualTo(ErrorCode.AI_ANALYSIS_FAILED);
 

@@ -20,12 +20,14 @@ import com.skinplate.api.infra.openai.dto.OpenAiSkinResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -118,15 +120,40 @@ class SkinAnalysisServiceTest {
     @Test
     @DisplayName("JPEG·PNG 가 아니면 AI 를 부르기 전에 막는다 — 호출 한 번이 곧 비용이다")
     void analyze_rejectsNonImage_beforeCallingAi() {
+        // 헤더는 image/jpeg 라고 말하지만 내용은 PDF 다. 헤더를 믿으면 이게 통과한다.
         MultipartFile pdf = new MockMultipartFile(
-                "image", "face.pdf", "application/pdf", new byte[]{1, 2, 3});
+                "image", "face.jpg", "image/jpeg", "%PDF-1.4".getBytes(StandardCharsets.UTF_8));
 
         assertThatThrownBy(() -> skinAnalysisService.analyze(USER_ID, pdf))
                 .isInstanceOf(BusinessException.class)
                 .extracting(exception -> ((BusinessException) exception).getErrorCode())
                 .isEqualTo(ErrorCode.INVALID_IMAGE);
 
-        verify(visionClient, never()).analyzeSkin(anyString());
+        verify(visionClient, never()).analyzeSkin(anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("PNG 는 PNG 로 선언해서 보낸다 — image/jpeg 로 고정하면 OpenAI 가 거절한다")
+    void analyze_declaresActualMediaType() {
+        givenUser(null);
+        givenSkinResult(new OpenAiSkinResult(true, 38, 52, 64, 25, 78, "요약"));
+        MultipartFile png = new MockMultipartFile("image", "shot.png", "application/octet-stream",
+                new byte[]{(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A});
+
+        skinAnalysisService.analyze(USER_ID, png);
+
+        ArgumentCaptor<String> mediaType = ArgumentCaptor.forClass(String.class);
+        verify(visionClient).analyzeSkin(anyString(), mediaType.capture());
+        assertThat(mediaType.getValue()).isEqualTo("image/png");
+    }
+
+    @Test
+    @DisplayName("summary 가 300자를 넘겨도 저장에서 터지지 않는다 — 유료 호출은 이미 끝나 있다")
+    void analyze_trimsOverlongSummary() {
+        givenUser(null);
+        givenSkinResult(new OpenAiSkinResult(true, 38, 52, 64, 25, 78, "가".repeat(500)));
+
+        assertThat(skinAnalysisService.analyze(USER_ID, jpegImage()).summary()).hasSize(300);
     }
 
     @Test
@@ -176,10 +203,12 @@ class SkinAnalysisServiceTest {
     }
 
     private void givenSkinResult(OpenAiSkinResult result) {
-        given(visionClient.analyzeSkin(anyString())).willReturn(result);
+        given(visionClient.analyzeSkin(anyString(), anyString())).willReturn(result);
     }
 
+    /** 앞 세 바이트가 JPEG 시그니처다. 형식 판별이 헤더가 아니라 여기를 본다. */
     private MultipartFile jpegImage() {
-        return new MockMultipartFile("image", "face.jpg", "image/jpeg", new byte[]{1, 2, 3});
+        return new MockMultipartFile("image", "face.jpg", "image/jpeg",
+                new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, (byte) 0xE0});
     }
 }

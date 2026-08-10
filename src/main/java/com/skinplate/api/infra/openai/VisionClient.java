@@ -9,7 +9,11 @@ import com.skinplate.api.infra.openai.dto.OpenAiSkinResult;
  */
 public interface VisionClient {
 
-    OpenAiSkinResult analyzeSkin(String base64Image);
+    /**
+     * @param mediaType 실제 바이트에서 판별한 image/jpeg 또는 image/png.
+     *                  data URI 에 선언하는 값이라 내용과 어긋나면 OpenAI 가 요청을 거절한다.
+     */
+    OpenAiSkinResult analyzeSkin(String base64Image, String mediaType);
 
-    OpenAiFoodResult analyzeFood(String base64Image);
+    OpenAiFoodResult analyzeFood(String base64Image, String mediaType);
 }

@@ -24,13 +24,13 @@ import java.util.List;
 public class MockOpenAiVisionClient implements VisionClient {
 
     @Override
-    public OpenAiSkinResult analyzeSkin(String base64Image) {
+    public OpenAiSkinResult analyzeSkin(String base64Image, String mediaType) {
         return new OpenAiSkinResult(true, 38, 52, 64, 25, 78,
                 "피부 장벽은 양호하지만 건조하고 홍조가 관찰됩니다.");
     }
 
     @Override
-    public OpenAiFoodResult analyzeFood(String base64Image) {
+    public OpenAiFoodResult analyzeFood(String base64Image, String mediaType) {
         return new OpenAiFoodResult(
                 true,
                 "돼지고기 김치찌개",
