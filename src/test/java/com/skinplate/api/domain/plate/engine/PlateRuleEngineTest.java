@@ -90,7 +90,7 @@ class PlateRuleEngineTest {
     private static FoodAnalysis food(String name, CookingMethod method, boolean spicy,
                                      Nutrition nutrition, List<FoodIngredient> ingredients) {
         FoodAnalysis food = FoodAnalysis.create(
-                null, "http://x/img.jpg", name, "한식", nutrition, method, spicy, "{}");
+                null, name, "한식", nutrition, method, spicy, "{}");
         food.addIngredients(ingredients);
         return food;
     }
