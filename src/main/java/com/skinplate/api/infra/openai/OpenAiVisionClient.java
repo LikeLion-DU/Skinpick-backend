@@ -102,8 +102,24 @@ public class OpenAiVisionClient implements VisionClient {
                 .onErrorMap(TimeoutException.class,
                         error -> new OpenAiClientException(ErrorCode.AI_TIMEOUT, error))
                 .onErrorMap(error -> !(error instanceof OpenAiClientException),
-                        error -> new OpenAiClientException(ErrorCode.AI_ANALYSIS_FAILED, error))
+                        error -> new OpenAiClientException(ErrorCode.AI_ANALYSIS_FAILED, logCause(error)))
                 .block();
+    }
+
+    /**
+     * 원인을 여기서 남기지 않으면 사라진다. GlobalExceptionHandler 는 ErrorCode 와
+     * 사용자용 메시지만 찍기 때문에, 키가 틀린 401 과 실제 OpenAI 장애가
+     * 화면에도 로그에도 "분석에 실패했습니다" 한 줄로 똑같이 보인다.
+     * 그 상태에서는 원인을 찾으려고 OpenAI 상태 페이지부터 열게 된다.
+     */
+    private Throwable logCause(Throwable error) {
+        if (error instanceof WebClientResponseException response) {
+            log.warn("OpenAI 호출 실패 {} — {}",
+                    response.getStatusCode(), response.getResponseBodyAsString());
+        } else {
+            log.warn("OpenAI 호출 실패", error);
+        }
+        return error;
     }
 
     /** Structured Outputs 라도 본문은 choices[0].message.content 안의 문자열이다. */
