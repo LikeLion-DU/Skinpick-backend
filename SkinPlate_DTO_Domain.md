@@ -39,7 +39,7 @@ skinplate-api/
 │   ├── application.yml
 │   ├── application-local.yml
 │   ├── application-prod.yml
-│   └── db/migration/V1__init.sql
+│   └── db/migration/  V1__init.sql · V2__drop_image_url.sql
 └── src/main/java/com/skinplate/api/
     ├── SkinPlateApplication.java
     ├── global/
@@ -267,6 +267,11 @@ logging.level:
 ---
 
 ## 1.4 DB 마이그레이션
+
+> **아래 V1 블록은 최종 스키마다.** 실제 저장소의 `V1__init.sql` 은 `image_url` 을 포함한
+> 상태로 이미 커밋돼 있고(마이그레이션은 수정하지 않는다), `V2__drop_image_url.sql` 이
+> 그 컬럼을 제거한다. 이 문서를 보고 새로 만들면 V1 에 애초에 컬럼이 없으므로
+> V2 는 `DROP COLUMN IF EXISTS` 로 두 경우를 모두 견딘다.
 
 **`src/main/resources/db/migration/V1__init.sql`**
 

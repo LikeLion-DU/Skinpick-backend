@@ -42,10 +42,6 @@ app:
     model: gpt-4o
     timeout-seconds: 18            # 재시도 없는 단발. 클라이언트 25초보다 반드시 짧아야 한다
     mock: ${AI_MOCK:false}
-  storage:
-    base-path: ${STORAGE_BASE_PATH:./uploads}
-    # ★ API_BASE_URL 과 반드시 같은 호스트. localhost 로 두면 에뮬레이터에서 사진만 안 뜬다
-    base-url: ${STORAGE_BASE_URL:http://10.0.2.2:8080/uploads}
 
 springdoc:
   swagger-ui.path: /swagger-ui/index.html
