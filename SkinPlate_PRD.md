@@ -2968,7 +2968,7 @@ public class OpenAiVisionClient {
 | **429 (rate limit)** | **2초 후 1회 재시도.** 실패하면 `AI_ANALYSIS_FAILED` |
 | `faceDetected: false` | `FACE_NOT_DETECTED` 422 → "밝은 곳에서 다시 촬영" 안내 |
 | `foodDetected: false` | `FOOD_NOT_DETECTED` 422 |
-| 스키마 파싱 실패 | 원본을 `raw_ai_response`에 기록 후 `AI_ANALYSIS_FAILED` |
+| 스키마 파싱 실패 | 원본을 **로그**에 남기고 `AI_ANALYSIS_FAILED`. `raw_ai_response`는 분석이 성공했을 때만 채운다 — 실패 응답에는 지표가 없어 NOT NULL 컬럼을 가짜 값으로 메워야 하고, 그 행이 `GET /skin/analyses/latest`에 잡혀 홈 화면이 0점을 띄운다 |
 | **Mock 모드** | `app.ai.mock=true` 이면 고정 응답 반환 (**발표 백업 플랜**) |
 
 ```java
