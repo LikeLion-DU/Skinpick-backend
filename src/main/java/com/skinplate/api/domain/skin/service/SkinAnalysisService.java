@@ -128,8 +128,9 @@ public class SkinAnalysisService {
         }
 
         byte[] bytes = readBytes(image);
+        String mediaType = detectMediaType(bytes);   // 인코딩 전에 막는다. 5MB 를 헛돌리지 않는다
 
-        return new EncodedImage(Base64.getEncoder().encodeToString(bytes), detectMediaType(bytes));
+        return new EncodedImage(Base64.getEncoder().encodeToString(bytes), mediaType);
     }
 
     private byte[] readBytes(MultipartFile image) {
@@ -164,7 +165,14 @@ public class SkinAnalysisService {
      */
     private String trimSummary(String summary) {
         if (summary == null || summary.length() <= SUMMARY_MAX_LENGTH) return summary;
-        return summary.substring(0, SUMMARY_MAX_LENGTH);
+
+        // 경계가 이모지 한가운데면 반쪽짜리 문자가 남고, Postgres 가 UTF-8 인코딩에서 거절한다.
+        // 막으려던 그 500 이 그대로 난다.
+        int end = Character.isHighSurrogate(summary.charAt(SUMMARY_MAX_LENGTH - 1))
+                ? SUMMARY_MAX_LENGTH - 1
+                : SUMMARY_MAX_LENGTH;
+
+        return summary.substring(0, end);
     }
 
     private record EncodedImage(String base64, String mediaType) {}

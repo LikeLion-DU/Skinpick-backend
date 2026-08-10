@@ -157,6 +157,19 @@ class SkinAnalysisServiceTest {
     }
 
     @Test
+    @DisplayName("자르는 자리가 이모지 한가운데면 한 글자 덜 자른다 — 반쪽 문자는 저장에서 터진다")
+    void analyze_doesNotSplitSurrogatePair() {
+        givenUser(null);
+        // 299자 + 이모지 → 300번째 char 가 이모지의 앞쪽 절반이다
+        givenSkinResult(new OpenAiSkinResult(true, 38, 52, 64, 25, 78, "가".repeat(299) + "🙂"));
+
+        String summary = skinAnalysisService.analyze(USER_ID, jpegImage()).summary();
+
+        assertThat(summary).hasSize(299);
+        assertThat(summary.chars().anyMatch(c -> Character.isSurrogate((char) c))).isFalse();
+    }
+
+    @Test
     @DisplayName("남의 분석 id 는 403 이 아니라 404 다 — 존재 여부를 알려주지 않는다")
     void get_otherUsersAnalysis_returns404() {
         given(skinAnalysisRepository.findByIdAndUserId(99L, USER_ID)).willReturn(Optional.empty());
