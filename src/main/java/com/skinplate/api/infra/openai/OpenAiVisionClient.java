@@ -96,7 +96,11 @@ public class OpenAiVisionClient implements VisionClient {
                 // 429 만 재시도한다. 응답이 즉시 오므로 최악 0.1+2+18 ≈ 20초로 앱 타임아웃 안에 들어온다.
                 // 예산과 처리량 상한은 다른 축이고, 429 는 재시도가 유일한 정답인 에러다. (PRD §17.2)
                 .retryWhen(Retry.fixedDelay(1, Duration.ofSeconds(2))
-                        .filter(error -> error instanceof WebClientResponseException.TooManyRequests))
+                        .filter(error -> error instanceof WebClientResponseException.TooManyRequests)
+                        // 기본 동작은 재시도가 소진되면 원래 예외를 Reactor 내부 예외로 갈아끼운다.
+                        // 그러면 429 응답 본문(어떤 한도인지·언제 풀리는지)이 로그에서 사라지는데,
+                        // 하필 그게 429 가 두 번 연속인 상황 — 본문이 가장 필요한 때다.
+                        .onRetryExhaustedThrow((spec, signal) -> signal.failure()))
                 .map(this::extractContent)
                 .map(content -> parse(content, type))
                 .onErrorMap(TimeoutException.class,

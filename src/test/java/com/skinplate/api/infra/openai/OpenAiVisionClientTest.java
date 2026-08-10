@@ -11,6 +11,7 @@ import org.springframework.http.MediaType;
 import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.reactive.function.client.ExchangeFunction;
 import org.springframework.web.reactive.function.client.WebClient;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 import reactor.core.publisher.Mono;
 
 import java.time.Duration;
@@ -18,6 +19,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 /**
  * 네트워크 없이 응답만 갈아끼운다. WebClient 자체는 실제 구현을 쓰므로
@@ -107,6 +109,26 @@ class OpenAiVisionClientTest {
                 .analyzeSkin("base64", "image/jpeg"))
                 .isInstanceOf(OpenAiClientException.class)
                 .extracting("rawResponse").isEqualTo("이건 JSON 이 아니다");
+    }
+
+    @Test
+    @DisplayName("429 가 두 번 연속이면 원인이 429 그대로 남는다 — 응답 본문이 로그의 유일한 단서다")
+    void retryExhaustedKeepsOriginalCause() {
+        AtomicInteger calls = new AtomicInteger();
+
+        Throwable thrown = catchThrowable(() -> clientOf(request -> {
+            calls.incrementAndGet();
+            return Mono.just(json(HttpStatus.TOO_MANY_REQUESTS, "{\"error\":{\"code\":\"rate_limit_exceeded\"}}"));
+        }, 5).analyzeSkin("base64", "image/jpeg"));
+
+        // Reactor 기본값은 여기서 원인을 RetryExhaustedException 으로 갈아끼운다.
+        // 그러면 로깅이 상태코드·본문 분기를 못 타고 내부 스택트레이스만 남는다.
+        assertThat(thrown)
+                .isInstanceOf(OpenAiClientException.class)
+                .hasCauseInstanceOf(WebClientResponseException.TooManyRequests.class);
+        assertThat(((OpenAiClientException) thrown).getErrorCode())
+                .isEqualTo(ErrorCode.AI_ANALYSIS_FAILED);
+        assertThat(calls.get()).isEqualTo(2);
     }
 
     @Test
