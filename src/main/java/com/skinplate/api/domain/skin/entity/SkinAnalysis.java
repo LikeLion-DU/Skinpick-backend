@@ -23,9 +23,6 @@ public class SkinAnalysis extends BaseTimeEntity {
     @JoinColumn(name = "user_id", nullable = false)
     private AppUser user;
 
-    @Column(nullable = false, length = 500)
-    private String imageUrl;
-
     @Column(nullable = false)
     private int skinScore;
 
@@ -41,14 +38,12 @@ public class SkinAnalysis extends BaseTimeEntity {
     private String rawAiResponse;
 
     public static SkinAnalysis create(AppUser user,
-                                      String imageUrl,
                                       SkinMetrics metrics,
                                       int skinScore,
                                       String summary,
                                       String rawAiResponse) {
         SkinAnalysis analysis = new SkinAnalysis();
         analysis.user = user;
-        analysis.imageUrl = imageUrl;
         analysis.metrics = metrics;
         analysis.skinScore = Math.max(0, Math.min(100, skinScore));
         analysis.summary = summary;

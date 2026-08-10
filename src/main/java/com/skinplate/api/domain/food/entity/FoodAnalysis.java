@@ -26,9 +26,6 @@ public class FoodAnalysis extends BaseTimeEntity {
     @JoinColumn(name = "user_id", nullable = false)
     private AppUser user;
 
-    @Column(nullable = false, length = 500)
-    private String imageUrl;
-
     @Column(nullable = false, length = 100)
     private String foodName;
 
@@ -53,7 +50,6 @@ public class FoodAnalysis extends BaseTimeEntity {
     private String rawAiResponse;
 
     public static FoodAnalysis create(AppUser user,
-                                      String imageUrl,
                                       String foodName,
                                       String foodCategory,
                                       Nutrition nutrition,
@@ -62,7 +58,6 @@ public class FoodAnalysis extends BaseTimeEntity {
                                       String rawAiResponse) {
         FoodAnalysis food = new FoodAnalysis();
         food.user = user;
-        food.imageUrl = imageUrl;
         food.foodName = foodName;
         food.foodCategory = foodCategory;
         food.nutrition = nutrition;

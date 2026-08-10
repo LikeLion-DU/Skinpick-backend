@@ -51,7 +51,7 @@ class MockOpenAiVisionClientTest {
         SkinMetrics metrics = SkinMetrics.of(skin.hydration(), skin.oil(),
                 skin.redness(), skin.trouble(), skin.barrier());
 
-        FoodAnalysis analysis = FoodAnalysis.create(null, "local", food.foodName(),
+        FoodAnalysis analysis = FoodAnalysis.create(null, food.foodName(),
                 food.foodCategory(),
                 Nutrition.of(food.nutrition().caloriesKcal(), food.nutrition().proteinG(),
                         food.nutrition().fatG(), food.nutrition().carbG(),
