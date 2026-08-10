@@ -754,17 +754,31 @@ final gate = faceGate();   // 웹이면 통과만 시키는 스텁이 온다
 이에 따라 **API도 컨테이너화한다.** §9.3에서 "API는 컨테이너화하지 않는다"고 적었던 것은 노트북 시연 전제였고, 지금은 무효다.
 
 ```dockerfile
-# Dockerfile — 멀티스테이지, 30줄이면 끝난다
-FROM gradle:8-jdk21 AS build
-COPY . /src
+# Dockerfile — 멀티스테이지, 20줄이면 끝난다
+FROM eclipse-temurin:21-jdk AS build
 WORKDIR /src
-RUN gradle bootJar --no-daemon
+
+# 빌드 스크립트를 소스보다 먼저 복사해 의존성 레이어를 분리한다.
+# 소스만 고친 재배포에서 내려받기를 건너뛴다 — 첫 배포는 여러 번 다시 올리게 된다.
+COPY gradlew settings.gradle build.gradle ./
+COPY gradle ./gradle
+RUN chmod +x gradlew && ./gradlew dependencies --no-daemon
+
+COPY src ./src
+RUN ./gradlew bootJar --no-daemon
 
 FROM eclipse-temurin:21-jre
-COPY --from=build /src/build/libs/*.jar /app.jar
-ENV SPRING_PROFILES_ACTIVE=prod
-ENTRYPOINT ["java","-jar","/app.jar"]
+WORKDIR /app
+COPY --from=build /src/build/libs/*.jar app.jar
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "app.jar"]
 ```
+
+> **`.dockerignore` 가 Dockerfile 만큼 중요하다.** 없으면 `COPY` 가 `.env` 를 그대로 이미지에 굽는다. `JWT_SECRET`·`OPENAI_API_KEY`·`DB_PASSWORD` 는 **레이어에 한 번 들어가면 뒤에서 지워도 남는다.** `build/`·`.gradle/` 도 함께 제외한다 — 호스트 캐시가 컨테이너 빌드를 오염시킨다.
+>
+> **`SPRING_PROFILES_ACTIVE` 를 이미지에 박지 않는다.** 플랫폼 환경변수로 넘기는 값과 중복이고, 박아두면 같은 이미지를 로컬에서 띄워 확인할 수 없다.
+>
+> **`PORT` 는 플랫폼이 주입한다.** Railway·Render 모두 컨테이너에 `PORT` 를 넣고 **그 포트로만** 트래픽을 보낸다. `application.yml` 에 `server.port: ${PORT:8080}` 이 없으면 컨테이너는 8080 에서 멀쩡히 뜨는데 헬스체크가 끝까지 안 붙고, 로그에는 아무 에러도 없다.
 
 #### DB — Supabase 무료 Postgres로 **확정**
 
