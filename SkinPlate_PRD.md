@@ -658,14 +658,15 @@ flowchart TB
 
 **피부 상태 판정에는 절대 쓰지 않는다.** ML Kit이 주는 `smilingProbability`, `leftEyeOpenProbability` 같은 값으로 트러블이나 홍조를 추정하려 들면, "AI는 인식, 로직은 Backend"라는 우리 구조가 무너지고 근거 없는 숫자가 하나 더 생긴다. **게이트와 크롭까지가 전부다.**
 
-**그리고 웹에서는 적용되지 않는다.** `google_mlkit_face_detection`은 Android/iOS 전용 플러그인이라 Flutter Web 빌드에 들어가지 않는다. **`kIsWeb`이면 게이트를 건너뛰고 파일 선택 경로를 쓴다**(§6.1).
+**그리고 웹에서는 적용되지 않는다.** `google_mlkit_face_detection`은 Android/iOS 전용 플러그인이라 Flutter Web 빌드에 들어가지 않는다. 웹은 프리뷰·게이트 없이 파일 선택 경로만 쓴다(§6.1).
+
+> **`kIsWeb` 만으로는 못 막는다.** `kIsWeb`은 런타임 분기이고 `import`는 컴파일 타임이다. 게이트 코드가 ML Kit을 import하고 그 파일이 웹에서 도달 가능하면, 분기를 아무리 걸어도 웹 빌드가 깨진다. **조건부 import로 ML Kit이 웹 번들에 들어가지 않게 막고, 웹은 파일 선택 경로만 쓴다. 구현은 설계서 §2.12 참조.**
 
 ```dart
-if (kIsWeb) {
-  // 프리뷰·게이트 없이 파일 선택 → 그대로 업로드
-  return _pickFromFiles();
-}
-return _cameraWithFaceGate();
+// 호출부는 팩토리 하나만 부른다 — ML Kit 타입을 만나지 않는다
+import 'face_gate_stub.dart' if (dart.library.io) 'face_gate_mlkit.dart';
+
+final gate = faceGate();   // 웹이면 통과만 시키는 스텁이 온다
 ```
 
 > 게이트가 없어도 웹 플로우는 끊기지 않는다. 얼굴이 아닌 사진이 올라오면 서버가 `faceDetected:false`로 응답하고 앱이 재촬영을 안내한다(§17.4) — 게이트가 하던 일을 한 번의 왕복으로 대신할 뿐이다.

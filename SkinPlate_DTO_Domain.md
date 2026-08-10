@@ -4,7 +4,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | v1.5 |
+| 문서 버전 | v1.6 |
 | 기준 문서 | Skin Plate PRD & Technical Design **v1.6** |
 | 범위 | 설정, 마이그레이션, Entity, Enum, Repository, DTO, Rule Engine 골격 (Backend) / DTO, Entity, Repository 인터페이스 (Flutter) |
 | 제외 | Service·Controller 구현체, OpenAI 호출 구현, UI 위젯 |
@@ -5518,20 +5518,42 @@ abstract interface class RecommendationRepository {
 
 PRD §9.5의 게이트를 구현한다. **판정이 아니라 게이트와 크롭 전용**이다.
 
-> **웹에서는 적용되지 않는다.** `google_mlkit_face_detection`은 Android/iOS 전용이라 Flutter Web 빌드에 들어가지 않는다. **`kIsWeb`이면 게이트를 건너뛰고 파일 선택 경로를 쓴다** — 아래 `FaceGate`는 호출조차 하지 않는다.
->
-> ```dart
-> import 'package:flutter/foundation.dart' show kIsWeb;
->
-> if (kIsWeb) return _pickFromFiles();   // 프리뷰·게이트 없이 업로드
-> return _cameraWithFaceGate();
-> ```
->
-> 얼굴이 아닌 사진이 올라오면 서버가 `faceDetected:false`로 응답하므로 플로우는 끊기지 않는다(PRD §6.1).
+### 2.12.1 왜 파일만 갈라서는 안 되는가
+
+웹에는 ML Kit이 없다. 그런데 **`kIsWeb`으로는 막을 수 없다.**
+
+```dart
+if (kIsWeb) return _pickFromFiles();   // ← 이걸로는 웹 빌드가 안 살아난다
+```
+
+`kIsWeb`은 **런타임 분기**이고 `import`는 **컴파일 타임**이다. 웹 번들을 만들 때 컴파일러는 도달 가능한 모든 import를 따라간다. 그래서 게이트 구현 파일이 `google_mlkit_face_detection`을 import하고, 그 파일을 웹에서도 닿는 코드가 import하면 — 분기를 아무리 걸어도 빌드가 깨진다.
+
+**파일을 둘로 나누는 것만으로도 부족하다.** 게이트의 시그니처가 ML Kit 타입에 오염돼 있으면 호출부가 그 타입을 만들어 넘겨야 하고, 그러면 **호출부가 ML Kit을 import하게 된다.**
+
+```dart
+Future<FaceGateResult> check(InputImage image, ...)   // InputImage = google_mlkit_commons
+```
+
+`InputImage`는 `dart:io`의 `File`을 참조한다. 웹 빌드는 컴파일 단계에서 죽고, 그 시점에 `kIsWeb`은 이미 늦었다.
+
+**경계를 파일이 아니라 타입 수준까지 밀어야 한다.**
+
+### 2.12.2 조건부 import 팩토리 구조 — 파일 4개
+
+| 파일 | 역할 | ML Kit |
+|---|---|---|
+| `domain/entities/face_gate_result.dart` | 결과 타입. 양쪽이 공유 | ❌ 순수 Dart |
+| `data/datasources/face_gate.dart` | 공용 인터페이스 + 조건부 import | ❌ 모른다 |
+| `data/datasources/face_gate_stub.dart` | 웹 기본값 | ❌ 없음 |
+| `data/datasources/face_gate_mlkit.dart` | 모바일 구현 | ✅ **여기서만** |
+
+호출부는 `createFaceGate()` 하나만 부르고 ML Kit 타입을 한 번도 만나지 않는다.
 
 **`lib/features/skin_analysis/domain/entities/face_gate_result.dart`**
 
 ```dart
+import 'dart:ui' show Rect;   // dart:ui 는 웹에도 있다. 플랫폼 중립이다.
+
 /// 촬영 버튼을 켤지 말지, 못 켠다면 뭐라고 안내할지.
 sealed class FaceGateResult {
   const FaceGateResult();
@@ -5540,7 +5562,7 @@ sealed class FaceGateResult {
 class FaceGateOk extends FaceGateResult {
   const FaceGateOk(this.faceRect);
   /// 크롭에 쓸 얼굴 영역 (여백 20% 포함)
-  final ({int left, int top, int width, int height}) faceRect;
+  final Rect faceRect;
 }
 
 class FaceGateBlocked extends FaceGateResult {
@@ -5550,16 +5572,72 @@ class FaceGateBlocked extends FaceGateResult {
   final String guide;
 }
 
+/// 웹처럼 게이트를 쓸 수 없는 환경. 촬영 버튼은 항상 열려 있다.
+class FaceGateUnavailable extends FaceGateResult {
+  const FaceGateUnavailable();
+}
+
 enum FaceGateReason { noFace, multipleFaces, tooSmall, notFrontal, tooDark }
 ```
 
 **`lib/features/skin_analysis/data/datasources/face_gate.dart`**
 
 ```dart
+import 'package:camera/camera.dart' show CameraImage;
+
+import '../../domain/entities/face_gate_result.dart';
+
+// dart.library.io 가 있으면 모바일 구현, 없으면(=웹) 스텁을 가져온다.
+// 이 한 줄이 웹 번들에서 ML Kit 을 완전히 걷어낸다.
+import 'face_gate_stub.dart'
+    if (dart.library.io) 'face_gate_mlkit.dart';
+
+/// 공용 인터페이스. ML Kit 타입이 하나도 등장하지 않는다.
+/// CameraImage 는 camera_platform_interface 타입이라 웹에서도 import 된다.
+abstract interface class FaceGate {
+  Future<FaceGateResult> check(CameraImage frame, int frameHeight);
+  void dispose();
+}
+
+/// 호출부가 쓰는 유일한 진입점. 두 구현 파일이 같은 이름으로 제공한다.
+FaceGate faceGate() => createFaceGate();
+```
+
+**`lib/features/skin_analysis/data/datasources/face_gate_stub.dart`** — 웹
+
+```dart
+import 'package:camera/camera.dart' show CameraImage;
+
+import '../../domain/entities/face_gate_result.dart';
+import 'face_gate.dart';
+
+/// 웹에는 ML Kit 이 없다. 게이트를 걸지 않고 그대로 통과시킨다.
+/// 얼굴이 아닌 사진이 올라와도 서버의 faceDetected:false 폴백이 받아 준다(PRD §6.1).
+FaceGate createFaceGate() => _NoGate();
+
+class _NoGate implements FaceGate {
+  @override
+  Future<FaceGateResult> check(CameraImage frame, int frameHeight) async =>
+      const FaceGateUnavailable();
+
+  @override
+  void dispose() {}
+}
+```
+
+**`lib/features/skin_analysis/data/datasources/face_gate_mlkit.dart`** — Android/iOS
+
+```dart
+import 'package:camera/camera.dart' show CameraImage;
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 
-class FaceGate {
-  FaceGate()
+import '../../domain/entities/face_gate_result.dart';
+import 'face_gate.dart';
+
+FaceGate createFaceGate() => MlKitFaceGate();
+
+class MlKitFaceGate implements FaceGate {
+  MlKitFaceGate()
       : _detector = FaceDetector(
           options: FaceDetectorOptions(
             performanceMode: FaceDetectorMode.fast,   // 실시간 프리뷰용
@@ -5575,15 +5653,10 @@ class FaceGate {
   static const double _maxHeadAngleDeg    = 15.0;  // 정면 허용 범위
   static const int    _minLuminance       = 60;    // 0~255
 
-  /// [luminanceOf] 는 얼굴 사각형을 받아 그 영역의 평균 휘도를 돌려준다.
-  /// 얼굴 영역은 이 메서드 안에서 검출되므로, 호출자가 미리 계산해 넘길 수 없다.
-  /// (그래서 int 가 아니라 콜백이다 — 순환 의존을 끊는 유일한 방법)
-  Future<FaceGateResult> check(
-    InputImage image,
-    int frameHeight,
-    int Function(Rect faceRect) luminanceOf,
-  ) async {
-    final faces = await _detector.processImage(image);
+  /// InputImage 생성이 이 파일 안에서 끝난다 — 호출부는 CameraImage 만 넘긴다.
+  @override
+  Future<FaceGateResult> check(CameraImage frame, int frameHeight) async {
+    final faces = await _detector.processImage(_toInputImage(frame));
 
     if (faces.isEmpty) {
       return const FaceGateBlocked(
@@ -5608,8 +5681,8 @@ class FaceGate {
           FaceGateReason.notFrontal, '정면을 봐주세요');
     }
 
-    // ML Kit은 밝기를 주지 않는다. 검출된 얼굴 영역으로 콜백을 불러 계산한다.
-    if (luminanceOf(face.boundingBox) < _minLuminance) {
+    // ML Kit 은 밝기를 주지 않는다. 검출된 얼굴 영역으로 직접 계산한다.
+    if (_faceLuminance(frame, face.boundingBox) < _minLuminance) {
       return const FaceGateBlocked(
           FaceGateReason.tooDark, '조금 더 밝은 곳에서 촬영해주세요');
     }
@@ -5617,11 +5690,12 @@ class FaceGate {
     return FaceGateOk(_withMargin(face.boundingBox, 0.2));
   }
 
+  @override
   void dispose() => _detector.close();
 }
 ```
 
-**밝기 계산 — YUV Y플레인을 그대로 읽는다**
+**밝기 계산 — YUV Y플레인을 그대로 읽는다** (같은 파일 안)
 
 ```dart
 /// CameraImage 의 planes[0] 이 곧 휘도(Y)다. RGB 변환이 필요 없다.
@@ -5630,7 +5704,7 @@ class FaceGate {
 /// 변환이 들어간다. 1080p 면 프레임당 200만 픽셀을 Dart 에서 도는 셈이라
 /// 프리뷰 FPS 가 눈에 띄게 떨어진다.
 /// 8픽셀 간격 샘플링이면 계산량이 1/64 이고, 조도 판정에는 차고 넘친다.
-int faceLuminance(CameraImage frame, Rect face, {int step = 8}) {
+int _faceLuminance(CameraImage frame, Rect face, {int step = 8}) {
   final y = frame.planes[0];
   var sum = 0, count = 0;
 
@@ -5653,14 +5727,14 @@ int faceLuminance(CameraImage frame, Rect face, {int step = 8}) {
 >
 > `image` 패키지는 **업로드 직전 크롭 한 번**에만 쓴다. 실시간 경로에는 넣지 않는다.
 
-**업로드 직전 크롭**
+**업로드 직전 크롭** — 모바일 전용 경로다
 
 ```dart
 Future<File> prepareSkinPhoto(File original, FaceGateOk gate) async {
   final decoded = img.decodeImage(await original.readAsBytes())!;
   final cropped = img.copyCrop(decoded,
-      x: gate.faceRect.left, y: gate.faceRect.top,
-      width: gate.faceRect.width, height: gate.faceRect.height);
+      x: gate.faceRect.left.toInt(),  y: gate.faceRect.top.toInt(),
+      width: gate.faceRect.width.toInt(), height: gate.faceRect.height.toInt());
 
   // 얼굴만 1024px → OpenAI detail:"high" 에서 실효 해상도가 3배 이상 올라간다
   final resized = img.copyResize(cropped, width: 1024);
@@ -5668,15 +5742,22 @@ Future<File> prepareSkinPhoto(File original, FaceGateOk gate) async {
 }
 ```
 
-**게이트에는 반드시 탈출구가 있어야 한다**
+### 2.12.3 두 구현은 같은 API 를 노출해야 한다
+
+`createFaceGate()` 의 이름·인자·반환 타입이 두 파일에서 **하나라도 다르면 한쪽 플랫폼에서만 컴파일이 깨진다.** 그리고 그건 그 플랫폼을 빌드해 봐야 안다 — 모바일만 돌려보고 있으면 웹이 깨진 걸 며칠 뒤에 발견한다.
+
+`FaceGate` 인터페이스를 양쪽이 `implements` 하게 둔 것이 그 방어다. 시그니처가 어긋나면 해당 파일 자체가 컴파일되지 않는다.
+
+### 2.12.4 게이트에는 반드시 탈출구가 있어야 한다
 
 게이트는 실패를 줄이려고 넣은 것이다. 탈출구가 없으면 **실패를 새로 만든다.**
 
 | 경로 | 게이트 |
 |---|---|
-| 카메라 촬영 | 적용. 4개 조건을 모두 통과해야 버튼 활성화 |
+| 카메라 촬영 (모바일) | 적용. 4개 조건을 모두 통과해야 버튼 활성화 |
 | **갤러리 업로드** | **우회한다.** 얼굴 검출은 하되 크롭에만 쓰고, 실패해도 원본을 그대로 올린다 |
 | 게이트 3회 연속 실패 | **"그래도 촬영" 버튼 노출.** 크롭 없이 전체 프레임 업로드 |
+| **웹** | 스텁이 `FaceGateUnavailable` 을 돌려주므로 항상 열려 있다 |
 
 ```dart
 if (_consecutiveFailures >= 3) {
@@ -5691,6 +5772,10 @@ if (_consecutiveFailures >= 3) {
 > **쓰지 말아야 할 곳** — `enableClassification: false`로 둔 것은 의도적이다. ML Kit이 주는 `smilingProbability`·`leftEyeOpenProbability`로 트러블이나 홍조를 추정하려 들면, "AI는 인식, 로직은 Backend"라는 구조가 무너지고 근거 없는 숫자가 하나 더 생긴다. **게이트와 크롭까지가 전부다.**
 >
 > **작업 시점은 Day 5~6.** 네이티브 의존성이 추가되는 작업이라 빌드가 깨지면 복구에 시간이 든다. Day 8 이후에는 붙이지 마라.
+
+> **웹 빌드는 게이트를 붙이기 전에도, 붙인 후에도 통과해야 한다.**
+> `flutter build web` 을 `FaceGate` 커밋의 완료 조건에 포함한다.
+> 게이트를 붙인 커밋에서 웹 빌드를 안 돌리면 며칠 뒤에 발견하게 된다.
 
 ---
 
@@ -5828,4 +5913,4 @@ npx wrangler pages deploy build/web --project-name=skinplate
 
 ---
 
-*문서 끝 · Skin Plate DTO & 도메인 구조 v1.5 (PRD v1.6 기준) — 구현 착수본*
+*문서 끝 · Skin Plate DTO & 도메인 구조 v1.6 (PRD v1.6 기준) — 구현 착수본*
