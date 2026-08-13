@@ -4,6 +4,7 @@ import com.skinplate.api.domain.food.entity.Nutrition;
 
 import java.math.BigDecimal;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -30,8 +31,8 @@ public final class StandardNutrition {
 
     /**
      * LinkedHashMap 이어야 한다. Map.of 는 반복 순서가 JVM 실행마다 달라져서,
-     * "김치라면" 같은 이름이 오면 findFirst() 가 김치찌개를 잡을지 라면을 잡을지
-     * 실행할 때마다 바뀐다. 재현성을 위해 만든 테이블이 재현 불가가 되는 셈이다.
+     * 한 이름이 키 둘에 걸리면 findFirst() 가 어느 쪽을 잡을지 실행할 때마다 바뀐다.
+     * 재현성을 위해 만든 테이블이 재현 불가가 되는 셈이다.
      * 위에 있을수록 우선한다 — 더 구체적인 이름을 먼저 둔다.
      */
     private static final Map<String, Nutrition> TABLE = new LinkedHashMap<>();
@@ -42,12 +43,28 @@ public final class StandardNutrition {
         TABLE.put("라면",     of(500, "10.0", "17.0", "73.0", 1800, "5.0"));
     }
 
-    /** 음식명에 표준 키가 포함되면 표준값을 반환한다. */
+    /**
+     * 음식명의 <b>어느 한 낱말이 표준 키로 끝나면</b> 표준값을 반환한다.
+     *
+     * 단순 포함(contains)이면 "라면사리 부대찌개"가 라면으로 잡혀 부대찌개에
+     * 라면의 영양값이 들어간다. 점수는 사진과 무관한 숫자로 계산되는데 사용자도
+     * 로그도 그걸 알 방법이 없다.
+     *
+     * 그렇다고 정확히 같은 이름만 받으면 "돼지고기 김치찌개"가 안 잡혀 시연이 깨진다 —
+     * AI 는 재료를 앞에 붙여 답한다. 한국어 음식 이름은 핵심 낱말이 뒤에 오므로
+     * 낱말 단위로 끝을 본다.
+     *
+     *   "돼지고기 김치찌개" → [돼지고기, 김치찌개] → 김치찌개로 끝남    ✅
+     *   "라면사리 부대찌개" → [라면사리, 부대찌개] → 라면으로 끝나지 않음 ✅ 안 잡힘
+     *   "신라면"           → [신라면]            → 라면으로 끝남      ✅
+     */
     public static Optional<Nutrition> find(String foodName) {
         if (foodName == null) return Optional.empty();
 
+        List<String> words = List.of(foodName.trim().split("\\s+"));
+
         return TABLE.entrySet().stream()
-                .filter(entry -> foodName.contains(entry.getKey()))
+                .filter(entry -> words.stream().anyMatch(word -> word.endsWith(entry.getKey())))
                 .map(Map.Entry::getValue)
                 .findFirst();
     }
