@@ -1,13 +1,26 @@
 package com.skinplate.api.domain.food;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.skinplate.api.domain.food.entity.Nutrition;
+import com.skinplate.api.domain.food.service.FoodAnalysisService;
 import com.skinplate.api.domain.food.service.StandardNutrition;
+import com.skinplate.api.global.exception.BusinessException;
+import com.skinplate.api.global.exception.ErrorCode;
+import com.skinplate.api.infra.openai.VisionClient;
+import com.skinplate.api.infra.openai.dto.OpenAiFoodResult;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.mock;
 
 /**
  * AI 응답을 믿지 않는 세 지점. 셋 다 <b>유료 호출이 끝난 뒤에</b> 터지는 자리라
@@ -85,5 +98,66 @@ class FoodAnalysisHardeningTest {
         assertThat(nutrition.getSodiumMg()).isEqualTo(1850);
         assertThat(nutrition.getProteinG()).isEqualByComparingTo("28.5");
         assertThat(nutrition.getSugarG()).isEqualByComparingTo("6.2");
+    }
+
+    // ---- 음식명 누락 ----
+
+    private final VisionClient visionClient = mock(VisionClient.class);
+    private final FoodAnalysisService foodAnalysisService =
+            new FoodAnalysisService(visionClient, new ObjectMapper());
+
+    private static final MultipartFile JPEG = new MockMultipartFile(
+            "image", "food.jpg", "image/jpeg",
+            new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, (byte) 0xE0});
+
+    @Test
+    @DisplayName("음식이라는데 이름이 없으면 422 다 — NOT NULL 컬럼까지 내려가 500 이 나면 안 된다")
+    void detectedButNamelessFood_is422() {
+        given(visionClient.analyzeFood(anyString(), anyString()))
+                .willReturn(aiResult(true, null));
+
+        assertThatThrownBy(() -> foodAnalysisService.recognize(JPEG))
+                .isInstanceOf(BusinessException.class)
+                .extracting(exception -> ((BusinessException) exception).getErrorCode())
+                .isEqualTo(ErrorCode.FOOD_NOT_DETECTED);
+    }
+
+    @Test
+    @DisplayName("이름이 공백뿐인 경우도 같다 — 스키마가 required 여도 그건 상대편 약속이다")
+    void blankName_is422() {
+        given(visionClient.analyzeFood(anyString(), anyString()))
+                .willReturn(aiResult(true, "   "));
+
+        assertThatThrownBy(() -> foodAnalysisService.recognize(JPEG))
+                .isInstanceOf(BusinessException.class)
+                .extracting(exception -> ((BusinessException) exception).getErrorCode())
+                .isEqualTo(ErrorCode.FOOD_NOT_DETECTED);
+    }
+
+    @Test
+    @DisplayName("음식이 아니라고 하면 기존대로 422 — 이름 검사를 넣었다고 이 경로가 바뀌지 않는다")
+    void notFood_is422() {
+        given(visionClient.analyzeFood(anyString(), anyString()))
+                .willReturn(aiResult(false, null));
+
+        assertThatThrownBy(() -> foodAnalysisService.recognize(JPEG))
+                .isInstanceOf(BusinessException.class)
+                .extracting(exception -> ((BusinessException) exception).getErrorCode())
+                .isEqualTo(ErrorCode.FOOD_NOT_DETECTED);
+    }
+
+    @Test
+    @DisplayName("이름이 멀쩡하면 그대로 통과한다")
+    void validName_passes() {
+        given(visionClient.analyzeFood(anyString(), anyString()))
+                .willReturn(aiResult(true, "돼지고기 김치찌개"));
+
+        assertThat(foodAnalysisService.recognize(JPEG).foodName()).isEqualTo("돼지고기 김치찌개");
+    }
+
+    private static OpenAiFoodResult aiResult(boolean detected, String foodName) {
+        return new OpenAiFoodResult(detected, foodName, "한식/찌개", "BOILED", true,
+                List.of(), new OpenAiFoodResult.Nutrition(520, new BigDecimal("28.5"),
+                new BigDecimal("24.0"), new BigDecimal("32.0"), 1850, new BigDecimal("6.2")));
     }
 }
