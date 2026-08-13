@@ -2827,6 +2827,12 @@ import java.util.List;
 
 public record SkinPlateResponse(
         Long plateId,
+
+        // 앱은 S07 결과에서 S08 추천으로 넘어가는데(PRD §6), 추천 조회가 이 값을 요구한다.
+        // 응답에 없으면 앱이 "최신 피부 분석"을 대신 쓰는 수밖에 없고,
+        // 그러면 과거 Plate 를 다시 열었을 때 엉뚱한 날짜의 추천이 뜬다.
+        Long skinAnalysisId,
+
         int plateScore,
         int baseScore,        // 항상 RuleConstants.BASE_SCORE(70). 계산 내역 카드 첫 줄
         String summary,
@@ -2843,6 +2849,7 @@ public record SkinPlateResponse(
     public static SkinPlateResponse from(SkinPlate entity, List<String> appliedRules) {
         return new SkinPlateResponse(
                 entity.getId(),
+                entity.getSkinAnalysis().getId(),
                 entity.getPlateScore(),
                 RuleConstants.BASE_SCORE,
                 entity.getSummary(),
@@ -5896,7 +5903,7 @@ if (_consecutiveFailures >= 3) {
 | `POST /auth/signup`<br>`POST /auth/login`<br>`POST /auth/test-login` | `AuthResponse` | `accessToken` · `tokenType` · `expiresIn` · `user{userId,email,nickname}` | `AuthResponseDto` |
 | `GET /auth/me`<br>`PATCH /auth/me` | `MeResponse` | `userId` · `email` · `nickname` · **`declaredSkinType`**(미선택 시 키 생략) · **`isTestAccount`** · `joinedAt` | `MeResponseDto` |
 | `POST /skin/analyses`<br>`GET /skin/analyses/latest`<br>`GET /skin/analyses/{id}` | `SkinAnalysisResponse` | `skinAnalysisId` · `skinScore` · `metrics{5}` · `summary` · `highlights[{label,status}]` · **`skinTypeGap{declared,observed,matched,message}`**(미선택 시 키 생략) · `analyzedAt` | `SkinAnalysisDto` |
-| `POST /plates`<br>`GET /plates/{id}` | `SkinPlateResponse` | `plateId` · `plateScore` · **`baseScore`** · `summary` · `food{...}` · `feedbacks{good,caution,action}` · `appliedRules[]` · `createdAt` | `SkinPlateDto` |
+| `POST /plates`<br>`GET /plates/{id}` | `SkinPlateResponse` | `plateId` · **`skinAnalysisId`** · `plateScore` · **`baseScore`** · `summary` · `food{...}` · `feedbacks{good,caution,action}` · `appliedRules[]` · `createdAt` | `SkinPlateDto` |
 | `POST /plates/{id}/simulate` | `PlateSimulateResponse` | `plateId` · `beforeScore` · `afterScore` · `appliedActions[]` · `removedRules[]` · `summary` | `PlateSimulationDto` |
 | `GET /recommendations` | `RecommendationResponse` | `skinAnalysisId` · `recommend[]` · `avoid[]` · `generatedAt` | `RecommendationDto` |
 

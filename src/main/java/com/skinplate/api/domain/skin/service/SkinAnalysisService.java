@@ -10,20 +10,18 @@ import com.skinplate.api.domain.user.entity.AppUser;
 import com.skinplate.api.domain.user.repository.AppUserRepository;
 import com.skinplate.api.global.exception.BusinessException;
 import com.skinplate.api.global.exception.ErrorCode;
+import com.skinplate.api.global.image.ImageEncoder;
+import com.skinplate.api.global.image.ImageEncoder.EncodedImage;
 import com.skinplate.api.infra.openai.VisionClient;
 import com.skinplate.api.infra.openai.dto.FacePhoto;
 import com.skinplate.api.infra.openai.dto.FacePhotoType;
 import com.skinplate.api.infra.openai.dto.OpenAiSkinResult;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
-import java.util.Arrays;
-import java.util.Base64;
 import java.util.List;
 
 /**
@@ -33,17 +31,6 @@ import java.util.List;
 @Service
 @RequiredArgsConstructor
 public class SkinAnalysisService {
-
-    /**
-     * 서버는 이미지 세 장을 모두 저장하지 않는다. 형식만 보고 Base64 로 바꿔 보낸 뒤
-     * 버린다 — 장수가 늘었다고 보관 정책이 바뀌지는 않는다. (PRD §9.6)
-     *
-     * 형식은 Content-Type 헤더가 아니라 실제 바이트로 판별한다. 헤더는 클라이언트가
-     * 말하는 값이라, 모바일 갤러리가 application/octet-stream 을 보내면 멀쩡한 사진이
-     * 400 으로 막히고, 반대로 헤더만 image/png 인 파일은 그대로 통과한다.
-     */
-    private static final byte[] JPEG_MAGIC = {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF};
-    private static final byte[] PNG_MAGIC  = {(byte) 0x89, 0x50, 0x4E, 0x47};
 
     /** summary 컬럼이 VARCHAR(300) 이다. */
     private static final int SUMMARY_MAX_LENGTH = 300;
@@ -132,55 +119,15 @@ public class SkinAnalysisService {
     }
 
     /**
-     * 최대치를 다 채운 요청 하나가 40MB 를 넘게 쓴다 — Base64 문자열 20MB(5MB × 3 × 4/3)에
-     * WebClient 가 만드는 요청 본문 21MB 가 겹치고, 둘 다 AI 응답이 올 때까지 살아 있다.
+     * 검증·Base64 변환은 ImageEncoder 가 한다 — 음식 경로와 같은 규칙이라
+     * 복붙해 두면 한쪽만 고쳐지는 날이 온다.
      *
-     * 그래도 상한을 걸지 않는다. 배포 서버(가비아 2 vCore · 4GB)에서 재보니 심사위원
-     * 3명 동시(PRD §16.5)를 최악 크기로 돌려도 힙 471MiB / 기본 최대 1,024MiB 였다.
-     * 먼저 닿는 벽은 힙이 아니라 CPU 다 — 동시 6건에서 2 vCore 가 포화한다(PRD §9.6 실측표).
-     *
-     * 여기서 CPU 를 쓰는 건 Base64 인코딩이라 업로드 크기에 그대로 비례한다. 앱은
-     * 1024px 크롭이라 장당 수백 KB 이고, 부담이 큰 쪽은 게이트가 없어 카메라 원본이
-     * 그대로 올라오는 웹이다.
-     *
-     * 어느 방향에서 막혔는지 메시지에 담는다. 세 장 중 하나만 잘못됐을 때
-     * "이미지 형식이 올바르지 않습니다" 만 뜨면 사용자는 셋 다 다시 찍는다.
+     * 방향 라벨을 같이 넘긴다. 세 장 중 하나만 잘못됐을 때 "이미지 형식이
+     * 올바르지 않습니다" 만 뜨면 사용자는 셋 다 다시 찍는다.
      */
     private FacePhoto encode(FacePhotoType type, MultipartFile image) {
-        if (image == null || image.isEmpty()) {
-            throw new BusinessException(ErrorCode.INVALID_IMAGE,
-                    type.getLabel() + " 사진이 비어 있습니다. 다시 촬영해 주세요.");
-        }
-
-        byte[] bytes = readBytes(image);
-        String mediaType = detectMediaType(type, bytes);   // 인코딩 전에 막는다. 5MB 를 헛돌리지 않는다
-
-        return new FacePhoto(type, Base64.getEncoder().encodeToString(bytes), mediaType);
-    }
-
-    private byte[] readBytes(MultipartFile image) {
-        try {
-            return image.getBytes();
-        } catch (IOException e) {
-            // 업로드가 잘못된 게 아니라 서버가 파일을 못 읽은 것이다(임시 디렉터리 포화 등).
-            // 400 으로 내리면 사용자는 멀쩡한 사진을 계속 다시 올리고,
-            // 서버가 망가진 동안 5xx 지표(PRD §8.2)는 깨끗한 채로 남는다.
-            throw new BusinessException(ErrorCode.INTERNAL_ERROR, e);
-        }
-    }
-
-    /** 판별한 타입은 OpenAI 의 data URI 에 그대로 선언된다. 내용과 어긋나면 400 이다. */
-    private String detectMediaType(FacePhotoType type, byte[] bytes) {
-        if (startsWith(bytes, JPEG_MAGIC)) return MediaType.IMAGE_JPEG_VALUE;
-        if (startsWith(bytes, PNG_MAGIC))  return MediaType.IMAGE_PNG_VALUE;
-
-        throw new BusinessException(ErrorCode.INVALID_IMAGE,
-                type.getLabel() + " 사진은 JPEG 또는 PNG 만 업로드할 수 있습니다.");
-    }
-
-    private static boolean startsWith(byte[] bytes, byte[] magic) {
-        return bytes.length >= magic.length
-                && Arrays.equals(bytes, 0, magic.length, magic, 0, magic.length);
+        EncodedImage encoded = ImageEncoder.encode(image, type.getLabel());
+        return new FacePhoto(type, encoded.base64(), encoded.mediaType());
     }
 
     /**

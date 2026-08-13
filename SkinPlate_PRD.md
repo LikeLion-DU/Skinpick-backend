@@ -2181,6 +2181,7 @@ public class Recommendation extends BaseTimeEntity {
   "success": true,
   "data": {
     "plateId": 205,
+    "skinAnalysisId": 101,
     "plateScore": 60,
     "summary": "단백질 충분, 발효식품 포함. 다만 나트륨 과다, 매운맛 자극.",
     "food": {
@@ -2467,6 +2468,7 @@ public record HighlightDto(String label, String status) {}   // GOOD / WARN / CA
 ```java
 public record SkinPlateResponse(
         Long plateId,
+        Long skinAnalysisId,    // S07 → S08 전환에 필요하다. 추천 조회가 이 값을 요구한다
         int plateScore,
         int baseScore,          // 항상 70. S07 계산 내역 카드가 첫 줄에 쓴다
         String summary,
