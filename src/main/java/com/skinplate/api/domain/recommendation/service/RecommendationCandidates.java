@@ -36,17 +36,28 @@ public final class RecommendationCandidates {
         return TABLE.get(concern);
     }
 
-    /** 심각한 순으로 취약 항목 상위 N개를 뽑는다. */
+    /**
+     * <b>실제로 취약한</b> 항목만 심각한 순으로 최대 N개 뽑는다. 없으면 빈 목록이다.
+     *
+     * 판정은 {@link SkinMetrics} 의 판정자를 그대로 쓴다. 여기서 임계값을 다시 적으면
+     * 같은 뜻의 숫자가 두 곳에 생기고, Rule Engine 은 "건조하지 않다"고 보는 지표를
+     * 추천만 "건조하다"고 보는 날이 온다.
+     *
+     * 거르지 않으면 <b>피부가 멀쩡해도 상위 두 개가 뽑힌다.</b> 모든 지표가 좋은
+     * 사용자에게 "장벽 회복을 위해 연어를 드세요"가 뜨는데, 심사위원이 본인 얼굴로
+     * 찍어 보는 순간이 정확히 그 경우다.
+     */
     public static List<Concern> topConcerns(SkinMetrics metrics, int count) {
-        record Scored(Concern concern, int severity) {}
+        record Scored(Concern concern, boolean present, int severity) {}
 
         return List.of(
-                        new Scored(Concern.DRY,          100 - metrics.getHydration()),
-                        new Scored(Concern.BARRIER_WEAK, 100 - metrics.getBarrier()),
-                        new Scored(Concern.OILY,         metrics.getOil()),
-                        new Scored(Concern.REDNESS,      metrics.getRedness()),
-                        new Scored(Concern.TROUBLE,      metrics.getTrouble()))
+                        new Scored(Concern.DRY,          metrics.isDry(),         100 - metrics.getHydration()),
+                        new Scored(Concern.BARRIER_WEAK, metrics.isBarrierWeak(), 100 - metrics.getBarrier()),
+                        new Scored(Concern.OILY,         metrics.isOily(),        metrics.getOil()),
+                        new Scored(Concern.REDNESS,      metrics.hasRedness(),    metrics.getRedness()),
+                        new Scored(Concern.TROUBLE,      metrics.hasTrouble(),    metrics.getTrouble()))
                 .stream()
+                .filter(Scored::present)
                 // 동점일 때 순서가 흔들리면 같은 지표에 다른 추천이 나온다.
                 // 재현성이 이 테이블의 존재 이유이므로 이름으로 한 번 더 고정한다.
                 .sorted(Comparator.comparingInt(Scored::severity).reversed()
@@ -54,5 +65,51 @@ public final class RecommendationCandidates {
                 .limit(count)
                 .map(Scored::concern)
                 .toList();
+    }
+
+    /**
+     * 음식별 추천 문구. (PRD §14.3 ⑧)
+     *
+     * 항목별로 한 문장씩 두면 같은 취약 항목에서 나온 음식들이 <b>글자까지 똑같은
+     * 문장</b>을 달고 화면에 줄줄이 뜬다 — 시연 지표에서는 추천 7장에 문장이 2종뿐이었다.
+     * S08 은 영상에 나가는 화면이다.
+     *
+     * AI 로 문장을 만들지 않는다. §18.9 는 문장 생성을 AI 몫으로 뒀지만 그건 G4
+     * 축소 경로("추천을 정적 문구로 대체")를 두고 한 설계이고, 지금은 그 경로를 쓴다.
+     * 무대에서 같은 사진에 같은 문장이 나오는 쪽이 자연스러운 문장보다 중요하다.
+     *
+     * 음식 이름을 바꾸면 여기도 같이 바꾼다 — 빠지면 문구 없이 이름만 뜬다.
+     */
+    private static final Map<String, String> REASONS = Map.ofEntries(
+            // 추천
+            Map.entry("연어",      "오메가3와 단백질이 들어 있어 피부 장벽을 채우는 데 좋습니다."),
+            Map.entry("아보카도",  "불포화지방과 비타민E가 수분이 빠져나가는 것을 붙잡아 줍니다."),
+            Map.entry("오이",      "수분이 대부분이라 부담 없이 물기를 채울 수 있습니다."),
+            Map.entry("견과류",    "비타민E와 좋은 지방이 들어 있어 조금씩 자주 먹기 좋습니다."),
+            Map.entry("브로콜리",  "항산화 성분이 풍부한 채소라 자극받은 피부에 부담이 적습니다."),
+            Map.entry("녹차",      "폴리페놀이 들어 있고 카페인이 커피보다 적습니다."),
+            Map.entry("토마토",    "라이코펜이 들어 있어 붉어진 피부를 진정시키는 데 도움이 됩니다."),
+            Map.entry("키위",      "비타민C가 많아 피부 컨디션을 관리하기에 좋습니다."),
+            Map.entry("고구마",    "식이섬유와 베타카로틴이 함께 들어 있습니다."),
+            Map.entry("채소",      "기름기가 적어 유분이 많은 날에도 부담이 없습니다."),
+            Map.entry("두부",      "지방은 적고 단백질은 챙길 수 있습니다."),
+            Map.entry("흰살생선",  "기름기가 적은 단백질이라 유분이 많을 때 알맞습니다."),
+            Map.entry("달걀",      "단백질과 아미노산이 고루 들어 있습니다."),
+            Map.entry("아몬드",    "비타민E가 많아 장벽이 약할 때 곁들이기 좋습니다."),
+            // 주의
+            Map.entry("커피",      "카페인이 이뇨 작용을 해 수분이 더 빠질 수 있습니다."),
+            Map.entry("술",        "탈수를 부르고 혈관을 확장시켜 붉은기를 키울 수 있습니다."),
+            Map.entry("매운 음식",  "캡사이신이 혈관을 확장시켜 홍조를 더 붉게 만들 수 있습니다."),
+            Map.entry("탄산음료",  "당류가 많아 트러블을 악화시킬 수 있습니다."),
+            Map.entry("초콜릿",    "당과 지방이 함께 많아 트러블이 있을 때 부담이 됩니다."),
+            Map.entry("튀김",      "튀김 기름이 유분과 트러블 양쪽을 자극할 수 있습니다."),
+            Map.entry("라면",      "나트륨이 높아 수분을 빼앗아 갑니다."),
+            Map.entry("패스트푸드", "기름기와 나트륨이 함께 높습니다."),
+            Map.entry("인스턴트",  "가공도가 높아 장벽 회복에 도움이 되지 않습니다."),
+            Map.entry("가공육",    "나트륨과 첨가물이 많아 장벽이 약할 때 부담이 됩니다."));
+
+    /** 표에 없는 음식이면 이름만 남긴다 — 문구가 없다고 추천이 사라지면 안 된다. */
+    public static String reasonOf(String foodName) {
+        return REASONS.getOrDefault(foodName, "");
     }
 }
