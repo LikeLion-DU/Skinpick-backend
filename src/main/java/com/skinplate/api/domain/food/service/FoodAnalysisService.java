@@ -49,7 +49,12 @@ public class FoodAnalysisService {
         OpenAiFoodResult aiResult = visionClient.analyzeFood(encoded.base64(), encoded.mediaType());
 
         // 음식이 아니면 저장하지 않는다. 남겨두면 사용자의 기록에 정체불명의 행이 쌓인다.
-        if (!aiResult.foodDetected()) {
+        //
+        // 이름이 비어 있는 경우도 같이 막는다. 스키마가 required 로 강제하지만 그건
+        // OpenAI 쪽 약속이고, 빈 이름이 통과하면 food_name 이 NOT NULL 인 저장 단계에서
+        // 500 이 난다 — 유료 호출이 끝난 뒤라 되돌릴 수도 없다. 이름을 못 붙였다는 건
+        // 음식을 인식하지 못했다는 뜻이므로 같은 422 로 내린다.
+        if (!aiResult.foodDetected() || isBlank(aiResult.foodName())) {
             throw new BusinessException(ErrorCode.FOOD_NOT_DETECTED);
         }
         return aiResult;
@@ -130,6 +135,10 @@ public class FoodAnalysisService {
         return Nutrition.of(
                 nutrition.caloriesKcal(), nutrition.proteinG(), nutrition.fatG(),
                 nutrition.carbG(), nutrition.sodiumMg(), nutrition.sugarG());
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     /** 컬럼 길이를 넘기면 저장에서 터진다. 그 시점엔 유료 호출이 이미 끝나 있다. */
