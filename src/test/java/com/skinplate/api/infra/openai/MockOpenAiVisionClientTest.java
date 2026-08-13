@@ -9,6 +9,8 @@ import com.skinplate.api.domain.plate.engine.PlateContext;
 import com.skinplate.api.domain.plate.engine.PlateRuleEngine;
 import com.skinplate.api.domain.plate.engine.rules.*;
 import com.skinplate.api.domain.skin.entity.SkinMetrics;
+import com.skinplate.api.infra.openai.dto.FacePhoto;
+import com.skinplate.api.infra.openai.dto.FacePhotoType;
 import com.skinplate.api.infra.openai.dto.OpenAiFoodResult;
 import com.skinplate.api.infra.openai.dto.OpenAiSkinResult;
 import org.junit.jupiter.api.DisplayName;
@@ -24,6 +26,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class MockOpenAiVisionClientTest {
 
+    private static final List<FacePhoto> PHOTOS = List.of(
+            new FacePhoto(FacePhotoType.FRONT, "무시된다", "image/jpeg"),
+            new FacePhoto(FacePhotoType.LEFT, "무시된다", "image/jpeg"),
+            new FacePhoto(FacePhotoType.RIGHT, "무시된다", "image/jpeg"));
+
     private final MockOpenAiVisionClient client = new MockOpenAiVisionClient();
 
     private final PlateRuleEngine engine = new PlateRuleEngine(List.of(
@@ -34,7 +41,7 @@ class MockOpenAiVisionClientTest {
     @Test
     @DisplayName("피부 응답은 문서의 시연 지표를 그대로 돌려준다")
     void skinMatchesDemoMetrics() {
-        OpenAiSkinResult result = client.analyzeSkin("무시된다", "image/jpeg");
+        OpenAiSkinResult result = client.analyzeSkin(PHOTOS);
 
         assertThat(result.faceDetected()).isTrue();
         assertThat(List.of(result.hydration(), result.oil(), result.redness(),
@@ -45,7 +52,7 @@ class MockOpenAiVisionClientTest {
     @Test
     @DisplayName("Mock 응답을 룰 엔진에 넣으면 발표에서 말할 60점이 나온다")
     void mockFoodReproducesDemoScore() {
-        OpenAiSkinResult skin = client.analyzeSkin("무시된다", "image/jpeg");
+        OpenAiSkinResult skin = client.analyzeSkin(PHOTOS);
         OpenAiFoodResult food = client.analyzeFood("무시된다", "image/jpeg");
 
         SkinMetrics metrics = SkinMetrics.of(skin.hydration(), skin.oil(),
@@ -66,8 +73,8 @@ class MockOpenAiVisionClientTest {
     @Test
     @DisplayName("같은 입력에 항상 같은 값 — 무대에서 두 번 찍어도 같아야 한다")
     void isDeterministic() {
-        assertThat(client.analyzeSkin("a", "image/jpeg"))
-                .isEqualTo(client.analyzeSkin("b", "image/png"));
+        assertThat(client.analyzeSkin(PHOTOS))
+                .isEqualTo(client.analyzeSkin(PHOTOS));
         assertThat(client.analyzeFood("a", "image/jpeg"))
                 .isEqualTo(client.analyzeFood("b", "image/png"));
     }

@@ -5,11 +5,11 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | v1.6 |
-| 작성일 | 2026-08-07 · **v1.6 개정 2026-08-10** (배포 구성 재작성 · 웹 추가) |
+| 문서 버전 | v1.7 |
+| 작성일 | 2026-08-07 · **v1.7 개정 2026-08-13** (피부 분석 3방향 촬영) |
 | 문서 범위 | 제품 요구사항(PRD) + 기술 설계(Architecture / API / DB / Rule Engine) |
 | 개발 기간 | 10일 (해커톤) |
-| 대상 플랫폼 | **Android (Flutter) + Web (Flutter Web)** |
+| 대상 플랫폼 | **Android (Flutter) → iOS → Web (Flutter Web)** — 이 순서로 개발한다 (v1.7 §9.6) |
 | 팀 구성 가정 | Flutter 1~2명, Backend 1~2명, 기획/디자인 1명 |
 
 ### 문서 사용 안내
@@ -594,23 +594,23 @@ flowchart TB
 | AI | OpenAI | gpt-4o | Vision + Structured Outputs 지원 |
 | 문서화 | springdoc-openapi | 2.x | Swagger UI 자동 생성 |
 | 로컬 DB | Docker Compose | - | 개발 중 Postgres만 컨테이너로 |
-| **배포 · 백엔드** | **Railway 또는 Render — 미정** | - | **Day 4 배포 착수 전 결정.** 두 후보의 요구사항이 동일해 준비는 지금 진행한다 (§9.6) |
+| **배포 · 백엔드** | **가비아 VM** (멋사 제공) | 2 vCore · 4GB · 1TB | **확정.** Docker 로 띄운다. HTTPS·본문 상한은 리버스 프록시 몫 (§9.6) |
 | **배포 · 웹** | **Cloudflare Pages** | - | **정적 파일 호스팅. 무료·무제한 대역폭·HTTPS 자동** (§9.6) |
 | **배포 · DB** | **Supabase 무료 Postgres** | 16 | **확정.** 서버와 분리해 재배포·호스팅 교체에도 데이터가 남는다 (§9.6) |
 
 ### 9.4 이미지 처리 파이프라인
 
 ```
-[Flutter] 촬영
-   → ML Kit 얼굴 게이트 (피부 사진만)  ★ §9.5
+[Flutter] 촬영            ★ 피부는 정면 · 왼쪽 · 오른쪽 3단계 (§9.5)
+   → ML Kit 얼굴 게이트 (피부 사진만, 방향별 판정)  ★ §9.5
    → 얼굴 영역 크롭 (여백 20%)
    → 리사이즈 (긴 변 1024px) + JPEG 압축 (quality 80)
-   → multipart 업로드
+   → 세 장 모두 통과해야 multipart 업로드 (front · left · right)
 [Backend] 수신
-   → 검증 (MIME, ≤5MB)
-   → Base64 인코딩        ★ 저장하지 않는다 (§9.6)
-   → OpenAI Vision 호출 (피부 detail: "high" / 음식 detail: "low")
-   → JSON 파싱 → DB 저장
+   → 세 장 각각 검증 (매직바이트, ≤5MB · 요청 합계 ≤20MB)
+   → 각각 Base64 인코딩   ★ 저장하지 않는다 (§9.6)
+   → OpenAI Vision 호출 1회 (피부 3장 detail: "high" / 음식 1장 detail: "low")
+   → JSON 파싱 → DB 저장 (SkinAnalysis 1건)
 ```
 
 > **비용·속도 최적화** — 클라이언트 리사이즈만으로 업로드 용량이 1/5로 줄어든다. 음식은 `detail: "low"`(고정 85토큰)로 충분하고, **피부만 `high`**로 보낸다. 홍조·트러블 판정이 512px 다운샘플로는 성립하지 않기 때문이다.
@@ -649,8 +649,13 @@ flowchart TB
 |---|---|---|
 | 얼굴 개수 | 정확히 1개 | "얼굴이 한 명만 보이게 해주세요" |
 | 얼굴 크기 | 바운딩 박스 높이 ≥ 프레임 높이의 40% | "조금 더 가까이 와주세요" |
-| 정면 여부 | `headEulerAngleY`, `headEulerAngleZ` 절댓값 ≤ 15° | "정면을 봐주세요" |
+| 각도 (FRONT) | `headEulerAngleY`, `headEulerAngleZ` 절댓값 ≤ 15° | "정면을 봐주세요" |
+| 각도 (LEFT / RIGHT) | `headEulerAngleY` 가 해당 방향으로 ≥ 25° | "얼굴을 조금 더 돌려주세요" |
 | 밝기 | 얼굴 영역 평균 휘도 ≥ 60 (0~255) | "조금 더 밝은 곳에서 촬영해주세요" |
+
+> **촬영은 3단계다** — 정면 → 왼쪽 → 오른쪽 순으로 각 단계에서 해당 방향의 게이트를 통과해야 다음으로 넘어간다. 세 장이 다 모인 뒤에야 서버를 한 번 호출한다(§14.3 ⑤). 단계마다 분석 API 를 부르면 결과가 세 개 나오고, 그중 무엇이 "오늘의 점수"인지 정할 방법이 없다.
+>
+> **`headEulerAngleY` 의 부호는 기기마다 뒤집힌다.** 전면 카메라 미러 처리 때문이다. 실기기에서 반드시 확인하고 상수 하나(`userLeftYawSign`)로 좌우를 통째로 뒤집는다.
 
 > **밝기는 ML Kit이 주지 않는다.** 크롭한 얼굴 영역의 픽셀 평균 휘도를 직접 계산한다. 10줄이면 되고, 이게 시연 실패를 가장 많이 막아준다.
 
@@ -677,7 +682,7 @@ final gate = faceGate();   // 웹이면 통과만 시키는 스텁이 온다
 |---|---|
 | 작업 시간 | 반나절 (Day 5~6 권장) |
 | APK 증가 | 약 +3~5MB (번들 모델 기준) |
-| iOS 추가 작업 | `pod install` + 카메라 권한 문구 — 30분 |
+| iOS 추가 작업 | `pod install` + Podfile 최소 버전 상향 — 30분. **단 Xcode 설치(약 15GB)가 별도이고, 권한 문구는 이미 들어가 있다**(§9.6) |
 | 런타임 | 프레임당 20~40ms, 온디바이스 |
 
 > **컷오프: Day 6 종료 시점, FE-A가 판단해 팀에 통보한다.** 게이트가 그때까지 안 끝나면 **정적 얼굴 가이드 오버레이(원형 프레임 + "밝은 곳에서 정면으로 찍어주세요", 1시간)** 로 전환하고 게이트는 Phase 2로 넘긴다.
@@ -710,33 +715,43 @@ final gate = faceGate();   // 웹이면 통과만 시키는 스텁이 온다
 | 첫 배포 시점 | Day 10 | **Day 4** |
 | 배포 대상 | 앱 하나 | **백엔드 · 웹 · DB 세 곳** |
 
-#### 백엔드 호스팅 — **미정.** Railway 또는 Render, Day 4 배포 착수 전 결정
+#### 백엔드 호스팅 — **가비아 VM 으로 확정** (멋쟁이사자처럼 대학 해커톤 제공)
 
-**Railway 크레딧이 소진됐다.** Render 무료가 대안이지만 **이 개정에서는 확정하지 않는다.** 결제 가능 여부가 정해지면 그때 아래 표로 고른다.
+| 항목 | 값 |
+|---|---|
+| Provider | **가비아** — 멋쟁이사자처럼 대학 해커톤 제공 서버 |
+| 용도 | 스핀픽 Backend |
+| CPU | High CPU · **2 vCore** |
+| Memory | **4GB RAM** |
+| 트래픽 | 월 **무료 1TB** |
 
-| 후보 | 비용 | 슬립 | 판단 기준 |
-|---|---|---|---|
-| **Railway Hobby** | $5/월 | 없음 | **결제가 가능하면 이쪽.** 슬립 걱정이 없다 |
-| **Render 무료** | $0 | 15분 무활동 시 | **무료만 가능하면 이쪽.** 고정 URL·HTTPS는 동일 |
+> **Railway · Render · "512MB PaaS" 가정은 전부 폐기한다(superseded).** 그 아래의 크레딧·슬립·콜드스타트·UptimeRobot 논의는 PaaS 후보를 저울질하던 v1.6 시점의 검토 기록이며 **현재 운영 환경 설명이 아니다.** 이 개정 이후 배포 관련 판단은 위 표만 근거로 한다.
 
-**Render를 택할 경우의 완화책**
+**PaaS 를 떠나면서 새로 생긴 일 두 가지.** 둘 다 v1.6 이 "PaaS 가 알아서 해준다"고 적어 두었던 것들이라, 환경이 바뀐 지금은 우리 작업이다.
 
-- **발표는 영상이므로 콜드스타트가 발표에 영향이 없다.** 영상에는 대기 시간이 애초에 찍히지 않는다
-- **심사 대기 중에는 UptimeRobot 5분 간격 핑으로 깨워 둔다.** 심사위원이 링크를 여는 순간에는 이미 살아 있다
-- **750시간/월 한도 대비 10일 = 240시간**이라 여유가 있다. 상시 켜 두어도 한도에 안 닿는다
+| # | 항목 | 내용 |
+|---|---|---|
+| **H1** | **HTTPS 가 자동이 아니다** | v1.6 의 선택 기준이 "HTTPS 자동 발급"이었는데 VM 에는 그게 없다. **웹(Cloudflare Pages)은 `https://` 이므로 `http://` 백엔드를 부르면 브라우저가 mixed content 로 차단한다** — 서버는 멀쩡한데 웹 체험 경로만 죽고, 콘솔을 열기 전까지 원인이 안 보인다. 도메인 + **Caddy**(인증서 자동) 또는 nginx + certbot 이 필요하다 |
+| **H2** | **리버스 프록시 본문 상한** | 피부 분석 요청이 **15MB**(5MB × 3장)다. **nginx 기본 `client_max_body_size` 는 1MB** 라 그대로 두면 업로드가 전부 413 이고, 앱에는 "분석 실패"만 뜬다. nginx 를 쓰면 `client_max_body_size 20m;` 을 반드시 넣는다. Caddy 는 기본 무제한이라 설정이 필요 없다 |
 
-> **두 후보가 요구하는 것이 동일하다. `server.port`·`DB_*` 환경변수·Dockerfile·헬스체크 경로는 어느 쪽을 택하든 그대로 쓰인다. 그래서 호스팅 결정을 미뤄도 Day 4 배포 준비는 지금 진행할 수 있다.**
->
-> 미룰 수 있는 것과 미뤄도 되는 것은 다르다. **결정 자체는 Day 4 배포 착수 전에 반드시 내린다**(R23) — 그날 아침에 계정부터 만들기 시작하면 반나절이 사라진다.
+> **`server.port: ${PORT:8080}` 는 그대로 둔다.** PaaS 의 `PORT` 주입에 맞춘 값이지만 VM 에서는 기본값 8080 으로 떨어질 뿐이라 해가 없고, 지우면 로컬·컨테이너 실행 방식만 하나 더 갈린다.
 
-**탈락 후보**
+**Caddy 구성은 `deploy/Caddyfile` 에 있다.** 도메인만 바꿔 넣으면 된다. 배포 순서와 함정:
+
+| 순서 | 할 일 | 빠뜨리면 |
+|---|---|---|
+| 1 | `api.<도메인>` **A 레코드 → 가비아 공인 IP** | Let's Encrypt 발급이 실패하고 Caddy 가 재시도만 반복한다. 로그를 안 보면 "왜 https 가 안 되지"로 끝난다 |
+| 2 | 방화벽 **80·443 개방** | 80 이 막히면 HTTP-01 챌린지가 통과하지 못한다. 443 만 열어도 발급이 안 된다 |
+| 3 | 앱을 **`-p 127.0.0.1:8080:8080`** 으로 띄운다 | `0.0.0.0` 이면 HTTPS 를 세워 놓고도 **평문 8080 이 인터넷에 그대로 남는다.** 테스트 계정이 켜져 있으면 그 포트로 누구나 토큰을 받는다 |
+| 4 | Caddy 기동 후 **3장 업로드를 한 번 통과**시킨다 | 413·502 는 배포 직후가 아니라 심사 중에 처음 만나게 된다 |
+
+> **CORS 헤더를 Caddy 에서 붙이지 않는다.** 앱의 `WebConfig` 가 이미 `/api/**` 를 열어 두었고, 프록시가 한 번 더 붙이면 `Access-Control-Allow-Origin` 이 두 개 실려 **브라우저가 응답 전체를 거부한다.** 웹에서만 깨지고 앱은 멀쩡해서 원인을 찾기 어렵다.
+
+**백업 후보**
 
 | 후보 | 이유 |
 |---|---|
-| 클라우드 VM(EC2 등) + nginx | ❌ 인증서 발급·갱신·리버스 프록시 설정에 반나절. 해커톤에서 그 시간은 없다 |
 | 노트북 + ngrok | ⚠️ 백업으로만. HTTPS는 되지만 무료 플랜은 URL이 재기동마다 바뀌어 릴리즈 빌드에 못 박을 수 없다 |
-
-> **HTTPS를 자동으로 받는 것이 두 후보의 공통점이자 선택 기준이다.** 배포본에서는 인증서 작업도, cleartext 예외도 필요 없다.
 >
 > **단, 로컬 개발은 여전히 HTTP다.** Day 2~5의 `http://10.0.2.2:8080`이 그대로 남아 있고, Flutter 디버그 매니페스트는 `INTERNET` 권한만 추가할 뿐 `usesCleartextTraffic`을 켜지 않는다. **Day 3 첫 API 호출에서 막히면 "서버가 안 떴나" 하고 백엔드를 뒤진다.** 10분이면 끝나므로 Day 2에 미리 넣는다.
 
@@ -752,6 +767,44 @@ final gate = faceGate();   // 웹이면 통과만 시키는 스텁이 온다
 ```
 
 이에 따라 **API도 컨테이너화한다.** §9.3에서 "API는 컨테이너화하지 않는다"고 적었던 것은 노트북 시연 전제였고, 지금은 무효다.
+
+#### 실제 OpenAI 경로 실측 (2026-08-14)
+
+부하 테스트는 OpenAI 를 지연 스텁으로 대체했으므로 **실제 `api.openai.com` 은 따로 확인했다.** 앱과 OpenAI 사이에 호출을 세는 프록시를 끼우고 3장을 올렸다.
+
+| 시나리오 | 업로드(Flutter→Backend) | 나간 본문(Backend→OpenAI) | OpenAI 호출 | 응답 | 왕복 |
+|---|---|---|---|---|---|
+| 앱 크롭 사양 (1024px·q80, 장당 104KB) | 0.30MB | **0.41MB** | **1회** · 이미지 3장 | 200 | 5.1s |
+| 중간 (장당 2.7~4.8MB) | 10.76MB | 14.35MB | **1회** · 이미지 3장 | 200 | 8.6s |
+| **상한 근접** (장당 4.81MB) | **14.43MB** | **19.24MB** | **1회** · 이미지 3장 | **200** | 8.9s |
+
+- **호출은 언제나 1회다.** 프록시가 센 값이고, 나간 본문에 `image_url` 이 3개·`[정면]` `[왼쪽 얼굴]` `[오른쪽 얼굴]` 라벨이 3개·`detail:"high"` 로 들어 있는 것까지 확인했다.
+- **OpenAI 는 19.24MB 요청을 받는다.** 최악 조건이 실제 API 에서 통과한다는 뜻이다.
+- **두 숫자를 헷갈리지 않는다.** `max-request-size: 20MB` 는 **들어오는** 요청(≤15MB)에 걸리는 값이고, OpenAI 로 **나가는** 본문(≈20MB)에는 아무 Spring 설정도 걸려 있지 않다. 나가는 쪽 상한은 OpenAI 가 정한다.
+- 검증 이미지는 얼굴이 아니라 **`faceDetected:false` → 422** 가 정상 결과다. 구조화 응답 파싱과 얼굴 미검출 분기가 실제 응답으로 동작한다는 것까지 같이 확인된다.
+- **요청 1회 = 분석 1건.** Mock 으로 201 을 받아 `skin_analysis` 행이 정확히 1 늘어나는 것을 확인했다(33 → 34).
+
+#### 메모리 실측 — **JVM 옵션은 넣지 않는다** (2026-08-13)
+
+3장 업로드로 요청 본문이 커졌으므로 실제 사양에서 재봤다. **배포 이미지를 그대로 `--memory=4g --cpus=2` 로 띄우고**, OpenAI 는 10초 지연 스텁으로 대체해 "AI 응답을 기다리는 동안의 점유"가 실제로 생기게 한 상태에서 측정했다.
+
+| 동시 | 장당 | 요청 본문 | Peak RSS | Peak Heap | Peak CPU | 지연 | 결과 |
+|---|---|---|---|---|---|---|---|
+| 1 | 5MB | 15.0MB | 493 MiB | — | 72% | 10.9s | 201 |
+| 2 | 5MB | 15.0MB | 668 MiB | — | 106% | 10.8s | 201 ×2 |
+| **3** | **5MB** | **15.0MB** | **876 MiB** | **471 MiB** | **170%** | **10.9s** | **201 ×3** |
+| 3 | 0.3MB | 0.9MB | — | — | **1%** | 10.1s | 201 ×3 |
+| 6 | 5MB | 15.0MB | 1,133 MiB | 685 MiB | **208%** | 12.8s | 201 ×6 |
+
+OOM 0 · 컨테이너 재시작 0 · 5xx 0.
+
+**결론 세 가지**
+
+1. **JVM 옵션을 넣지 않는다.** 4GB 컨테이너에서 JVM 기본 힙은 `MaxRAMPercentage=25%` → **1,024 MiB** 다. 심사위원 3명 동시(§16.5)를 최악 크기로 돌려도 힙 471 MiB(46%)·RSS 876 MiB(전체의 21%)라 **손댈 근거가 없다.** `-Xmx3g` 나 `MaxRAMPercentage=75` 를 넣으면 힙만 늘고 Metaspace·Direct·Netty·native 몫이 줄어 오히려 컨테이너 OOM-kill 쪽으로 옮겨간다.
+2. **먼저 닿는 벽은 메모리가 아니라 CPU다.** 동시 6건에서 CPU 208%(2 vCore 포화)·지연 +18%인데 힙은 여전히 685/1,024 MiB 다. 이 구간의 CPU 는 대부분 **Base64 인코딩과 multipart 파싱**이라 업로드 크기에 직접 비례한다.
+3. **그래서 프론트 크롭 정책이 곧 서버 여유다.** 같은 동시 3건인데 1024px 크롭(장당 0.3MB) 경로는 **CPU 1%** 다. 무료 트래픽 1TB 를 이유로 크롭·리사이즈를 느슨하게 하면 트래픽이 아니라 **CPU 에서 먼저 대가를 치른다.**
+
+> **v1.6 이후의 "512MB PaaS · 힙 128MB → 동시 3건 OOM" 분석은 폐기한다.** 512MB × 25% = 128MB 라는 전제 자체가 실제 서버와 다르다. 다만 그 분석이 지목한 **요청당 20MB 요청 본문**은 실측으로 확인됐다(스텁이 받은 본문 20,974,031 바이트). 크기 자체는 사실이고, 그것을 감당할 여유가 4GB 에는 있다는 것이 달라진 결론이다.
 
 ```dockerfile
 # Dockerfile — 멀티스테이지, 20줄이면 끝난다
@@ -780,15 +833,15 @@ ENTRYPOINT ["java", "-jar", "app.jar"]
 >
 > **`SPRING_PROFILES_ACTIVE=prod` 를 이미지에 박는다.** 기본 프로파일은 `local` 이고 `application-local.yml` 은 테스트 계정을 켜 두므로, 플랫폼에서 이 변수 하나를 빠뜨리면 **공개 배포에서 `POST /auth/test-login` 이 열린 채로 뜬다.** 빈 본문만 보내면 누구나 7일짜리 토큰을 받는데, 로그도 헬스체크도 전부 정상이라 아무도 눈치채지 못한다. `docker run -e` 와 플랫폼 환경변수가 이 값을 덮으므로 **같은 이미지를 로컬에서 `local` 로 띄워 확인하는 것도 그대로 된다** — 박아두는 쪽에 잃는 게 없다.
 >
-> **`PORT` 는 플랫폼이 주입한다.** Railway·Render 모두 컨테이너에 `PORT` 를 넣고 **그 포트로만** 트래픽을 보낸다. `application.yml` 에 `server.port: ${PORT:8080}` 이 없으면 컨테이너는 8080 에서 멀쩡히 뜨는데 헬스체크가 끝까지 안 붙고, 로그에는 아무 에러도 없다.
+> **`PORT` 와 `EXPOSE` 관련 서술은 PaaS 전제였다(superseded).** 가비아 VM 에서는 `docker run -p` 로 우리가 포트를 정하고, `server.port: ${PORT:8080}` 은 기본값 8080 으로 떨어진다. 둘 다 그대로 두는 이유는 §9.6 호스팅 절에 적었다 — 지워서 얻는 게 없다.
 >
-> **`EXPOSE` 는 쓰지 않는다.** Railway 는 `EXPOSE` 를 프록시 대상 포트 힌트로 읽는다. 앱은 `${PORT}` 에 바인딩하는데 `EXPOSE 8080` 이 남아 있으면 둘이 어긋나는 순간 트래픽이 닫힌 포트로 가고, **바로 위 문단과 똑같은 방식으로 조용히 실패한다.** 포트의 출처를 `PORT` 하나로 둔다.
+> **대신 VM 에서는 리버스 프록시가 새 함정이다.** 인증서(H1)와 본문 상한(H2)이 거기 걸린다. 컨테이너만 띄우고 프록시를 안 세우면 앱은 HTTP 로 멀쩡히 뜨는데 **웹에서만 mixed content 로 막히고**, nginx 를 기본 설정으로 세우면 **15MB 업로드가 전부 413** 이다. 둘 다 로그에 에러가 안 남는 종류다.
 
 #### DB — Supabase 무료 Postgres로 **확정**
 
-서버 호스팅은 미정이지만 **DB는 여기서 못 박는다.** Render 무료 Postgres는 만료가 있어 쓰지 않는다.
+**서버가 가비아 VM 으로 확정된 뒤에도 DB는 Supabase 로 둔다.** 4GB VM 에 Postgres 를 같이 올릴 수는 있지만, 그러면 앱과 DB 가 같은 메모리·CPU 를 나눠 쓰고 컨테이너를 지우는 순간 데이터가 사라진다. **분리해 두면 서버를 재배포하거나 VM 을 다시 만들어도 계정·분석 기록이 남는다.**
 
-> **DB를 서버와 분리해 두면 서버를 재배포하거나 호스팅을 갈아타도 데이터가 안 날아간다.** 호스팅을 아직 안 정했기 때문에 오히려 이 분리가 필수다 — Railway로 갔다가 Render로 옮겨도 계정·분석 기록은 그대로 남는다.
+> **다만 지연이 하나 붙는다.** DB 가 외부에 있으므로 쿼리마다 네트워크 왕복이 생긴다. 이 API 는 요청당 쿼리가 몇 개뿐이고 무거운 건 OpenAI 대기라 체감되지 않지만, **VM 안에 Postgres 를 올리는 쪽이 빠르다는 사실 자체는 맞다.** 그 속도보다 데이터가 남는 쪽을 택한 것이다.
 
 | 환경변수 | 값 | 비고 |
 |---|---|---|
@@ -815,16 +868,38 @@ npx wrangler pages deploy build/web --project-name=skinplate
 
 > **`API_BASE_URL`이 빌드 시점에 박힌다.** 백엔드 호스팅이 정해진 뒤에 웹을 빌드해야 하고, 백엔드 주소가 바뀌면 웹도 다시 빌드해 올린다. 두 줄이라 부담은 없지만 순서는 있다.
 
-> **CORS 함정이 없다.** `WebConfig`가 이미 `/api/**`를 전체 허용으로 열어 두었고(설계서 §1.9), 우리는 **쿠키가 아니라 `Authorization` 헤더로 토큰을 보낸다.** `allowCredentials`·`SameSite`·프리플라이트 쿠키 같은 문제가 **처음부터 발생하지 않는다.** 웹을 붙이면서 백엔드에서 고칠 것이 하나도 없다.
+> **CORS 함정이 없다.** `WebConfig`가 `/api/**`를 전체 허용으로 열어 두었고(설계서 §1.9), 우리는 **쿠키가 아니라 `Authorization` 헤더로 토큰을 보낸다.** `allowCredentials`·`SameSite`·프리플라이트 쿠키 같은 문제가 **처음부터 발생하지 않는다.**
+>
+> **다만 그 `WebConfig` 가 실제로는 없었다(2026-08-14 발견·수정).** 설계서 §1.9 에 클래스가 적혀 있는데 스켈레톤에서 빠진 채로 넘어왔고, `SecurityConfig` 의 `.cors(withDefaults())` 는 `CorsConfigurationSource` 빈이 없으면 **빈 설정으로 풀려 헤더를 한 줄도 안 내보낸다.** 그 상태로 배포했으면 **APK 는 멀쩡하고 웹만 전부 막힌 채** 심사에 들어갔을 것이다 — 앱에서 안 보이는 종류라 배포 후에나 드러난다. 지금은 클래스를 넣었고 `WebConfigTest` 가 매핑 존재를 고정한다.
 
-#### 앱 배포 — Android APK만. **iOS는 제외한다**
+#### 앱 배포 — **Android → iOS → 웹** 순 (2026-08-14 우선순위 확정)
 
 | 대상 | 판단 |
 |---|---|
-| **Android APK** | ✅ **GitHub Releases에 올리고 QR로 배포.** Firebase App Distribution은 필요 없다 — 테스터 이메일 등록 절차가 QR보다 마찰이 크다 |
-| **iOS / TestFlight** | ❌ **Apple Developer $99/년 + 심사 대기.** 10일 안에 안 들어간다 |
+| **① Android APK** | ✅ **GitHub Releases에 올리고 QR로 배포.** Firebase App Distribution은 필요 없다 — 테스터 이메일 등록 절차가 QR보다 마찰이 크다. **시연 영상은 이 빌드로 찍는다** |
+| **② iOS — Xcode USB 직접 설치** | ✅ **무료.** 팀에 실기기가 있다. **Android 가 끝난 뒤에 붙인다** |
+| ~~iOS / TestFlight~~ | ❌ **$99/년.** 다만 이건 **TestFlight 경로에만** 해당한다 — 아래 정정 참조 |
+| **③ 웹** | 우선순위 최하위. 붙으면 체험 폭이 넓어지지만 **시연 경로는 APK 다** |
 
-> **아이폰 심사위원은 사파리로 웹을 열면 된다.** 모바일 브라우저에서 파일 선택을 누르면 카메라가 열리므로 **거기서도 촬영이 된다**(§6.1). iOS를 뺀 자리를 웹이 정확히 메운다 — 그래서 이번 개정에서 웹이 "있으면 좋은 것"이 아니라 **iOS 대체재**가 됐다.
+> **§9.6 v1.6 의 "iOS 제외" 근거는 절반이 틀렸다(2026-08-14 정정).** 근거가 "Apple Developer $99/년 + 심사 대기"였는데 그건 **TestFlight 배포에만** 걸린다. **Xcode 로 USB 직접 설치하는 경로는 무료 Apple ID 로 되고 심사도 없다.**
+>
+> 무료 설치(Personal Team)의 제약은 **7일 후 앱 만료**·기기당 앱 3개·유료 entitlement(Push·App Groups) 사용 불가인데, **우리는 셋 다 걸리지 않는다.** 카메라와 ML Kit 은 무료 서명으로 그대로 돌고, Day 8 에 설치하면 Day 9 촬영과 Day 10 발표를 덮는다.
+
+**iOS 에 실제로 드는 것은 돈이 아니라 시간이다.**
+
+| 항목 | 상태 (2026-08-14) |
+|---|---|
+| **Xcode** | ❌ **설치 안 돼 있다** — Command Line Tools 뿐. App Store 에서 약 15GB. §9.5 가 적어 둔 "iOS 추가 작업 30분"에 **이게 빠져 있었다** |
+| iOS 프로젝트 골격 | ✅ `Runner.xcworkspace` 존재 |
+| 카메라·사진 권한 문구 | ✅ `Info.plist` 에 이미 있다 |
+| Podfile 최소 버전 | ⚠️ `platform :ios` 미지정 → ML Kit 요구 버전으로 올리고 `pod install` |
+| iOS FaceGate 코드 | ⚠️ `bgra8888` 분기는 있으나 **실기기에서 한 번도 안 돌았다** |
+
+> **마지막 줄이 진짜 리스크다.** 설계서 §2.12.2 가 경고한 대로 **iOS 에서 프레임 포맷이 어긋나면 예외가 안 나고 검출이 0개로 나온다.** 게이트는 "얼굴이 화면 안에 들어오게 해주세요"만 계속 띄우고, 원인을 게이트 조건에서 찾게 된다. **실기기에 올려 보기 전에는 되는지 알 수 없다.**
+>
+> **그래서 iOS 는 Android 가 G5 를 통과한 뒤에만 착수한다.** 네이티브 의존성이 걸린 작업이라 빌드가 깨지면 복구에 시간이 들고, 그게 Day 8 기능 동결이 막으려는 바로 그 상황이다. **Day 8 안에 Android 가 안 끝나면 iOS 는 발표 이후로 넘긴다** — 순서를 정한 것이지 둘 다 하겠다고 정한 것이 아니다.
+>
+> **아이폰 심사위원 경로는 iOS 가 붙으면 iOS 로, 못 붙으면 웹으로 간다.** 웹을 최하위로 내렸어도 **버린 것은 아니다** — 둘 다 없으면 아이폰 심사위원은 체험할 방법이 없다.
 
 #### 이미지 서빙 — 아예 의존하지 않는다
 
@@ -842,9 +917,12 @@ npx wrangler pages deploy build/web --project-name=skinplate
 그런데도 `ImageStorage` · 리소스 핸들러 · `/uploads/**` 공개 · `STORAGE_BASE_URL`을 만들면, **아무도 안 읽는 데이터를 PaaS 컨테이너 재배포마다 잃는 코드**를 유지하게 된다.
 
 ```java
-byte[] bytes = image.getBytes();            // 저장하지 않는다
-String base64 = Base64.getEncoder().encodeToString(bytes);
-OpenAiSkinResult ai = visionClient.analyzeSkin(base64);
+// 세 장 모두 저장하지 않는다. 장수가 늘어도 보관 정책은 그대로다.
+List<FacePhoto> photos = List.of(
+        encode(FacePhotoType.FRONT, front),
+        encode(FacePhotoType.LEFT, left),
+        encode(FacePhotoType.RIGHT, right));
+OpenAiSkinResult ai = visionClient.analyzeSkin(photos);   // 호출 1회
 ```
 
 **이 결정이 주는 것 세 가지**
@@ -871,7 +949,7 @@ OpenAiSkinResult ai = visionClient.analyzeSkin(base64);
 
 | 시점 | 할 일 |
 |---|---|
-| **Day 4** | **1차 배포.** 기능이 절반만 돌아도 올린다. 목적은 파이프라인을 뚫는 것. **착수 전에 Railway/Render를 결정한다**(R23) |
+| **Day 4** | **1차 배포.** 기능이 절반만 돌아도 올린다. 목적은 파이프라인을 뚫는 것. **가비아 VM + 리버스 프록시(HTTPS·본문 20MB)를 같이 세운다**(R23) |
 | Day 7 | 릴리즈 APK로 실기기에서 배포 서버 호출 확인 · **웹 빌드 → Cloudflare Pages 연결**(§19.2) |
 | Day 8 | **배포본 E2E 1회 완주 — APK 1회 · 웹 1회.** 이게 시연에서 쓸 바로 그 빌드다 |
 | Day 9~10 | 영상 촬영·편집. 코드는 동결 |
@@ -1042,9 +1120,16 @@ class SkinAnalysisNotifier extends _$SkinAnalysisNotifier {
   @override
   AsyncValue<SkinAnalysis?> build() => const AsyncData(null);
 
-  Future<void> analyze(File image) async {
+  /// 세 장이 다 모인 뒤 한 번만 부른다. 촬영 단계마다 부르면 분석이 세 건 생기고
+  /// 그중 무엇이 오늘의 점수인지 정할 방법이 없다. (§14.3 ⑤)
+  Future<void> analyze({
+    required File front,
+    required File left,
+    required File right,
+  }) async {
     state = const AsyncLoading();
-    final result = await ref.read(analyzeSkinUseCaseProvider)(image);
+    final result = await ref.read(analyzeSkinUseCaseProvider)(
+        front: front, left: left, right: right);
     state = result.when(
       success: (data) => AsyncData(data),
       failure: (f) => AsyncError(f, StackTrace.current),
@@ -1294,7 +1379,7 @@ SecurityFilter  →  Controller  →  Service  →  Repository  →  Entity
 
 - Controller는 Entity를 직접 반환하지 않는다. 항상 DTO.
 - Service만 `@Transactional`을 갖는다.
-- **OpenAI 호출은 트랜잭션 밖에서 한다.** AI 호출 18초를 트랜잭션 안에 두면 DB 커넥션 하나가 18초 잠긴다. 기본 풀 10이면 동시 10명에서 고갈되는데, 심사위원 3명이 슬롯 1·2·3으로 동시에 체험하는 시나리오를 우리가 직접 상정하고 있다(§16.5).
+- **OpenAI 호출은 트랜잭션 밖에서 한다.** AI 호출 25초를 트랜잭션 안에 두면 DB 커넥션 하나가 25초 잠긴다. 기본 풀 10이면 동시 10명에서 고갈되는데, 심사위원 3명이 슬롯 1·2·3으로 동시에 체험하는 시나리오를 우리가 직접 상정하고 있다(§16.5).
 - **Entity → DTO 변환은 `@Transactional(readOnly = true)` 메서드 안에서만.** `open-in-view: false`이므로 컨트롤러에서 `SkinPlateResponse.from()`을 호출하면 LAZY 연쇄(`foodAnalysis` → `ingredients` → `feedbacks`)에서 `LazyInitializationException`이 난다.
 - Engine은 Spring 컨텍스트에 의존하되 DB에는 접근하지 않는다 (순수 계산).
 - **Controller는 사용자 식별에 `@CurrentUser Long userId`만 받는다.** 요청 본문의 userId는 존재하지 않으며, 존재하더라도 무시한다.
@@ -2009,9 +2094,17 @@ public class Recommendation extends BaseTimeEntity {
 
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---|---|
-| `image` | file | ✅ | 얼굴 사진 (JPEG/PNG, ≤5MB) |
+| `front` | file | ✅ | 정면 얼굴 사진 (JPEG/PNG, ≤5MB) |
+| `left` | file | ✅ | 왼쪽 얼굴 사진 (JPEG/PNG, ≤5MB) |
+| `right` | file | ✅ | 오른쪽 얼굴 사진 (JPEG/PNG, ≤5MB) |
 
 **Header**: `Authorization: Bearer {accessToken}`
+
+> **세 장이 하나의 분석이다.** 정면·좌·우를 한 번의 Vision 호출로 함께 보내 결과 하나를 받는다. 사진마다 따로 호출해 평균 내지 않는다 — 각도마다 점수가 달라지면 "같은 얼굴이면 같은 점수"라는 재현성 주장이 무너지고, 비용과 대기 시간도 세 배가 된다.
+>
+> **방향은 파트 이름이 정한다.** 배열 + `type` 필드로 받으면 중복 `type`·미지 `type`·순서 뒤바뀜을 전부 서버가 직접 검사해야 하는데, 파트 이름으로 두면 그 셋이 애초에 표현되지 않는다. 한 장이라도 빠지면 `MissingServletRequestPartException` → **400 `INVALID_INPUT`** 이고, AI 는 호출되지 않는다.
+>
+> **웹도 세 장을 요구한다.** 웹에는 ML Kit 게이트가 없지만(§9.5) 계약은 같다. 파일 선택을 세 번 하게 되는 대신 앱과 서버 경로가 한 벌로 유지된다.
 
 **Response 201**
 
@@ -2053,7 +2146,7 @@ public class Recommendation extends BaseTimeEntity {
 **처리 흐름**
 
 ```
-검증 → 저장 → Base64 → OpenAI Vision (Structured Output)
+세 장 각각 검증(매직바이트) → 각각 Base64 → OpenAI Vision 1회 (Structured Output)
      → 5개 지표 수신 → SkinScoreCalculator로 종합 점수 산출
      → highlights 생성 → (선언 타입이 있으면) skinTypeGap 생성
      → DB 저장 → 응답
@@ -2643,10 +2736,12 @@ public @interface CurrentUser {}
 @PostMapping(value = "/skin/analyses", consumes = MULTIPART_FORM_DATA_VALUE)
 public ResponseEntity<ApiResponse<SkinAnalysisResponse>> analyze(
         @CurrentUser Long userId,                       // ★ 토큰에서 온 값
-        @RequestPart("image") MultipartFile image) {
+        @RequestPart("front") MultipartFile front,      // ★ 파트 이름이 곧 촬영 방향
+        @RequestPart("left") MultipartFile left,
+        @RequestPart("right") MultipartFile right) {
 
     return ResponseEntity.status(HttpStatus.CREATED)
-            .body(ApiResponse.ok(skinAnalysisService.analyze(userId, image)));
+            .body(ApiResponse.ok(skinAnalysisService.analyze(userId, front, left, right)));
 }
 ```
 
@@ -2785,10 +2880,10 @@ sequenceDiagram
     participant AI as OpenAI gpt-4o
     participant D as PostgreSQL
 
-    F->>C: POST /skin/analyses (multipart)<br/>Authorization: Bearer …
-    C->>S: analyze(userId, file)
-    S->>O: analyzeSkin(base64)
-    O->>AI: chat.completions<br/>(image + json_schema)
+    F->>C: POST /skin/analyses (multipart)<br/>front · left · right<br/>Authorization: Bearer …
+    C->>S: analyze(userId, front, left, right)
+    S->>O: analyzeSkin([FRONT, LEFT, RIGHT])
+    O->>AI: chat.completions 1회<br/>(방향 라벨 + 이미지 3장 + json_schema)
     AI-->>O: 구조화 JSON
     O-->>S: OpenAiSkinResult
     S->>S: SkinScoreCalculator.calculate()
@@ -2813,18 +2908,25 @@ public class OpenAiVisionClient {
 
     private static final String MODEL = "gpt-4o";
 
-    public OpenAiSkinResult analyzeSkin(String base64Image) {
+    public OpenAiSkinResult analyzeSkin(List<FacePhoto> photos) {
+        // 사진마다 앞에 방향 라벨을 끼운다. 순서로만 구분하면 한 장이 밀려도 드러나지 않는다.
+        List<Map<String, Object>> content = new ArrayList<>();
+        content.add(text(SkinAnalysisPrompt.USER));
+        for (FacePhoto photo : photos) {
+            content.add(text("[" + photo.type().getLabel() + "]"));
+            // 선언 타입은 실제 바이트에서 판별한 값이다. image/jpeg 로 고정하면
+            // PNG 를 올린 사용자만 "분석 실패"를 본다.
+            content.add(Map.of("type", "image_url", "image_url", Map.of(
+                    "url", "data:" + photo.mediaType() + ";base64," + photo.base64(),
+                    "detail", "high"           // ★ 피부는 high. 아래 설명 참조
+            )));
+        }
+
         Map<String, Object> body = Map.of(
             "model", MODEL,
             "messages", List.of(
                 Map.of("role", "system", "content", SkinAnalysisPrompt.SYSTEM),
-                Map.of("role", "user", "content", List.of(
-                    Map.of("type", "text", "text", SkinAnalysisPrompt.USER),
-                    Map.of("type", "image_url", "image_url", Map.of(
-                        "url", "data:image/jpeg;base64," + base64Image,
-                        "detail", "high"           // ★ 피부는 high. 아래 설명 참조
-                    ))
-                ))
+                Map.of("role", "user", "content", content)
             ),
             "response_format", Map.of(
                 "type", "json_schema",
@@ -2843,7 +2945,7 @@ public class OpenAiVisionClient {
                 .bodyValue(body)
                 .retrieve()
                 .bodyToMono(JsonNode.class)
-                .timeout(Duration.ofSeconds(18))          // 타임아웃은 재시도하지 않는다
+                .timeout(Duration.ofSeconds(25))          // 타임아웃은 재시도하지 않는다
                 .retryWhen(Retry.fixedDelay(1, Duration.ofSeconds(2))
                         .filter(e -> e instanceof WebClientResponseException.TooManyRequests))
                 .map(this::extractContent)
@@ -2863,9 +2965,11 @@ public class OpenAiVisionClient {
 
 | 결정 | 근거 |
 |---|---|
-| **타임아웃은 재시도하지 않는다** | 재시도 포함 최악 `20+2+20 = 42초`인데 앱 타임아웃은 25초다. **서버는 살아서 GPT를 붙들고 있는데 앱은 이미 포기한 상태**가 된다. 사용자가 재시도를 누르면 또 42초가 시작된다 |
-| **429는 재시도한다** | 예산이 남는 것과 초당 처리량 상한(TPM)은 다른 축이다. `detail:"high"`로 요청당 토큰이 커진 만큼 상한에 더 빨리 닿는다. 팀 4명이 동시에 개발하는 Day 3~5, 표준 10종을 반복 호출하는 Day 8 캘리브레이션이 위험 구간이다. **429는 응답이 즉시 오므로 재시도해도 최악 `0.1+2+18 ≈ 20초`** — 클라이언트 25초 안에 들어온다. 재시도가 유일한 정답인 에러를 타임아웃과 같이 묶어 없애면, 예산이 84% 남은 채로 "분석에 실패했습니다"가 뜬다 |
-| 클라이언트 25초 | 서버 18초 + 이미지 업로드·응답 여유 |
+| **타임아웃은 재시도하지 않는다** | 재시도 포함 최악 `25+2+25 = 52초`인데 앱 타임아웃은 32초다. **서버는 살아서 GPT를 붙들고 있는데 앱은 이미 포기한 상태**가 된다. 사용자가 재시도를 누르면 또 52초가 시작된다 |
+| **429는 재시도한다** | 예산이 남는 것과 초당 처리량 상한(TPM)은 다른 축이다. `detail:"high"` 세 장으로 요청당 토큰이 커진 만큼 상한에 더 빨리 닿는다. 팀 4명이 동시에 개발하는 Day 3~5, 표준 10종을 반복 호출하는 Day 8 캘리브레이션이 위험 구간이다. **429는 응답이 즉시 오므로 재시도해도 최악 `0.1+2+25 ≈ 27초`** — 클라이언트 32초 안에 들어온다. 재시도가 유일한 정답인 에러를 타임아웃과 같이 묶어 없애면, 예산이 84% 남은 채로 "분석에 실패했습니다"가 뜬다 |
+| 서버 25초 · 클라이언트 32초 | 피부는 `detail:"high"` 세 장이라 18초로는 빠듯하다. 세 장을 한 요청에 넣은 대가는 지연이지, 호출 횟수가 아니다 |
+
+> **25초는 추론 시간만이 아니라 업로드까지 포함한 예산이다.** `.timeout()` 이 교환 전체를 감싸므로 **약 20MB 본문을 OpenAI 로 올리는 시간이 이 안에 들어간다.** 실측에서는 19.24MB 업로드 + 추론이 8.9초였으므로 여유가 있지만, 서버 상행 대역이 좁으면 추론에 남는 시간이 줄어든다. `AI_TIMEOUT` 이 잦아지면 값을 올리기 전에 **업로드 크기부터 본다** — 게이트 없는 웹에서 카메라 원본이 올라오는 경우가 그 원인이다.
 | `TimeoutException` 별도 분기 | `onErrorMap`을 무차별로 걸면 타임아웃도 `AI_ANALYSIS_FAILED`(502)가 되어 **`AI_TIMEOUT`(504)이 영영 발생하지 않는다.** 앱의 재시도 UX 분기가 통째로 도달 불가 코드가 된다 |
 | 피부는 `detail: "high"` | `low`는 이미지를 512×512 한 타일로 다운샘플한다. 그 해상도로 홍조 62와 88을 구분하는 건 근거가 없는데, **이 제품의 개인화 전체(severityFactor)가 그 숫자에 얹혀 있다.** 음식은 "김치찌개인가"만 알면 되므로 `low`로 충분하다 |
 
@@ -2963,7 +3067,7 @@ public class OpenAiVisionClient {
 
 | 상황 | 처리 |
 |---|---|
-| 타임아웃 (18초 초과) | `AI_TIMEOUT`(504) 반환, 앱은 재시도 버튼 노출 |
+| 타임아웃 (25초 초과) | `AI_TIMEOUT`(504) 반환, 앱은 재시도 버튼 노출 |
 | 5xx | **재시도 없이** 즉시 `AI_ANALYSIS_FAILED`(502) |
 | **429 (rate limit)** | **2초 후 1회 재시도.** 실패하면 `AI_ANALYSIS_FAILED` |
 | `faceDetected: false` | `FACE_NOT_DETECTED` 422 → "밝은 곳에서 다시 촬영" 안내 |
@@ -2998,12 +3102,14 @@ public class MockOpenAiVisionClient implements VisionClient {
 
 | 항목 | 토큰 | 비용 |
 |---|---|---|
-| 피부 분석 (얼굴 크롭 `high` = 85 + 170×4타일) | 1,265 in / 250 out | $0.0057 |
+| 피부 분석 (얼굴 크롭 `high` = 85 + 170×4타일, **×3방향**) | 3,395 in / 250 out | $0.0110 |
 | 음식 분석 (`low` = 85) | 785 in / 500 out | $0.0070 |
 | 추천 문장 생성 (텍스트) | 600 in / 400 out | $0.0055 |
-| **플로우 1회** | | **$0.018 (약 25원)** |
+| **플로우 1회** | | **$0.024 (약 33원)** |
 
-조직 크레딧 **$100 기준 약 5,500회**를 돌릴 수 있다. 개발 10일간 하루 80회(800회) + 리허설 50회 + 심사위원 체험 30회를 다 합쳐도 **$16, 예산의 16%**다.
+조직 크레딧 **$100 기준 약 4,200회**를 돌릴 수 있다. 개발 10일간 하루 80회(800회) + 리허설 50회 + 심사위원 체험 30회를 다 합쳐도 **$21, 예산의 21%**다.
+
+> 3방향 촬영으로 피부 분석 입력이 1,265 → 3,395 토큰이 됐다. 회당 5.7원이 늘었고 예산 비중은 16% → 21%다. **여전히 제약이 아니다** — 세 각도를 종합한다는 것이 이 분석의 근거이므로 여기서 아끼면 아낄 대상을 잘못 고른 것이다.
 
 > **예산은 제약이 아니다.** 그래서 피부 분석을 `detail:"high"`로 올리는 결정에 비용 부담이 없고, 일일 호출 제한(30회)도 개발을 방해하기만 한다. 제한 로직을 만드는 데 쓸 반나절을 다른 데 쓰는 편이 낫다.
 | ~~호출 제한~~ | — | **만들지 않는다.** 아래 산정대로 예산의 16%만 쓴다. 제한 로직은 개발만 방해한다 |
@@ -3369,7 +3475,7 @@ gantt
 | G2 | Day 5 종료 | 피부 분석 E2E 동작 | 지표 5개 → 3개로 축소 |
 | G3 | Day 7 종료 | Plate Score E2E 동작 | **룰은 자르지 않는다.** 9종은 각각 20줄이고 이미 다 작성돼 있어 잘라도 아끼는 시간이 없는데, 발표 숫자(60점/87점)만 깨진다. 대신 화면을 자른다 — S09 히스토리 · 결과 공유 · 지표 추이 차트 |
 | G4 | Day 8 종료 | 전체 플로우 관통 | 추천을 정적 문구로 대체(AI 문장 생성 제외) |
-| G5 | **Day 8 종료** | **배포본 E2E 1회 완주 — APK 1회 · 웹 1회** | 기능을 더 넣지 않고 동결. Day 9~10은 영상 촬영·편집 전용. **웹이 안 되면 웹만 버리고 APK로 간다** — 웹은 체험용이지 시연 경로가 아니다(§21) |
+| G5 | **Day 8 종료** | **배포본 E2E 1회 완주 — APK 1회.** 웹·iOS 는 게이트 조건이 아니다 | 기능을 더 넣지 않고 동결. Day 9~10은 영상 촬영·편집 전용. **APK 하나만 통과하면 G5 다** — 우선순위가 Android → iOS → 웹이므로(§9.6) 뒤의 둘은 남는 시간에 붙이는 것이지 통과 조건이 아니다. **iOS 착수는 이 게이트를 통과한 뒤에만** |
 | G6 | Day 9 종료 | 영상 촬영 완료 | 미완성 기능은 촬영에서 제외하고 완성된 것만 찍는다 |
 
 > **게이트 번호는 §19.2 Day 표의 게이트 열과 1:1로 맞춰 읽는다.** G4·G5가 같은 Day 8인 것은 오기가 아니다 — 그날 하루에 전체 관통과 배포본 E2E가 같이 걸려 있고, 그래서 Day 8이 기능 동결일이다.
@@ -3386,7 +3492,7 @@ gantt
 
 | # | 리스크 | 영향 | 확률 | 대응 |
 |---|---|---|---|---|
-| R1 | **OpenAI 응답 지연/실패** | 데모 중단 | 중 | **18초 단발 타임아웃(재시도 없음)**, `app.ai.mock=true`로 즉시 전환, 로딩 단계 UI로 체감 대기 완화 |
+| R1 | **OpenAI 응답 지연/실패** | 데모 중단 | 중 | **25초 단발 타임아웃(재시도 없음)**, `app.ai.mock=true`로 즉시 전환, 로딩 단계 UI로 체감 대기 완화 |
 | R2 | **AI 응답 파싱 실패** | 기능 불가 | 중 | Structured Outputs(json_schema, strict) 강제, 원본 jsonb 저장 후 폴백 |
 | R3 | **의료 자문으로 오해** | 신뢰/법적 리스크 | 중 | 모든 결과 화면 하단 고정 문구: *"본 서비스는 의료 진단이 아니며 참고용 정보입니다."* 프롬프트에서 질환명 언급 금지 |
 | R4 | **촬영 조명·화질 편차로 결과 요동** | 신뢰도 하락 | 높 | 촬영 가이드 오버레이, 조도 안내 문구, `temperature 0.2`로 변동 축소, 재촬영 유도 |
@@ -3408,8 +3514,8 @@ gantt
 | R20 | **영상 촬영·편집 시간이 일정에 없음** | 발표물 미완성 | 높 | Day 9 촬영 / Day 10 편집으로 이틀을 확보하고, **Day 8을 기능 동결일**로 못 박는다 |
 | R21 | **얼굴 게이트가 촬영을 막음** | 현장 시연 중단 | 중 | 갤러리 업로드는 게이트 우회, 3회 연속 실패 시 "그래도 촬영" 버튼(§9.5). 영상은 재촬영 가능하나 현장 시연은 통제 불가 |
 | R22 | **시뮬레이션이 원본 엔티티를 변경** | 시연 데이터 파괴 | 중 | detached 복사본으로만 계산 + `@Transactional(readOnly = true)` 안전망 (설계서 §1.19.2) |
-| **R23** | **백엔드 호스팅 미정** | **Day 4 배포가 그날 아침 계정 만들기부터 시작 → 반나절 소실, 배포 전체가 밀림** | **높** | **Day 4 착수 전까지 Railway/Render를 결정한다**(§9.6). 결정 기준은 "결제가 되는가" 하나뿐이라 5분이면 끝난다. **두 후보의 요구사항이 동일하므로 준비(Dockerfile·`DB_*`·헬스체크)는 결정과 무관하게 지금 진행한다** |
-| **R24** | **Render를 택할 경우 콜드스타트**(15분 무활동 시 슬립, 첫 요청 30~60초) | 심사위원이 링크를 열었는데 빈 화면 | 중 | **발표는 영상이라 발표 자체는 무관.** 심사 대기 중 **UptimeRobot 5분 간격 핑**으로 깨워 둔다. 750시간/월 대비 10일=240시간이라 상시 워밍업해도 한도에 안 닿는다(§9.6) |
+| **R23** | **VM 에는 HTTPS 가 자동으로 안 붙는다** | **웹(Cloudflare Pages, https)이 http 백엔드를 못 부른다 → 심사위원 체험 경로만 죽는다.** 서버·앱은 멀쩡해서 원인이 안 보인다 | **높** | **Day 4 배포와 같은 날 도메인 + Caddy 를 세운다**(§9.6 H1). Caddy 를 쓰면 인증서가 자동이고 본문 상한도 기본 무제한이라 H2 까지 같이 해결된다 |
+| **R24** | **리버스 프록시 본문 상한**(nginx 기본 1MB) | **15MB 짜리 3장 업로드가 전부 413.** 앱에는 "분석 실패"만 뜨고 백엔드 로그에는 요청이 아예 안 찍힌다 | 중 | nginx 면 `client_max_body_size 20m;`, Caddy 면 기본값 그대로(§9.6 H2). **Day 4 배포 직후 3장 업로드를 한 번 통과시켜 확인한다** |
 
 ### 안전 문구 (전 화면 공통)
 
@@ -3464,7 +3570,7 @@ gantt
 | "총점 55는 어떻게 나온 겁니까?" | 5개 지표의 방향을 통일해 평균낸다. 산식이 §4.1에 공개되어 있고, S05 화면에서 지표 바와 총점을 함께 보여주므로 검산이 가능하다 |
 | "피부 타입을 받으면 결국 고정 타입 개인화 아닙니까?" | **점수에는 쓰지 않는다.** `PlateContext`는 지표와 음식만 받는다. 자가 신고는 "알고 계셨던 것과 오늘 측정이 다르다"를 보여주는 데만 쓴다 — 오히려 고정 타입의 한계를 드러내는 장치다 |
 | **"웹과 앱 중 뭐가 본체입니까?"** | **하나의 Flutter 코드베이스로 둘 다 냅니다.** 온디바이스 얼굴 게이트만 앱 전용이고 나머지 기능은 동일합니다 |
-| **"iOS는 왜 없습니까?"** | **빌드는 됩니다.** 다만 배포에 스토어 심사가 필요해 이번엔 안드로이드와 웹으로 시연합니다. **아이폰은 사파리로 열면 촬영까지 됩니다** |
+| **"iOS는 왜 없습니까?"** | **빌드는 됩니다.** 게이트도 iOS 프레임 포맷까지 분기해 두었습니다. 우선순위를 안드로이드 → iOS → 웹으로 잡았고, 스토어 배포는 심사가 필요해 이번 시연에서 뺐을 뿐입니다. **아이폰은 사파리로 열면 촬영까지 됩니다** |
 
 ---
 
@@ -3483,7 +3589,7 @@ app:
   ai:
     api-key: ${OPENAI_API_KEY}
     model: gpt-4o
-    timeout-seconds: 18
+    timeout-seconds: 25
     mock: ${AI_MOCK:false}
 
 spring:
@@ -3496,7 +3602,7 @@ spring:
     properties.hibernate.format_sql: true
   servlet.multipart:
     max-file-size: 5MB
-    max-request-size: 10MB
+    max-request-size: 20MB          # 피부 분석이 5MB 짜리 세 장을 한 요청에 싣는다
 ```
 
 **DB 환경변수 — 로컬과 배포가 다르다**
@@ -3579,6 +3685,38 @@ curl http://localhost:8080/api/v1/auth/me \
 | **Access Token** | 로그인 시 발급되는 JWT. 유효기간 7일, 모든 보호 API에 `Bearer`로 첨부 |
 | **테스트 계정** | 서버 기동 시 자동 생성되는 시연·검증용 고정 계정 (슬롯 1~3) |
 | **원탭 로그인** | `POST /auth/test-login` 호출로 입력 없이 테스트 계정에 로그인하는 시연용 동작 |
+
+---
+
+## 부록 I. v1.7 변경 이력 (2026-08-13 · 피부 분석 3방향 촬영)
+
+Flutter FaceGate에 FRONT·LEFT·RIGHT 판정이 이미 다 들어 있는데 화면은 정면 한 장만 쓰고 있었다. 그 셋을 실제로 쓰도록 계약을 넓혔다.
+
+| # | 항목 | 변경 |
+|---|---|---|
+| **C1** | **`POST /skin/analyses` 요청** | 파트 `image` 1개 → **`front` · `left` · `right` 3개, 전부 필수**(§14.3 ⑤). **응답·DB·점수 산식은 그대로다** — 세 장이 `SkinAnalysis` 한 건을 만든다 |
+| **C2** | **방향 표현** | 배열 + `type` 필드가 아니라 **multipart 파트 이름**으로 받는다. 중복 `type`·미지 `type`·순서 뒤바뀜이 표현될 수 없는 형태라 검증 코드가 필요 없고, base64 JSON 대비 요청이 33% 작다 |
+| **C3** | **Vision 호출** | 세 장을 **한 번의 요청**에 싣고 사진마다 앞에 `[정면]` `[왼쪽 얼굴]` `[오른쪽 얼굴]` 라벨을 붙인다. 장당 호출 후 평균 내지 않는다 — 각도마다 점수가 달라지면 재현성 주장이 무너진다 |
+| **C4** | **프롬프트** | `USER` 만 3방향 설명으로 확장. **`SYSTEM` 의 지표 정의·판정 규칙·JSON Schema 는 그대로** — 입력 장수가 늘었을 뿐 잣대는 같아야 과거 분석과 비교된다 |
+| **C5** | **타임아웃** | 서버 18초 → **25초**, 클라이언트 25초 → **32초**. `detail:"high"` 세 장이면 입력이 1,265 → 3,395 토큰이라 18초로는 빠듯하다. 429 재시도 포함 최악 27초로 여전히 클라이언트 안에 들어온다 |
+| **C6** | **업로드 상한** | `max-request-size` 10MB → **20MB**. 게이트가 없는 웹에서 원본 세 장이 그대로 올라오면 10MB 로는 413 이 난다. `max-file-size` 는 5MB 유지 |
+| **C7** | **비용** | 플로우 1회 $0.018 → **$0.024**(약 33원). 예산 비중 16% → **21%**. 여전히 제약이 아니다(§17.5) |
+| **C8** | **촬영 게이트** | FRONT 는 `|yaw|·|roll| ≤ 15°`, LEFT·RIGHT 는 해당 방향으로 **`yaw ≥ 25°`**(§9.5). 3단계 촬영이고 **세 장이 다 통과해야 서버를 한 번 호출한다** |
+| **C9** | **웹** | 게이트는 여전히 없지만 **계약은 같다.** 파일 선택을 세 번 하게 되는 대신 앱·서버 경로가 한 벌로 유지된다 |
+
+> **기존 API 를 깨는 변경이지만 깨질 것이 없었다.** 사용처가 Flutter 앱 하나(같은 스프린트)와 백엔드 테스트뿐이고, 배포된 앱 버전이 아직 없다. 그래서 `/multi-view` 같은 별도 엔드포인트를 만들지 않았다 — Service·프롬프트·테스트가 두 벌이 되고 Day 8 기능 동결까지 유지비만 는다.
+
+**같은 날 서버 환경도 확정됐다.**
+
+| # | 항목 | 변경 |
+|---|---|---|
+| **C10** | **백엔드 호스팅 확정** | **가비아 VM**(멋쟁이사자처럼 대학 해커톤 제공) · High CPU 2 vCore · 4GB RAM · 무료 트래픽 1TB. **Railway · Render · "512MB PaaS" 가정은 전부 폐기**(§9.6). R23·R24 도 PaaS 리스크에서 **VM 리스크(HTTPS·프록시 본문 상한)로 교체** |
+| **C11** | **메모리 실측 → JVM 옵션 변경 없음** | 배포 이미지를 `--memory=4g --cpus=2` 로 띄워 3장 × 동시 1·2·3·6 을 실측. 심사위원 3명 동시(최악 15MB 요청)에서 **힙 471MiB / 기본 최대 1,024MiB · RSS 876MiB / 4GB · OOM 0**. `-Xmx` 도 `MaxRAMPercentage` 도 **넣지 않는다** — 근거가 없고, 힙만 늘리면 native·Direct 몫이 줄어 오히려 컨테이너 OOM-kill 로 옮겨간다 |
+| **C12** | **먼저 닿는 벽은 CPU** | 동시 6건에서 2 vCore 포화(208%)·지연 +18%, 그런데 힙은 685/1,024MiB. 이 CPU 는 **Base64 인코딩**이라 업로드 크기에 비례한다 — 1024px 크롭 경로(장당 0.3MB)는 같은 동시 3건에서 **CPU 1%**. **무료 트래픽 1TB 를 이유로 크롭을 느슨하게 하면 트래픽이 아니라 CPU 에서 대가를 치른다** |
+| **C13** | **512MB / 힙 128MB OOM 분석 폐기** | 전제(512MB × 25%)가 실제 서버와 달랐다. 다만 그 분석이 지목한 **요청당 약 20MB 요청 본문은 실측으로 사실 확인**(20,974,031 바이트). 크기는 맞고, 4GB 에 그걸 감당할 여유가 있다는 것이 달라진 결론 |
+| **C14** | **`WebConfig` 누락 발견·수정** | 설계서 §1.9 에 클래스가 있는데 **구현이 없었다.** `SecurityConfig` 의 `.cors(withDefaults())` 는 `CorsConfigurationSource` 빈이 없으면 빈 설정으로 풀려 CORS 헤더를 내보내지 않는다. **APK 는 멀쩡하고 웹만 전부 막히는** 종류라 배포 후에나 드러났을 것이다. §1.9 코드를 그대로 옮기고 `WebConfigTest` 로 고정 |
+| **C15** | **플랫폼 우선순위 확정 — Android → iOS → 웹** | v1.6 의 "iOS 제외" 근거("Apple Developer $99/년 + 심사")는 **TestFlight 경로에만** 해당한다. **Xcode USB 직접 설치는 무료**이고 팀에 실기기가 있어 iOS 를 웹보다 앞에 둔다. 대신 **Android 가 G5 를 통과한 뒤에만 착수**한다 — iOS FaceGate 의 `bgra8888` 경로가 실기기에서 한 번도 안 돌았고, 어긋나면 예외 없이 검출 0개라 Day 8 동결 뒤에 만질 종류가 아니다 |
+| **C16** | **G5 게이트에서 "웹 1회" 제거** | 통과 조건은 **APK 1회**뿐이다. 웹·iOS 는 남는 시간에 붙이는 것이지 동결을 막는 조건이 아니다. **다만 iOS·웹이 둘 다 없으면 아이폰 심사위원은 체험 경로가 없다**(§21) — 최소 하나는 붙여야 한다 |
 
 ---
 

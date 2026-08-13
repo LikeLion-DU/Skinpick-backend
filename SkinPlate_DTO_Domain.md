@@ -4,8 +4,8 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | v1.7 |
-| 기준 문서 | Skin Plate PRD & Technical Design **v1.6** |
+| 문서 버전 | v1.8 |
+| 기준 문서 | Skin Plate PRD & Technical Design **v1.7** |
 | 범위 | 설정, 마이그레이션, Entity, Enum, Repository, DTO, Rule Engine 골격 (Backend) / DTO, Entity, Repository 인터페이스 (Flutter) |
 | 제외 | Service·Controller 구현체, OpenAI 호출 구현, UI 위젯 |
 
@@ -216,7 +216,7 @@ spring:
 
   servlet.multipart:
     max-file-size: 5MB
-    max-request-size: 10MB
+    max-request-size: 20MB          # 피부 분석이 5MB 짜리 세 장을 한 요청에 싣는다
 
   jackson:
     default-property-inclusion: non_null
@@ -234,7 +234,7 @@ app:
     api-key: ${OPENAI_API_KEY:}
     base-url: https://api.openai.com/v1
     model: gpt-4o
-    timeout-seconds: 18            # 타임아웃은 재시도 없음. 429만 1회 재시도
+    timeout-seconds: 25            # 타임아웃은 재시도 없음. 429만 1회 재시도 (피부는 high 3장)
     mock: ${AI_MOCK:false}
 
 springdoc:
@@ -1024,7 +1024,9 @@ public class OpenAiConfig {
 }
 ```
 
-> **`maxInMemorySize`를 10MB로 올린 것이 중요하다.** WebClient 기본값은 256KB인데, Base64 인코딩된 이미지는 원본보다 33% 커진다. 이 설정을 빼먹으면 `DataBufferLimitException`이 나면서 "AI 분석이 안 돼요"로 나타난다. 원인을 찾는 데 보통 한 시간이 걸린다.
+> **`maxInMemorySize`는 요청이 아니라 응답에 걸리는 한도다.** WebClient 기본값 256KB는 **디코더** 제한이라 올려도 우리가 올려 보내는 Base64 이미지와는 상관이 없다 — 피부 3장이면 요청 본문이 22MB지만 10MB 설정으로 그대로 나간다(인코더는 이 한도를 보지 않는다). 실제로 막히는 쪽은 **OpenAI 응답**인데 그건 수 KB짜리 JSON 하나다.
+>
+> 그래도 10MB로 두는 이유는 응답 본문이 커질 여지(에러 페이지·디버그 응답)를 남겨두는 값이 무해하기 때문이다. **"AI 분석이 안 돼요"의 원인을 여기서 찾지 마라** — 요청 크기 문제는 `spring.servlet.multipart.max-request-size`(업로드 단계)나 컨테이너 힙에서 난다.
 
 **`global/config/SwaggerConfig.java`**
 
@@ -4165,12 +4167,12 @@ class Env {
 
   static const Duration connectTimeout = Duration(seconds: 10);
 
-  /// 서버 AI 타임아웃이 18초(단발, 재시도 없음)이므로 25초면 충분하다.
+  /// 서버 AI 타임아웃이 25초(단발, 재시도 없음)이므로 32초면 충분하다.
   ///
   /// 이 값이 서버보다 짧으면 서버는 살아서 GPT를 붙들고 있는데 앱만 포기한 상태가
   /// 되고, 사용자가 재시도를 누르면 같은 일이 반복된다. 서버보다 길되,
   /// 무제한(0)으로 두면 네트워크가 끊겼을 때 로딩 화면에서 못 빠져나온다.
-  static const Duration receiveTimeout = Duration(seconds: 25);
+  static const Duration receiveTimeout = Duration(seconds: 32);
 }
 ```
 
@@ -5011,8 +5013,16 @@ import '../../../../core/result/result.dart';
 import '../entities/skin_analysis.dart';
 
 abstract interface class SkinRepository {
-  /// 얼굴 사진을 업로드하고 분석 결과를 받는다. (multipart)
-  Future<Result<SkinAnalysis>> analyze(File image);
+  /// 정면·왼쪽·오른쪽 세 장을 한 번에 올리고 분석 결과 하나를 받는다. (multipart)
+  ///
+  /// 파트 이름이 곧 방향이다 — `front` · `left` · `right`. 한 장이라도 빠지면
+  /// 서버가 400 을 돌려주므로, 세 장이 다 모이기 전에는 호출하지 않는다.
+  /// 촬영 단계마다 부르면 분석이 세 건 생기고 그중 무엇이 오늘의 점수인지 알 수 없다.
+  Future<Result<SkinAnalysis>> analyze({
+    required File front,
+    required File left,
+    required File right,
+  });
 
   /// 홈 화면(S02)의 "오늘의 Skin Score" 카드용. 없으면 Success(null).
   Future<Result<SkinAnalysis?>> getLatest();
@@ -5910,7 +5920,7 @@ if (_consecutiveFailures >= 3) {
 | 순서 | 만들 것 | 위치 | Day | 비고 |
 |---|---|---|---|---|
 | 1 | `AuthService` · `AuthController` | `domain/auth/` | 2 | `/auth/*` 5종(`PATCH /auth/me` 포함). `testLogin()` 첫 줄에 `if (!enabled) throw TEST_LOGIN_DISABLED` |
-| 3 | `OpenAiVisionClient` + 프롬프트 · JSON Schema | `infra/openai/` | 3~4 | 피부는 `detail:"high"`, 음식은 `"low"`. 18초 단발, 재시도 없음 |
+| 3 | `OpenAiVisionClient` + 프롬프트 · JSON Schema | `infra/openai/` | 3~4 | 피부는 `detail:"high"` 3장 1회, 음식은 `"low"`. 25초 단발, 재시도 없음 |
 | 4 | `MockOpenAiVisionClient` | `infra/openai/` | 3 | `@ConditionalOnProperty("app.ai.mock")`. **3번과 같은 날 만든다** — 발표 백업 플랜은 나중에 붙이면 안 붙는다 |
 | 5 | `SkinAnalysisService` | `domain/skin/` | 4 | `SkinScoreCalculator`·`SkinHighlightBuilder`(§1.12.1)·`SkinTypeGapAnalyzer`(§1.12.2)는 완성돼 있다. 조립만. **AI 호출은 트랜잭션 밖** |
 | 6 | `FoodAnalysisService` · `SkinPlateService` | `domain/food/` · `domain/plate/` | 5~6 | 엔진은 이미 있으므로 조립만. `StandardNutrition.find()` 한 줄 적용 |
@@ -5965,6 +5975,24 @@ npx wrangler pages deploy build/web --project-name=skinplate
 ---
 
 ## 부록. 리뷰 반영 이력
+
+### v1.8 (2026-08-13 · 피부 분석 3방향 입력 — PRD v1.7 대응)
+
+게이트에는 FRONT·LEFT·RIGHT 판정이 다 있는데 계약이 정면 한 장이라 나머지 둘이 쓰이지 못하고 있었다. 계약을 셋으로 넓혔다.
+
+| 항목 | 변경 |
+|---|---|
+| **`VisionClient.analyzeSkin` [수정]** | `(String base64, String mediaType)` → **`(List<FacePhoto> photos)`**. 세 장이 한 요청에 실린다. 음식은 그대로 한 장 |
+| **`FacePhoto` · `FacePhotoType` [신설]** | `infra/openai/dto/`. 방향(`FRONT`·`LEFT`·`RIGHT`) + Base64 + 판별된 mediaType. `label` 이 프롬프트에서 사진 앞에 붙는 `[정면]` `[왼쪽 얼굴]` `[오른쪽 얼굴]` 이다 |
+| **`SkinAnalysisService.analyze` [수정]** | 파라미터 3개(`front`·`left`·`right`). 방향이 **파라미터 자리에서 정해지므로** 클라이언트가 보낸 순서를 신뢰할 일이 없다. 형식 판별 실패 시 **어느 방향인지 메시지에 담는다** — 아니면 사용자가 셋 다 다시 찍는다 |
+| **`SkinAnalysisPrompt.USER` [수정]** | 3방향 설명으로 확장. **`SYSTEM` 과 `SCHEMA` 는 손대지 않았다** — 잣대가 바뀌면 과거 분석과 비교가 안 된다 |
+| **`SkinRepository.analyze` [수정]** | `analyze(File image)` → **`analyze({required front, required left, required right})`**. 세 장이 모이기 전에는 호출하지 않는다. 단계마다 부르면 분석이 세 건 생기고 그중 무엇이 오늘의 점수인지 알 수 없다 |
+| **`Env.receiveTimeout`** | 25초 → **32초** (서버 25초보다 길되 과하지 않게) |
+| **`§1.3` 업로드 상한** | `max-request-size` 10MB → **20MB**. 게이트가 없는 웹은 원본 세 장이 그대로 올라온다 |
+| **Entity · DDL · 응답 DTO** | **변경 없음.** 세 장이 `SkinAnalysis` 한 건을 만든다. 마이그레이션도 추가하지 않았다 |
+| **`WebConfig` [누락 발견]** | **§1.9 에 적혀 있는데 구현이 없었다.** v1.5 이력이 "코드 변경 없음"이라고 적은 것은 클래스가 있다는 전제였는데, 스켈레톤에서 빠진 채로 넘어왔다. `SecurityConfig` 의 `.cors(withDefaults())` 는 `CorsConfigurationSource` 빈이 없으면 빈 설정으로 풀려 **`Access-Control-Allow-Origin` 을 내보내지 않는다.** APK 는 영향이 없고 **웹만 전부 막힌다.** §1.9 코드를 그대로 옮기고 `WebConfigTest` 로 고정했다 |
+
+---
 
 ### v1.7 (2026-08-10 · §2.12 얼굴 게이트 — 호출되지만 없던 함수 채움)
 

@@ -2,7 +2,8 @@
 
 Skin Plate 백엔드. **AI 피부 분석 → 음식 분석 → 행동 제안**. 해커톤 10일(2026-08-08 ~ 08-17).
 Spring Boot 3.3.5 / Java 21 / PostgreSQL 16 / Flyway / Spring Security + jjwt / OpenAI gpt-4o.
-Flutter 앱은 별도 저장소. 배포는 Docker + PaaS(HTTPS 자동 발급).
+Flutter 앱은 별도 저장소. 배포는 Docker + **가비아 VM**(2 vCore · 4GB · 무료 트래픽 1TB).
+HTTPS 는 자동이 아니다 — 리버스 프록시가 인증서와 **본문 상한 20MB**(3장 업로드)를 같이 맡는다.
 
 ## 기준 문서
 
@@ -50,7 +51,8 @@ Flutter 앱은 별도 저장소. 배포는 Docker + PaaS(HTTPS 자동 발급).
 **AI 경계** — AI는 인식, 점수는 Backend.
 - `IngredientTag` / `CookingMethod`를 바꾸면 `food-analysis-schema.json`도 같이 바꾼다
 - Mock 스위치는 **`app.ai.mock` 프로퍼티 하나**. `@Profile("mock")` 금지
-- 타임아웃 18초 단발. 429만 1회 재시도, `TimeoutException`은 `AI_TIMEOUT`으로 분기
+- 타임아웃 25초 단발. 429만 1회 재시도, `TimeoutException`은 `AI_TIMEOUT`으로 분기
+- 피부는 **정면·좌·우 3장을 한 번의 Vision 호출**로. 장당 호출 후 평균 금지 — 각도마다 점수가 달라진다
 
 ## 프로젝트 컨벤션
 

@@ -26,7 +26,9 @@ spring:
 
   servlet.multipart:
     max-file-size: 5MB
-    max-request-size: 10MB
+    # 피부 분석이 5MB 짜리 세 장을 한 요청에 싣는다. 10MB 로 두면 게이트가 없는 웹에서
+    # 원본 세 장이 그대로 올라와 413 이 나고, 앱에는 "분석 실패"만 뜬다.
+    max-request-size: 20MB
 
   jackson:
     default-property-inclusion: non_null
@@ -44,7 +46,8 @@ app:
     api-key: ${OPENAI_API_KEY:}
     base-url: https://api.openai.com/v1
     model: gpt-4o
-    timeout-seconds: 18            # 재시도 없는 단발. 클라이언트 25초보다 반드시 짧아야 한다
+    timeout-seconds: 25            # 재시도 없는 단발. 피부는 high 3장이라 18초로는 빠듯하다.
+                                   # 클라이언트 타임아웃(32초)보다 반드시 짧아야 한다
     mock: ${AI_MOCK:false}
 
 springdoc:

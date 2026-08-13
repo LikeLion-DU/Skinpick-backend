@@ -11,6 +11,8 @@ import com.skinplate.api.domain.user.repository.AppUserRepository;
 import com.skinplate.api.global.exception.BusinessException;
 import com.skinplate.api.global.exception.ErrorCode;
 import com.skinplate.api.infra.openai.VisionClient;
+import com.skinplate.api.infra.openai.dto.FacePhoto;
+import com.skinplate.api.infra.openai.dto.FacePhotoType;
 import com.skinplate.api.infra.openai.dto.OpenAiSkinResult;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
@@ -22,6 +24,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.List;
 
 /**
  * 피부 분석 흐름 조율. 점수·요약 뱃지·갭 코멘트는 이미 완성된 세 컴포넌트가 계산하고,
@@ -32,7 +35,8 @@ import java.util.Base64;
 public class SkinAnalysisService {
 
     /**
-     * 서버는 이미지를 저장하지 않는다. 형식만 보고 Base64 로 바꿔 보낸 뒤 버린다. (PRD §9.6)
+     * 서버는 이미지 세 장을 모두 저장하지 않는다. 형식만 보고 Base64 로 바꿔 보낸 뒤
+     * 버린다 — 장수가 늘었다고 보관 정책이 바뀌지는 않는다. (PRD §9.6)
      *
      * 형식은 Content-Type 헤더가 아니라 실제 바이트로 판별한다. 헤더는 클라이언트가
      * 말하는 값이라, 모바일 갤러리가 application/octet-stream 을 보내면 멀쩡한 사진이
@@ -54,16 +58,26 @@ public class SkinAnalysisService {
     private final TransactionTemplate transactionTemplate;
 
     /**
-     * 이 메서드에 @Transactional 을 달면 18초짜리 AI 대기가 트랜잭션 안에 들어가고,
+     * 이 메서드에 @Transactional 을 달면 25초짜리 AI 대기가 트랜잭션 안에 들어가고,
      * 동시 요청 몇 건으로 커넥션 풀이 마른다. 그래서 AI 호출을 먼저 끝낸 뒤
      * 저장 구간만 TransactionTemplate 으로 감싼다.
      *
      * 같은 빈의 @Transactional 메서드를 직접 호출하면 프록시를 거치지 않아
      * 트랜잭션이 아예 열리지 않는다 — 그 함정을 피하려고 템플릿을 쓴다.
      */
-    public SkinAnalysisResponse analyze(Long userId, MultipartFile image) {
-        EncodedImage encoded = encode(image);
-        OpenAiSkinResult aiResult = visionClient.analyzeSkin(encoded.base64(), encoded.mediaType());
+    public SkinAnalysisResponse analyze(Long userId,
+                                        MultipartFile front,
+                                        MultipartFile left,
+                                        MultipartFile right) {
+
+        // 세 장을 한 번에 보내 하나의 결과를 받는다. 방향은 파라미터 자리에서 정해지므로
+        // 클라이언트가 보낸 순서를 신뢰할 일이 없다. (지시서 §5 · §8)
+        List<FacePhoto> photos = List.of(
+                encode(FacePhotoType.FRONT, front),
+                encode(FacePhotoType.LEFT, left),
+                encode(FacePhotoType.RIGHT, right));
+
+        OpenAiSkinResult aiResult = visionClient.analyzeSkin(photos);
 
         // 얼굴이 아니면 저장하지 않는다. 남겨두면 /latest 가 얼굴 아닌 사진의 점수를 돌려준다.
         if (!aiResult.faceDetected()) {
@@ -118,19 +132,30 @@ public class SkinAnalysisService {
     }
 
     /**
-     * 5MB 원본과 Base64 문자열을 AI 호출이 끝날 때까지 힙에 들고 있으므로
-     * 요청 하나가 최대 12MB 쯤 쓴다. 시연 규모에서는 문제없지만, 동시 업로드가
-     * 스무 건을 넘기면 작은 컨테이너에서는 OOM 이다. 그때는 업로드 상한을 낮춘다.
+     * 최대치를 다 채운 요청 하나가 40MB 를 넘게 쓴다 — Base64 문자열 20MB(5MB × 3 × 4/3)에
+     * WebClient 가 만드는 요청 본문 21MB 가 겹치고, 둘 다 AI 응답이 올 때까지 살아 있다.
+     *
+     * 그래도 상한을 걸지 않는다. 배포 서버(가비아 2 vCore · 4GB)에서 재보니 심사위원
+     * 3명 동시(PRD §16.5)를 최악 크기로 돌려도 힙 471MiB / 기본 최대 1,024MiB 였다.
+     * 먼저 닿는 벽은 힙이 아니라 CPU 다 — 동시 6건에서 2 vCore 가 포화한다(PRD §9.6 실측표).
+     *
+     * 여기서 CPU 를 쓰는 건 Base64 인코딩이라 업로드 크기에 그대로 비례한다. 앱은
+     * 1024px 크롭이라 장당 수백 KB 이고, 부담이 큰 쪽은 게이트가 없어 카메라 원본이
+     * 그대로 올라오는 웹이다.
+     *
+     * 어느 방향에서 막혔는지 메시지에 담는다. 세 장 중 하나만 잘못됐을 때
+     * "이미지 형식이 올바르지 않습니다" 만 뜨면 사용자는 셋 다 다시 찍는다.
      */
-    private EncodedImage encode(MultipartFile image) {
+    private FacePhoto encode(FacePhotoType type, MultipartFile image) {
         if (image == null || image.isEmpty()) {
-            throw new BusinessException(ErrorCode.INVALID_IMAGE);
+            throw new BusinessException(ErrorCode.INVALID_IMAGE,
+                    type.getLabel() + " 사진이 비어 있습니다. 다시 촬영해 주세요.");
         }
 
         byte[] bytes = readBytes(image);
-        String mediaType = detectMediaType(bytes);   // 인코딩 전에 막는다. 5MB 를 헛돌리지 않는다
+        String mediaType = detectMediaType(type, bytes);   // 인코딩 전에 막는다. 5MB 를 헛돌리지 않는다
 
-        return new EncodedImage(Base64.getEncoder().encodeToString(bytes), mediaType);
+        return new FacePhoto(type, Base64.getEncoder().encodeToString(bytes), mediaType);
     }
 
     private byte[] readBytes(MultipartFile image) {
@@ -145,12 +170,12 @@ public class SkinAnalysisService {
     }
 
     /** 판별한 타입은 OpenAI 의 data URI 에 그대로 선언된다. 내용과 어긋나면 400 이다. */
-    private String detectMediaType(byte[] bytes) {
+    private String detectMediaType(FacePhotoType type, byte[] bytes) {
         if (startsWith(bytes, JPEG_MAGIC)) return MediaType.IMAGE_JPEG_VALUE;
         if (startsWith(bytes, PNG_MAGIC))  return MediaType.IMAGE_PNG_VALUE;
 
         throw new BusinessException(ErrorCode.INVALID_IMAGE,
-                "JPEG 또는 PNG 이미지만 업로드할 수 있습니다.");
+                type.getLabel() + " 사진은 JPEG 또는 PNG 만 업로드할 수 있습니다.");
     }
 
     private static boolean startsWith(byte[] bytes, byte[] magic) {
@@ -160,7 +185,7 @@ public class SkinAnalysisService {
 
     /**
      * 프롬프트의 "40자 이내"는 권고일 뿐이라 AI 가 길게 답할 수 있다.
-     * 300자를 넘기면 저장에서 터지는데, 그 시점엔 18초짜리 유료 호출이 이미 끝나 있어
+     * 300자를 넘기면 저장에서 터지는데, 그 시점엔 25초짜리 유료 호출이 이미 끝나 있어
      * 되돌릴 방법이 없다. 잘라서라도 결과를 돌려준다.
      */
     private String trimSummary(String summary) {
@@ -174,8 +199,6 @@ public class SkinAnalysisService {
 
         return summary.substring(0, end);
     }
-
-    private record EncodedImage(String base64, String mediaType) {}
 
     /** raw_ai_response 는 jsonb 다. 파싱된 결과를 다시 직렬화해 원본 형태로 남긴다. */
     private String toJson(OpenAiSkinResult aiResult) {

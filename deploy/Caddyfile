@@ -1,0 +1,45 @@
+# 가비아 VM 앞단. Caddy 를 고른 이유는 두 가지가 한 번에 해결되기 때문이다 —
+# 인증서 자동 발급·갱신(PRD §9.6 H1)과 본문 상한 기본 무제한(H2).
+#
+#   docker run -d --name caddy --network host \
+#     -v /etc/caddy/Caddyfile:/etc/caddy/Caddyfile:ro \
+#     -v caddy_data:/data -v caddy_config:/config caddy:2
+#
+# 배포 전에 반드시:
+#   1) api.<도메인> A 레코드가 가비아 서버 공인 IP 를 가리킬 것 — DNS 가 안 붙으면
+#      Let's Encrypt 발급이 실패하고 Caddy 는 계속 재시도만 한다
+#   2) 80·443 이 방화벽에서 열려 있을 것 — 80 이 막히면 HTTP-01 챌린지가 통과하지 못한다
+#   3) 앱은 127.0.0.1:8080 에만 바인딩할 것 (docker run -p 127.0.0.1:8080:8080)
+#      0.0.0.0 으로 열어 두면 HTTPS 를 세워 놓고도 평문 8080 이 인터넷에 그대로 남는다
+
+api.example.com {
+	# 앱은 로컬에만 떠 있다. 인터넷에 노출되는 포트는 443 하나다.
+	reverse_proxy 127.0.0.1:8080
+
+	# 피부 분석이 5MB × 3장이다. Caddy 기본값은 무제한이라 없어도 통과하지만,
+	# Spring 의 max-request-size 와 같은 값을 여기 박아 두면 초과 요청이
+	# 앱까지 오지 않고 여기서 끊긴다.
+	#
+	# 단위를 MiB 로 쓴다. Caddy 의 "20MB" 는 20,000,000 이고 Spring 의 "20MB" 는
+	# 20,971,520 이라, MB 로 맞춰 두면 그 사이 971,520 바이트 구간의 요청만
+	# Caddy 가 413 으로 끊는다. 앱 로그에는 요청 자체가 안 찍혀서 원인이 안 보인다.
+	request_body {
+		max_size 20MiB
+	}
+
+	# 타임아웃은 적지 않는다. Caddy v2 는 reverse_proxy 에 기본 타임아웃이 없어서
+	# 업로드 15MB + OpenAI 대기 25초가 그대로 통과한다. (site 블록에 timeouts 를
+	# 쓰면 "unrecognized directive" 로 Caddy 가 아예 기동하지 않는다 — 전역
+	# servers 블록 전용 지시어다.)
+
+	# CORS 는 앱의 WebConfig 가 붙인다. 여기서 헤더를 또 붙이면
+	# Access-Control-Allow-Origin 이 두 번 실려 브라우저가 응답 전체를 거부한다.
+
+	encode gzip
+
+	log {
+		output file /var/log/caddy/api.log
+		# 얼굴 사진이 오가는 경로다. 본문은 남기지 않는다.
+		format json
+	}
+}
