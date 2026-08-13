@@ -17,7 +17,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 /**
@@ -37,20 +36,6 @@ public class RecommendationService {
 
     /** 취약 항목을 몇 개까지 볼 것인가. 늘리면 추천 목록이 길어져 화면을 넘긴다. */
     private static final int TOP_CONCERN_COUNT = 2;
-
-    private static final Map<Concern, String> RECOMMEND_REASON = Map.of(
-            Concern.DRY,          "수분과 좋은 지방이 건조한 피부를 채우는 데 도움이 됩니다.",
-            Concern.REDNESS,      "항산화 성분이 붉어진 피부의 자극을 줄여줍니다.",
-            Concern.TROUBLE,      "비타민과 식이섬유가 트러블 진정에 도움이 됩니다.",
-            Concern.OILY,         "기름기가 적어 유분이 많은 피부에 부담이 적습니다.",
-            Concern.BARRIER_WEAK, "오메가3와 단백질이 피부 장벽 회복을 돕습니다.");
-
-    private static final Map<Concern, String> AVOID_REASON = Map.of(
-            Concern.DRY,          "수분을 빼앗아 건조를 더 심하게 만들 수 있습니다.",
-            Concern.REDNESS,      "자극이 강해 홍조를 더 붉게 만들 수 있습니다.",
-            Concern.TROUBLE,      "당류가 많아 트러블을 악화시킬 수 있습니다.",
-            Concern.OILY,         "기름기가 많아 유분 과다를 부추길 수 있습니다.",
-            Concern.BARRIER_WEAK, "가공도가 높아 장벽 회복에 도움이 되지 않습니다.");
 
     private final SkinAnalysisRepository skinAnalysisRepository;
     private final RecommendationRepository recommendationRepository;
@@ -80,13 +65,20 @@ public class RecommendationService {
      * 락으로 줄을 세우고, 마지막 방어선으로 V3 의 UNIQUE 제약이 뒤를 받친다.
      */
     private void createOnce(SkinAnalysis analysis) {
+        List<Recommendation> built = build(analysis);
+
+        // 취약 항목이 없으면 잠글 것도 저장할 것도 없다. 피부가 멀쩡한 사용자의
+        // 조회마다 쓰기 락을 잡고 빈 저장을 하게 두면 락만 값을 치른다.
+        // 이 경우 exists 는 계속 false 지만, build 는 지표에서 바로 나오는 순수 계산이다.
+        if (built.isEmpty()) return;
+
         skinAnalysisRepository.findForUpdate(analysis.getId());
 
         if (recommendationRepository.existsBySkinAnalysisId(analysis.getId())) {
             return;             // 락을 기다리는 동안 앞선 요청이 만들었다
         }
 
-        recommendationRepository.saveAll(build(analysis));
+        recommendationRepository.saveAll(built);
     }
 
     /**
@@ -102,16 +94,21 @@ public class RecommendationService {
 
         // 취약 항목 두 개가 같은 음식을 추천할 수 있다(연어는 건조·장벽 양쪽에 나온다).
         // 화면에 같은 이름이 두 번 뜨지 않도록 순서를 지키면서 걸러낸다.
-        Set<String> seen = new LinkedHashSet<>();
+        //
+        // 추천과 주의를 따로 센다. 하나로 합치면 어느 한쪽에 이미 나온 이름이
+        // 다른 쪽에서 조용히 사라지는데, V3 의 UNIQUE 는 (분석, 타입, 음식)이라
+        // DB 는 양쪽 공존을 허용한다 — 코드만 몰래 더 좁게 막고 있는 셈이다.
+        Set<String> seenRecommend = new LinkedHashSet<>();
+        Set<String> seenAvoid = new LinkedHashSet<>();
 
         for (Concern concern : concerns) {
             Candidates candidates = RecommendationCandidates.of(concern);
 
             for (String foodName : candidates.recommend()) {
-                if (!seen.add(foodName)) continue;
+                if (!seenRecommend.add(foodName)) continue;
                 recommendations.add(Recommendation.of(analysis.getUser(), analysis,
                         RecommendationType.RECOMMEND, foodName,
-                        RECOMMEND_REASON.get(concern), order++));
+                        RecommendationCandidates.reasonOf(foodName), order++));
             }
         }
 
@@ -119,10 +116,10 @@ public class RecommendationService {
             Candidates candidates = RecommendationCandidates.of(concern);
 
             for (String foodName : candidates.avoid()) {
-                if (!seen.add(foodName)) continue;
+                if (!seenAvoid.add(foodName)) continue;
                 recommendations.add(Recommendation.of(analysis.getUser(), analysis,
                         RecommendationType.AVOID, foodName,
-                        AVOID_REASON.get(concern), order++));
+                        RecommendationCandidates.reasonOf(foodName), order++));
             }
         }
 
