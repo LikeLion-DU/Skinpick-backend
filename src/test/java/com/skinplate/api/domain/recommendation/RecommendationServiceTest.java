@@ -36,6 +36,7 @@ class RecommendationServiceTest {
     private SkinAnalysisRepository skinAnalysisRepository;
     private RecommendationRepository recommendationRepository;
     private RecommendationService recommendationService;
+    private final List<Recommendation> saved = new java.util.ArrayList<>();
 
     @BeforeEach
     void setUp() {
@@ -45,8 +46,16 @@ class RecommendationServiceTest {
                 skinAnalysisRepository, recommendationRepository);
 
         given(recommendationRepository.existsBySkinAnalysisId(ANALYSIS_ID)).willReturn(false);
+        // 저장한 것을 조회가 그대로 돌려주게 한다. 이렇게 해야 테스트가 "무엇을 만들었나"가
+        // 아니라 getOrCreate 가 실제로 돌려주는 응답을 본다 — 정렬·타입 분리·generatedAt
+        // 같은 읽기 경로의 회귀가 여기서 잡힌다.
         given(recommendationRepository.saveAll(org.mockito.ArgumentMatchers.anyList()))
-                .willAnswer(invocation -> invocation.getArgument(0));
+                .willAnswer(invocation -> {
+                    saved.addAll(invocation.getArgument(0));
+                    return invocation.getArgument(0);
+                });
+        given(recommendationRepository.findBySkinAnalysisIdAndUserIdOrderByDisplayOrderAsc(
+                ANALYSIS_ID, USER_ID)).willAnswer(invocation -> saved);
     }
 
     @Test
@@ -56,7 +65,7 @@ class RecommendationServiceTest {
 
         RecommendationResponse response = recommendationService.getOrCreate(USER_ID, ANALYSIS_ID);
 
-        List<RecommendedFoodDto> recommend = savedOf(response).recommend();
+        List<RecommendedFoodDto> recommend = response.recommend();
         assertThat(recommend).hasSize(7);
         assertThat(recommend).extracting(RecommendedFoodDto::foodName)
                 .containsExactly("브로콜리", "녹차", "토마토", "연어", "아보카도", "오이", "견과류");
@@ -82,12 +91,10 @@ class RecommendationServiceTest {
     void dedupIsPerType() {
         givenAnalysis(SkinMetrics.of(38, 52, 64, 25, 78));
 
-        recommendationService.getOrCreate(USER_ID, ANALYSIS_ID);
+        RecommendationResponse response = recommendationService.getOrCreate(USER_ID, ANALYSIS_ID);
 
-        List<Recommendation> saved = captureSaved();
         // 술은 홍조·건조 양쪽 주의 후보라 한 번만, 커피는 건조 쪽에서 한 번.
-        assertThat(saved).filteredOn(r -> r.getType().name().equals("AVOID"))
-                .extracting(Recommendation::getFoodName)
+        assertThat(response.avoid()).extracting(RecommendedFoodDto::foodName)
                 .containsExactly("매운 음식", "술", "커피");
     }
 
@@ -105,18 +112,4 @@ class RecommendationServiceTest {
         given(skinAnalysisRepository.findForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
     }
 
-    @SuppressWarnings("unchecked")
-    private List<Recommendation> captureSaved() {
-        ArgumentCaptor<List<Recommendation>> captor = ArgumentCaptor.forClass(List.class);
-        verify(recommendationRepository).saveAll(captor.capture());
-        return captor.getValue();
-    }
-
-    /**
-     * 저장 직후 조회는 대역이 빈 목록을 돌려주므로, 방금 저장한 것으로 응답을 다시 만든다.
-     * 검증 대상은 "무엇을 만들었는가"이지 리포지토리 대역의 동작이 아니다.
-     */
-    private RecommendationResponse savedOf(RecommendationResponse ignored) {
-        return RecommendationResponse.from(ANALYSIS_ID, captureSaved());
-    }
 }

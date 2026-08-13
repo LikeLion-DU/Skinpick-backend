@@ -80,6 +80,22 @@ class RecommendationCandidatesTest {
     }
 
     @Test
+    @DisplayName("같은 음식이 추천과 주의 양쪽에 있으면 안 된다 — 화면에 권하면서 말리게 된다")
+    void noFoodIsBothRecommendedAndAvoided() {
+        Set<String> recommended = Stream.of(Concern.values())
+                .flatMap(concern -> RecommendationCandidates.of(concern).recommend().stream())
+                .collect(java.util.stream.Collectors.toSet());
+        Set<String> avoided = Stream.of(Concern.values())
+                .flatMap(concern -> RecommendationCandidates.of(concern).avoid().stream())
+                .collect(java.util.stream.Collectors.toSet());
+
+        // 중복 제거는 타입별로 돈다(DB 의 UNIQUE 도 타입을 포함한다). 그래서 표에 겹치는
+        // 이름을 넣는 순간 한 사용자에게 "드세요"와 "피하세요"가 동시에 뜬다.
+        // 런타임에 한쪽을 조용히 버리는 대신 여기서 빌드를 깨뜨린다.
+        assertThat(recommended).doesNotContainAnyElementsOf(avoided);
+    }
+
+    @Test
     @DisplayName("E. 후보 표의 모든 음식에 문구가 있고, 서로 다르다")
     void everyCandidateHasItsOwnReason() {
         List<String> foods = Stream.of(Concern.values())

@@ -4017,21 +4017,45 @@ public final class RecommendationCandidates {
         return TABLE.get(concern);
     }
 
-    /** 심각한 순으로 취약 항목 상위 N개를 뽑는다. */
+    /**
+     * <b>실제로 취약한</b> 항목만 심각한 순으로 최대 N개. 없으면 빈 목록이다.
+     *
+     * 판정은 SkinMetrics 의 판정자를 그대로 쓴다. 여기에 임계값을 다시 적으면
+     * 같은 뜻의 숫자가 두 곳에 생기고, Rule Engine 은 "건조하지 않다"고 보는 지표를
+     * 추천만 "건조하다"고 보는 날이 온다.
+     *
+     * 거르지 않으면 피부가 멀쩡해도 상위 두 개가 뽑힌다 — 심사위원이 본인 얼굴로
+     * 찍어 보는 순간이 정확히 그 경우다.
+     */
     public static List<Concern> topConcerns(SkinMetrics m, int n) {
-        record Scored(Concern concern, int severity) {}
+        record Scored(Concern concern, boolean present, int severity) {}
 
         return List.of(
-                        new Scored(Concern.DRY,          100 - m.getHydration()),
-                        new Scored(Concern.BARRIER_WEAK, 100 - m.getBarrier()),
-                        new Scored(Concern.OILY,         m.getOil()),
-                        new Scored(Concern.REDNESS,      m.getRedness()),
-                        new Scored(Concern.TROUBLE,      m.getTrouble()))
+                        new Scored(Concern.DRY,          m.isDry(),         100 - m.getHydration()),
+                        new Scored(Concern.BARRIER_WEAK, m.isBarrierWeak(), 100 - m.getBarrier()),
+                        new Scored(Concern.OILY,         m.isOily(),        m.getOil()),
+                        new Scored(Concern.REDNESS,      m.hasRedness(),    m.getRedness()),
+                        new Scored(Concern.TROUBLE,      m.hasTrouble(),    m.getTrouble()))
                 .stream()
-                .sorted(Comparator.comparingInt(Scored::severity).reversed())
+                .filter(Scored::present)
+                // 동점이면 순서가 흔들려 같은 지표에 다른 추천이 나온다. 이름으로 고정한다.
+                .sorted(Comparator.comparingInt(Scored::severity).reversed()
+                                  .thenComparing(scored -> scored.concern().name()))
                 .limit(n)
                 .map(Scored::concern)
                 .toList();
+    }
+
+    /**
+     * 음식별 추천 문구. 후보 표의 24개 음식이 각자의 문장을 갖는다.
+     * 항목별로 한 문장씩 두면 같은 취약 항목에서 나온 음식들이 글자까지 같은 문장을
+     * 달고 줄줄이 뜬다 — S08 은 영상에 나가는 화면이다. (전문은 구현 파일 참조)
+     */
+    private static final Map<String, String> REASONS = Map.ofEntries(/* 음식명 → 문구 24개 */);
+
+    /** 표에 없는 음식이면 이름만 남긴다 — 문구가 없다고 추천이 사라지면 안 된다. */
+    public static String reasonOf(String foodName) {
+        return REASONS.getOrDefault(foodName, "");
     }
 }
 ```
