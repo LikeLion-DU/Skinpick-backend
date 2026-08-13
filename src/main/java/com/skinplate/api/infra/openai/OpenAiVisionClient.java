@@ -3,6 +3,7 @@ package com.skinplate.api.infra.openai;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.skinplate.api.global.exception.ErrorCode;
+import com.skinplate.api.infra.openai.dto.FacePhoto;
 import com.skinplate.api.infra.openai.dto.OpenAiFoodResult;
 import com.skinplate.api.infra.openai.dto.OpenAiSkinResult;
 import com.skinplate.api.infra.openai.exception.OpenAiClientException;
@@ -16,6 +17,7 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 import reactor.util.retry.Retry;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
@@ -51,32 +53,54 @@ public class OpenAiVisionClient implements VisionClient {
         this.timeout = Duration.ofSeconds(timeoutSeconds);
     }
 
+    /**
+     * 사진 세 장이 메시지 하나에 들어간다. 사진마다 바로 앞에 방향 라벨을 텍스트로 끼워
+     * 넣는데, 그러지 않으면 AI 가 순서로만 방향을 추측하게 되고 그 추측이 틀려도
+     * 아무 데도 드러나지 않는다. 라벨 세 줄은 30토큰이 채 안 된다.
+     */
     @Override
-    public OpenAiSkinResult analyzeSkin(String base64Image, String mediaType) {
-        return call(SkinAnalysisPrompt.SYSTEM, SkinAnalysisPrompt.USER, SkinAnalysisPrompt.SCHEMA,
-                "skin_analysis", base64Image, mediaType, SKIN_DETAIL, OpenAiSkinResult.class);
+    public OpenAiSkinResult analyzeSkin(List<FacePhoto> photos) {
+        List<Map<String, Object>> content = new ArrayList<>();
+        content.add(text(SkinAnalysisPrompt.USER));
+
+        for (FacePhoto photo : photos) {
+            content.add(text("[" + photo.type().getLabel() + "]"));
+            content.add(image(photo.base64(), photo.mediaType(), SKIN_DETAIL));
+        }
+
+        return call(SkinAnalysisPrompt.SYSTEM, SkinAnalysisPrompt.SCHEMA,
+                "skin_analysis", content, OpenAiSkinResult.class);
     }
 
     @Override
     public OpenAiFoodResult analyzeFood(String base64Image, String mediaType) {
-        return call(FoodAnalysisPrompt.SYSTEM, FoodAnalysisPrompt.USER, FoodAnalysisPrompt.SCHEMA,
-                "food_analysis", base64Image, mediaType, FOOD_DETAIL, OpenAiFoodResult.class);
+        return call(FoodAnalysisPrompt.SYSTEM, FoodAnalysisPrompt.SCHEMA, "food_analysis",
+                List.of(text(FoodAnalysisPrompt.USER), image(base64Image, mediaType, FOOD_DETAIL)),
+                OpenAiFoodResult.class);
     }
 
-    private <T> T call(String system, String user, Map<String, Object> schema, String schemaName,
-                       String base64Image, String mediaType, String detail, Class<T> type) {
+    private static Map<String, Object> text(String value) {
+        return Map.of("type", "text", "text", value);
+    }
+
+    /**
+     * 선언한 타입과 실제 바이트가 어긋나면 400 이다.
+     * image/jpeg 로 고정해 두면 PNG 를 올린 사용자만 "분석 실패"를 본다.
+     */
+    private static Map<String, Object> image(String base64, String mediaType, String detail) {
+        return Map.of("type", "image_url", "image_url", Map.of(
+                "url", "data:" + mediaType + ";base64," + base64,
+                "detail", detail));
+    }
+
+    private <T> T call(String system, Map<String, Object> schema, String schemaName,
+                       List<Map<String, Object>> userContent, Class<T> type) {
 
         Map<String, Object> body = Map.of(
                 "model", model,
                 "messages", List.of(
                         Map.of("role", "system", "content", system),
-                        Map.of("role", "user", "content", List.of(
-                                Map.of("type", "text", "text", user),
-                                // 선언한 타입과 실제 바이트가 어긋나면 400 이다.
-                                // image/jpeg 로 고정해 두면 PNG 를 올린 사용자만 "분석 실패"를 본다.
-                                Map.of("type", "image_url", "image_url", Map.of(
-                                        "url", "data:" + mediaType + ";base64," + base64Image,
-                                        "detail", detail))))),
+                        Map.of("role", "user", "content", userContent)),
                 "response_format", Map.of(
                         "type", "json_schema",
                         "json_schema", Map.of(
@@ -91,9 +115,9 @@ public class OpenAiVisionClient implements VisionClient {
                 .bodyValue(body)
                 .retrieve()
                 .bodyToMono(JsonNode.class)
-                // 타임아웃은 재시도하지 않는다. 재시도까지 하면 앱 타임아웃(25초)을 넘긴다.
+                // 타임아웃은 재시도하지 않는다. 재시도까지 하면 앱 타임아웃(32초)을 넘긴다.
                 .timeout(timeout)
-                // 429 만 재시도한다. 응답이 즉시 오므로 최악 0.1+2+18 ≈ 20초로 앱 타임아웃 안에 들어온다.
+                // 429 만 재시도한다. 응답이 즉시 오므로 최악 0.1+2+25 ≈ 27초로 앱 타임아웃 안에 들어온다.
                 // 예산과 처리량 상한은 다른 축이고, 429 는 재시도가 유일한 정답인 에러다. (PRD §17.2)
                 .retryWhen(Retry.fixedDelay(1, Duration.ofSeconds(2))
                         .filter(error -> error instanceof WebClientResponseException.TooManyRequests)

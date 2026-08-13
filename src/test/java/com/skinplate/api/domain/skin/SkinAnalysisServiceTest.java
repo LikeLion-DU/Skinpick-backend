@@ -16,6 +16,8 @@ import com.skinplate.api.domain.user.repository.AppUserRepository;
 import com.skinplate.api.global.exception.BusinessException;
 import com.skinplate.api.global.exception.ErrorCode;
 import com.skinplate.api.infra.openai.VisionClient;
+import com.skinplate.api.infra.openai.dto.FacePhoto;
+import com.skinplate.api.infra.openai.dto.FacePhotoType;
 import com.skinplate.api.infra.openai.dto.OpenAiSkinResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -28,12 +30,14 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -81,7 +85,7 @@ class SkinAnalysisServiceTest {
         givenSkinResult(new OpenAiSkinResult(true, 38, 52, 64, 25, 78,
                 "피부 장벽은 양호하지만 건조하고 홍조가 관찰됩니다."));
 
-        SkinAnalysisResponse response = skinAnalysisService.analyze(USER_ID, jpegImage());
+        SkinAnalysisResponse response = analyzeThreePhotos();
 
         assertThat(response.skinScore()).isEqualTo(55);
         assertThat(response.metrics().hydration()).isEqualTo(38);
@@ -101,7 +105,27 @@ class SkinAnalysisServiceTest {
         givenUser(null);
         givenSkinResult(new OpenAiSkinResult(true, 38, 52, 64, 25, 78, "요약"));
 
-        assertThat(skinAnalysisService.analyze(USER_ID, jpegImage()).skinTypeGap()).isNull();
+        assertThat(analyzeThreePhotos().skinTypeGap()).isNull();
+    }
+
+    @Test
+    @DisplayName("세 장이 한 번의 호출로, 각자의 방향 표시를 달고 넘어간다 (지시서 §5 · §8)")
+    void analyze_sendsThreeLabelledPhotosInOneCall() {
+        givenUser(null);
+        givenSkinResult(new OpenAiSkinResult(true, 38, 52, 64, 25, 78, "요약"));
+
+        // 세 장을 서로 다른 바이트로 만든다. 같으면 방향이 뒤바뀌어도 통과한다.
+        skinAnalysisService.analyze(USER_ID,
+                jpegImage((byte) 0x01), jpegImage((byte) 0x02), jpegImage((byte) 0x03));
+
+        List<FacePhoto> photos = capturePhotos();
+
+        assertThat(photos).extracting(FacePhoto::type)
+                .containsExactly(FacePhotoType.FRONT, FacePhotoType.LEFT, FacePhotoType.RIGHT);
+        assertThat(photos).extracting(photo -> lastByteOf(photo.base64()))
+                .containsExactly((byte) 0x01, (byte) 0x02, (byte) 0x03);
+        // 장당 한 번씩 부르면 지표가 세 벌 나오고 비용도 세 배가 된다.
+        verify(visionClient).analyzeSkin(anyList());
     }
 
     @Test
@@ -109,7 +133,7 @@ class SkinAnalysisServiceTest {
     void analyze_faceNotDetected_throwsAndDoesNotSave() {
         givenSkinResult(new OpenAiSkinResult(false, 0, 0, 0, 0, 0, null));
 
-        assertThatThrownBy(() -> skinAnalysisService.analyze(USER_ID, jpegImage()))
+        assertThatThrownBy(this::analyzeThreePhotos)
                 .isInstanceOf(BusinessException.class)
                 .extracting(exception -> ((BusinessException) exception).getErrorCode())
                 .isEqualTo(ErrorCode.FACE_NOT_DETECTED);
@@ -122,14 +146,26 @@ class SkinAnalysisServiceTest {
     void analyze_rejectsNonImage_beforeCallingAi() {
         // 헤더는 image/jpeg 라고 말하지만 내용은 PDF 다. 헤더를 믿으면 이게 통과한다.
         MultipartFile pdf = new MockMultipartFile(
-                "image", "face.jpg", "image/jpeg", "%PDF-1.4".getBytes(StandardCharsets.UTF_8));
+                "left", "face.jpg", "image/jpeg", "%PDF-1.4".getBytes(StandardCharsets.UTF_8));
 
-        assertThatThrownBy(() -> skinAnalysisService.analyze(USER_ID, pdf))
+        assertThatThrownBy(() -> skinAnalysisService.analyze(USER_ID, jpegImage(), pdf, jpegImage()))
                 .isInstanceOf(BusinessException.class)
                 .extracting(exception -> ((BusinessException) exception).getErrorCode())
                 .isEqualTo(ErrorCode.INVALID_IMAGE);
 
-        verify(visionClient, never()).analyzeSkin(anyString(), anyString());
+        verify(visionClient, never()).analyzeSkin(anyList());
+    }
+
+    @Test
+    @DisplayName("세 장 중 어느 것이 잘못됐는지 메시지에 담는다 — 아니면 셋 다 다시 찍는다")
+    void analyze_namesTheOffendingDirection() {
+        MultipartFile empty = new MockMultipartFile("right", new byte[0]);
+
+        assertThatThrownBy(() -> skinAnalysisService.analyze(USER_ID, jpegImage(), jpegImage(), empty))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("오른쪽 얼굴");
+
+        verify(visionClient, never()).analyzeSkin(anyList());
     }
 
     @Test
@@ -137,14 +173,15 @@ class SkinAnalysisServiceTest {
     void analyze_declaresActualMediaType() {
         givenUser(null);
         givenSkinResult(new OpenAiSkinResult(true, 38, 52, 64, 25, 78, "요약"));
-        MultipartFile png = new MockMultipartFile("image", "shot.png", "application/octet-stream",
+        MultipartFile png = new MockMultipartFile("left", "shot.png", "application/octet-stream",
                 new byte[]{(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A});
 
-        skinAnalysisService.analyze(USER_ID, png);
+        // 세 장의 형식이 서로 달라도 각자 판별된다. 앱은 크롭 결과를 JPEG 로 보내지만
+        // 웹은 사용자가 고른 파일이 그대로 올라와 한 장만 PNG 인 경우가 생긴다.
+        skinAnalysisService.analyze(USER_ID, jpegImage(), png, jpegImage());
 
-        ArgumentCaptor<String> mediaType = ArgumentCaptor.forClass(String.class);
-        verify(visionClient).analyzeSkin(anyString(), mediaType.capture());
-        assertThat(mediaType.getValue()).isEqualTo("image/png");
+        assertThat(capturePhotos()).extracting(FacePhoto::mediaType)
+                .containsExactly("image/jpeg", "image/png", "image/jpeg");
     }
 
     @Test
@@ -153,7 +190,7 @@ class SkinAnalysisServiceTest {
         givenUser(null);
         givenSkinResult(new OpenAiSkinResult(true, 38, 52, 64, 25, 78, "가".repeat(500)));
 
-        assertThat(skinAnalysisService.analyze(USER_ID, jpegImage()).summary()).hasSize(300);
+        assertThat(analyzeThreePhotos().summary()).hasSize(300);
     }
 
     @Test
@@ -163,7 +200,7 @@ class SkinAnalysisServiceTest {
         // 299자 + 이모지 → 300번째 char 가 이모지의 앞쪽 절반이다
         givenSkinResult(new OpenAiSkinResult(true, 38, 52, 64, 25, 78, "가".repeat(299) + "🙂"));
 
-        String summary = skinAnalysisService.analyze(USER_ID, jpegImage()).summary();
+        String summary = analyzeThreePhotos().summary();
 
         assertThat(summary).hasSize(299);
         assertThat(summary.chars().anyMatch(c -> Character.isSurrogate((char) c))).isFalse();
@@ -216,12 +253,33 @@ class SkinAnalysisServiceTest {
     }
 
     private void givenSkinResult(OpenAiSkinResult result) {
-        given(visionClient.analyzeSkin(anyString(), anyString())).willReturn(result);
+        given(visionClient.analyzeSkin(anyList())).willReturn(result);
+    }
+
+    private SkinAnalysisResponse analyzeThreePhotos() {
+        return skinAnalysisService.analyze(USER_ID, jpegImage(), jpegImage(), jpegImage());
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<FacePhoto> capturePhotos() {
+        ArgumentCaptor<List<FacePhoto>> captor = ArgumentCaptor.forClass(List.class);
+        verify(visionClient).analyzeSkin(captor.capture());
+        return captor.getValue();
+    }
+
+    private static byte lastByteOf(String base64) {
+        byte[] decoded = Base64.getDecoder().decode(base64);
+        return decoded[decoded.length - 1];
     }
 
     /** 앞 세 바이트가 JPEG 시그니처다. 형식 판별이 헤더가 아니라 여기를 본다. */
     private MultipartFile jpegImage() {
-        return new MockMultipartFile("image", "face.jpg", "image/jpeg",
-                new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, (byte) 0xE0});
+        return jpegImage((byte) 0xE0);
+    }
+
+    /** 마지막 바이트로 세 장을 구분한다 — 어느 사진이 어느 방향으로 갔는지 보려고. */
+    private MultipartFile jpegImage(byte marker) {
+        return new MockMultipartFile("photo", "face.jpg", "image/jpeg",
+                new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, marker});
     }
 }

@@ -1,5 +1,6 @@
 package com.skinplate.api.infra.openai;
 
+import com.skinplate.api.infra.openai.dto.FacePhoto;
 import com.skinplate.api.infra.openai.dto.OpenAiFoodResult;
 import com.skinplate.api.infra.openai.dto.OpenAiSkinResult;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -23,8 +24,9 @@ import java.util.List;
 @ConditionalOnProperty(name = "app.ai.mock", havingValue = "true")
 public class MockOpenAiVisionClient implements VisionClient {
 
+    /** 사진이 몇 장이든 같은 값을 돌려준다. 시연에서 필요한 건 재현 가능한 60점이다. */
     @Override
-    public OpenAiSkinResult analyzeSkin(String base64Image, String mediaType) {
+    public OpenAiSkinResult analyzeSkin(List<FacePhoto> photos) {
         return new OpenAiSkinResult(true, 38, 52, 64, 25, 78,
                 "피부 장벽은 양호하지만 건조하고 홍조가 관찰됩니다.");
     }
