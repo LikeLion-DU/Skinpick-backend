@@ -59,12 +59,18 @@ public class SkinPlateService {
 
     /**
      * AI 호출을 먼저 끝낸 뒤 저장 구간만 트랜잭션으로 감싼다.
-     * 18초짜리 대기를 트랜잭션 안에 두면 커넥션 하나가 그동안 잠긴다.
+     * 25초짜리 대기를 트랜잭션 안에 두면 커넥션 하나가 그동안 잠긴다.
+     *
+     * 단, 기준이 될 피부 분석이 있는지는 <b>유료 호출 전에</b> 본다. 인덱스 읽기 한 번이다.
+     * 뒤로 미루면 피부 분석을 한 번도 안 한 사용자가 20초를 기다린 끝에 404 를 보고,
+     * 그 요청마다 gpt-4o 호출이 한 번씩 버려진다. 남의 id·오래된 id 도 마찬가지다.
      */
     public SkinPlateResponse create(Long userId, MultipartFile image, Long skinAnalysisId) {
+        Long resolvedId = resolveSkinAnalysisId(userId, skinAnalysisId);
+
         OpenAiFoodResult aiResult = foodAnalysisService.recognize(image);
 
-        return transactionTemplate.execute(status -> save(userId, aiResult, skinAnalysisId));
+        return transactionTemplate.execute(status -> save(userId, aiResult, resolvedId));
     }
 
     @Transactional(readOnly = true)
@@ -129,6 +135,10 @@ public class SkinPlateService {
      * skinAnalysisId 를 생략하면 최신 피부 분석을 쓴다. 한 번도 안 찍었으면 404 다 —
      * 비교할 기준이 없으면 상극 분석이 성립하지 않는다.
      */
+    private Long resolveSkinAnalysisId(Long userId, Long skinAnalysisId) {
+        return resolveSkinAnalysis(userId, skinAnalysisId).getId();
+    }
+
     private SkinAnalysis resolveSkinAnalysis(Long userId, Long skinAnalysisId) {
         if (skinAnalysisId != null) {
             // 타인의 id 면 403 이 아니라 404 다. 존재 여부 자체를 알려주지 않는다.

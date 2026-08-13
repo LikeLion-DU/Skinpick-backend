@@ -61,12 +61,32 @@ public class RecommendationService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.SKIN_ANALYSIS_NOT_FOUND));
 
         if (!recommendationRepository.existsBySkinAnalysisId(skinAnalysisId)) {
-            recommendationRepository.saveAll(build(analysis));
+            createOnce(analysis);
         }
 
         return RecommendationResponse.from(skinAnalysisId,
                 recommendationRepository
                         .findBySkinAnalysisIdAndUserIdOrderByDisplayOrderAsc(skinAnalysisId, userId));
+    }
+
+    /**
+     * 아직 없을 때만 부른다. 분석 행에 락을 잡고 <b>다시 확인한 뒤</b> 만든다.
+     *
+     * "있나 보고 없으면 넣는다" 만으로는 부족하다. READ COMMITTED 에서 동시 요청 둘이
+     * 모두 "없다" 를 보고 둘 다 넣을 수 있다 — S08 을 두 번 누르거나 느린 첫 응답에
+     * 클라이언트가 재시도하면 7건이 14건이 되고, 이후 조회마다 같은 음식이 두 번씩
+     * 뜬다. 지우기 전까지 회복되지 않는다.
+     *
+     * 락으로 줄을 세우고, 마지막 방어선으로 V3 의 UNIQUE 제약이 뒤를 받친다.
+     */
+    private void createOnce(SkinAnalysis analysis) {
+        skinAnalysisRepository.findForUpdate(analysis.getId());
+
+        if (recommendationRepository.existsBySkinAnalysisId(analysis.getId())) {
+            return;             // 락을 기다리는 동안 앞선 요청이 만들었다
+        }
+
+        recommendationRepository.saveAll(build(analysis));
     }
 
     /**
