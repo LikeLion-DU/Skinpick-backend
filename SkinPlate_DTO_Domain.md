@@ -5910,7 +5910,7 @@ if (_consecutiveFailures >= 3) {
 
 > **쓰지 말아야 할 곳** — `enableClassification: false`로 둔 것은 의도적이다. ML Kit이 주는 `smilingProbability`·`leftEyeOpenProbability`로 트러블이나 홍조를 추정하려 들면, "AI는 인식, 로직은 Backend"라는 구조가 무너지고 근거 없는 숫자가 하나 더 생긴다. **게이트와 크롭까지가 전부다.**
 >
-> **작업 시점은 Day 5~6.** 네이티브 의존성이 추가되는 작업이라 빌드가 깨지면 복구에 시간이 든다. Day 8 이후에는 붙이지 마라.
+> **네이티브 의존성이 추가되는 작업이라 빌드가 깨지면 복구에 시간이 든다.** G5(배포본 E2E 완주) 를 통과한 뒤에는 붙이지 마라 — 업로드 마감(08-21) 이 지나면 되돌릴 커밋조차 못 올린다.
 
 > **웹 빌드는 게이트를 붙이기 전에도, 붙인 후에도 통과해야 한다.**
 > `flutter build web` 을 `FaceGate` 커밋의 완료 조건에 포함한다.
@@ -5961,7 +5961,7 @@ if (_consecutiveFailures >= 3) {
 | 7 | `SkinPlateService.simulate()` | `domain/plate/` | 6 | 엔진 재호출만. **저장하지 않는다** |
 | 8 | `RecommendationService` | `domain/recommendation/` | 7 | `RecommendationCandidates` 사용. **lazy 동기 생성** (비동기 아님) |
 | 9 | Flutter `DataSource` · `RepositoryImpl` · `UseCase` | 각 feature `data/` | 3~7 | 인터페이스가 이미 있으므로 채우기만 |
-| 10 | `FaceGate` + 카메라 프리뷰 연동 | `skin_analysis/data/` | 5~6 | **Day 8 이후에는 붙이지 마라.** 네이티브 의존성이라 빌드가 깨지면 복구에 시간이 든다 |
+| 10 | `FaceGate` + 카메라 프리뷰 연동 | `skin_analysis/data/` | 5~6 | **G5 통과 이후에는 붙이지 마라.** 네이티브 의존성이라 빌드가 깨지면 복구에 시간이 드는데, 업로드 마감(08-21) 이 지나면 되돌릴 커밋도 못 올린다 |
 | 11 | S01c 피부 타입 선택 화면 + S05 갭 카드 | `auth/presentation/` · `skin_analysis/presentation/` | 2 · 4 | 칩 5개 + 건너뛰기. 갭 카드는 서버가 문장까지 만들어 주므로 렌더링만 |
 | 12 | S07 "왜 60점인가" 카드 + 시뮬레이션 버튼 | `skin_plate/presentation/` | 7~8 | **차별점을 화면으로 옮기는 작업.** 지금은 문서와 백엔드 로그에만 있다 |
 | 13 | **`kIsWeb` 카메라 분기 + `ConstrainedBox(maxWidth: 430)`** | `skin_analysis/` · `app/` | 7 | **웹 대응. 둘 합쳐 반나절**(PRD §19.2). 웹은 게이트·프리뷰를 건너뛰고 파일 선택으로 간다(§2.12) |
