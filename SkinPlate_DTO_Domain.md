@@ -5933,7 +5933,7 @@ if (_consecutiveFailures >= 3) {
 | `GET /reports?period=` | `ReportResponse` | `period` · `from` · `to` · `latestSkinScore` · `skinScoreTrend[]` · `recordCount` · `averagePlateScore` · `penalties[]` · `meals[]` | `ReportDto` |
 | `GET /recommendations` | `RecommendationResponse` | `skinAnalysisId` · `recommend[]` · `avoid[]` · `generatedAt` | `RecommendationDto` |
 
-**어긋나기 쉬운 지점 5개**
+**어긋나기 쉬운 지점 7개**
 
 | # | 위험 | 대응 |
 |---|---|---|
