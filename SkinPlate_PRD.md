@@ -1924,6 +1924,7 @@ public class Recommendation extends BaseTimeEntity {
 | 8-b | **POST** | **`/plates/records`** | ✅ | **분석 토큰으로 기록 저장** | **P0** |
 | 8-c | ~~POST~~ | ~~`/plates`~~ | ✅ | ~~음식 분석 + Plate Score 생성~~ · **폐기 예정** — 8·8-b 로 대체됐다. 앱 전환과 호출 0 확인 후 제거한다 | — |
 | 9 | **POST** | **`/plates/{id}/simulate`** | ✅ | **추천 행동 실행 시 점수 재계산 (저장 안 함)** | **P0** |
+| 9-b | **POST** | **`/plates/simulate`** | ✅ | **분석 토큰으로 저장 전 시뮬레이션 (저장 안 함)** | **P0** |
 | 10 | GET | `/plates/{id}` | ✅ | Plate 상세 | P1 |
 | 11 | GET | `/recommendations` | ✅ | 피부 기반 음식 추천 | P0 |
 | 12 | GET | `/health` | — | 헬스체크 | P0 |
@@ -2329,6 +2330,41 @@ int after = engine.evaluate(new PlateContext(skin, copy)).score();
 > **이 API가 이 프로젝트에서 가장 값싼 차별화다.** 작업량은 반나절인데, 심사위원 눈앞에서 `60 → 68`이 움직인다. 다른 팀의 "AI가 조언을 해줍니다"와 우리의 "조언을 실행하면 점수가 이만큼 오릅니다"는 완전히 다른 인상을 남긴다.
 >
 > 이전 설계의 `potentialScore`(감점 절댓값 합산)는 **어떤 실제 계산과도 일치하지 않았다.** 예시 A에서 60 + 8 + 6 = 74가 나오는데, 실제로 국물을 절반 남기면 나트륨이 925mg이 되어 R04가 아예 발동하지 않으므로 **68**이고, 매운 양념까지 덜면 **80**이다. 74는 어디에도 없는 숫자다. 근사치를 버리고 실제로 다시 계산한다.
+
+---
+
+#### ⑦-d POST `/api/v1/plates/simulate` ★차별화
+
+⑦-b 와 하는 일은 같다 — 추천 행동을 실행했다고 가정하고 **Skin Plate Score 를 다시 계산해서 돌려준다. 저장하지 않는다.** 다른 점은 대상을 지목하는 방법뿐이다. 결과 화면은 저장 전이라 `plateId` 가 없으므로(⑦ 참고), `analysisToken` 이 그 자리를 대신한다. `/plates/records` 와 나란한 형태다.
+
+**Request** — `application/json`
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| `analysisToken` | string | ✅ | ⑦ 이 발급한 토큰 |
+| `actions` | string[] | ✅ | 실행할 행동. 값·영양값 조정 규칙은 ⑦-b 표와 같다 |
+
+```json
+{ "analysisToken": "eyJhbGciOiJIUzI1NiJ9...", "actions": ["HALVE_SOUP"] }
+```
+
+**Response 200** — `plateId` 가 없다. `beforeScore` 도 저장된 값이 아니라 **토큰의 food 를 엔진으로 다시 평가한 값**이다.
+
+```json
+{
+  "success": true,
+  "data": {
+    "beforeScore": 60,
+    "afterScore": 68,
+    "appliedActions": ["HALVE_SOUP"],
+    "removedRules": ["R04"],
+    "summary": "국물을 절반만 남기면 나트륨 부담이 사라집니다."
+  },
+  "error": null
+}
+```
+
+> **`beforeScore` 가 ⑦(analyze)의 `plateScore` 와 반드시 같아야 한다.** 토큰의 `food`(AI 원본)를 `FoodAnalysisService.toEntity(null, …)` 로 한 번 더 태워야 표준 영양값 덮어쓰기·문자열 trim 이 똑같이 적용된다 — 건너뛰면 결과 화면이 보여준 점수와 시뮬레이션의 "실행 전" 점수가 갈라진다.
 
 ---
 

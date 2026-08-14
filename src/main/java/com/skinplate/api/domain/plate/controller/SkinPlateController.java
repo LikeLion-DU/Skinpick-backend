@@ -1,6 +1,8 @@
 package com.skinplate.api.domain.plate.controller;
 
 import com.skinplate.api.domain.plate.dto.PlateAnalysisResponse;
+import com.skinplate.api.domain.plate.dto.PlateAnalysisSimulateRequest;
+import com.skinplate.api.domain.plate.dto.PlateAnalysisSimulateResponse;
 import com.skinplate.api.domain.plate.dto.PlateHistoryResponse;
 import com.skinplate.api.domain.plate.dto.PlateRecordRequest;
 import com.skinplate.api.domain.plate.dto.PlateSimulateRequest;
@@ -75,6 +77,20 @@ public class SkinPlateController {
     public ApiResponse<SkinPlateResponse> get(@CurrentUser Long userId,
                                               @PathVariable Long plateId) {
         return ApiResponse.ok(skinPlateService.get(userId, plateId));
+    }
+
+    /**
+     * analyze() 의 토큰으로 저장 전에 시뮬레이션한다. 결과 화면에는 아직 plateId 가 없으므로
+     * 토큰이 대상을 지목한다 — /plates/records 와 나란한 형태다. 저장하지 않으므로 200 이다.
+     * 세그먼트 수가 달라 아래 /{plateId}/simulate 와 매핑이 갈라진다.
+     */
+    @PostMapping("/simulate")
+    public ApiResponse<PlateAnalysisSimulateResponse> simulateFromToken(
+            @CurrentUser Long userId,
+            @Valid @RequestBody PlateAnalysisSimulateRequest request) {
+
+        return ApiResponse.ok(skinPlateService.simulateFromToken(
+                userId, request.analysisToken(), request.actions()));
     }
 
     /**

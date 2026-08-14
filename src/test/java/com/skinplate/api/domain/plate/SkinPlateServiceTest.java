@@ -10,6 +10,7 @@ import com.skinplate.api.domain.food.entity.Nutrition;
 import com.skinplate.api.domain.food.repository.FoodAnalysisRepository;
 import com.skinplate.api.domain.food.service.FoodAnalysisService;
 import com.skinplate.api.domain.plate.dto.PlateAnalysisResponse;
+import com.skinplate.api.domain.plate.dto.PlateAnalysisSimulateResponse;
 import com.skinplate.api.domain.plate.dto.PlateSimulateResponse;
 import com.skinplate.api.domain.plate.dto.SkinPlateResponse;
 import com.skinplate.api.domain.plate.engine.PlateRuleEngine;
@@ -389,10 +390,112 @@ class SkinPlateServiceTest {
         verify(foodAnalysisService, never()).recognize(any());
     }
 
+    @Test
+    @DisplayName("simulateFromToken — 토큰의 food 로 계산한다, beforeScore 는 엔진의 before 결과와 같다")
+    void simulateFromToken_evaluatesTokenFood() {
+        givenSkinAnalysis();
+        OpenAiFoodResult aiResult = givenAiResult();
+        givenAnalysisTokenPayload(aiResult);
+        given(foodAnalysisService.toEntity(null, aiResult)).willReturn(givenFood());
+
+        PlateAnalysisSimulateResponse response = simulateFromToken(PlateActionCode.HALVE_SOUP);
+
+        assertThat(response.beforeScore()).isEqualTo(60);
+        verify(foodAnalysisService).toEntity(null, aiResult);
+    }
+
+    @Test
+    @DisplayName("simulateFromToken — 저장하지 않는다")
+    void simulateFromToken_savesNothing() {
+        givenSkinAnalysis();
+        OpenAiFoodResult aiResult = givenAiResult();
+        givenAnalysisTokenPayload(aiResult);
+        given(foodAnalysisService.toEntity(null, aiResult)).willReturn(givenFood());
+
+        simulateFromToken(PlateActionCode.HALVE_SOUP);
+
+        verify(foodAnalysisRepository, never()).save(any());
+        verify(skinPlateRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("simulateFromToken — AI 를 다시 부르지 않는다")
+    void simulateFromToken_neverCallsAiAgain() {
+        givenSkinAnalysis();
+        OpenAiFoodResult aiResult = givenAiResult();
+        givenAnalysisTokenPayload(aiResult);
+        given(foodAnalysisService.toEntity(null, aiResult)).willReturn(givenFood());
+
+        simulateFromToken(PlateActionCode.HALVE_SOUP);
+
+        verify(foodAnalysisService, never()).recognize(any());
+    }
+
+    @Test
+    @DisplayName("simulateFromToken — 무대 숫자 그대로 움직인다: 60 → 국물 절반 68")
+    void simulateFromToken_movesScoreLikeDemo() {
+        givenSkinAnalysis();
+        OpenAiFoodResult aiResult = givenAiResult();
+        givenAnalysisTokenPayload(aiResult);
+        given(foodAnalysisService.toEntity(null, aiResult)).willReturn(givenFood());
+
+        PlateAnalysisSimulateResponse response = simulateFromToken(PlateActionCode.HALVE_SOUP);
+
+        assertThat(response.beforeScore()).isEqualTo(60);
+        assertThat(response.afterScore()).isEqualTo(68);
+        assertThat(response.afterScore()).isGreaterThan(response.beforeScore());
+        assertThat(response.removedRules()).isNotEmpty();
+    }
+
+    @Test
+    @DisplayName("simulateFromToken — 남의 피부 분석이면 403 이 아니라 404 다")
+    void simulateFromToken_tokenPointsToOthersSkinAnalysis_returns404() {
+        OpenAiFoodResult aiResult = givenAiResult();
+        givenAnalysisTokenPayload(aiResult);
+        given(skinAnalysisRepository.findByIdAndUserId(ANALYSIS_ID, USER_ID)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> simulateFromToken(PlateActionCode.HALVE_SOUP))
+                .isInstanceOf(BusinessException.class)
+                .extracting(exception -> ((BusinessException) exception).getErrorCode())
+                .isEqualTo(ErrorCode.SKIN_ANALYSIS_NOT_FOUND);
+    }
+
+    @Test
+    @DisplayName("simulateFromToken — beforeScore 가 analyze() 의 점수와 같다")
+    void simulateFromToken_beforeScoreMatchesAnalyze() {
+        givenSkinAnalysis();
+        // 원본(2200)은 표준값(1850)과 다르다 — toEntity 를 타야만 표준화된 givenFood() 로
+        // 수렴해 60점이 나온다. 원본을 그대로 쓰면 R04 초과분이 늘어 59점으로 갈라진다.
+        OpenAiFoodResult aiResult = givenAiResult(2200);
+        given(foodAnalysisService.recognize(any())).willReturn(aiResult);
+        given(foodAnalysisService.toEntity(null, aiResult)).willReturn(givenFood());
+        given(analysisTokenProvider.issue(USER_ID, ANALYSIS_ID, aiResult)).willReturn("signed-token");
+
+        PlateAnalysisResponse analyzeResponse = skinPlateService.analyze(USER_ID, image(), ANALYSIS_ID);
+
+        givenAnalysisTokenPayload(aiResult);
+        PlateAnalysisSimulateResponse simulateResponse = simulateFromToken(PlateActionCode.HALVE_SOUP);
+
+        // toEntity 를 우회해 aiResult 로 FoodAnalysis 를 직접 만들면 이 등식이 깨진다 —
+        // 표준 영양값 덮어쓰기·trim 이 analyze 에만 적용되고 시뮬레이션에는 빠지기 때문이다.
+        assertThat(simulateResponse.beforeScore()).isEqualTo(analyzeResponse.plateScore());
+    }
+
     // ---- 픽스처 ----
 
     private PlateSimulateResponse simulate(PlateActionCode... actions) {
         return skinPlateService.simulate(USER_ID, PLATE_ID, List.of(actions));
+    }
+
+    private PlateAnalysisSimulateResponse simulateFromToken(PlateActionCode... actions) {
+        return skinPlateService.simulateFromToken(USER_ID, "token", List.of(actions));
+    }
+
+    /** simulateFromToken() 이 parse() 로 되받는 토큰 페이로드. jti 는 시뮬레이션에서 안 쓰인다. */
+    private AnalysisTokenPayload givenAnalysisTokenPayload(OpenAiFoodResult aiResult) {
+        AnalysisTokenPayload payload = new AnalysisTokenPayload(USER_ID, "jti-sim", ANALYSIS_ID, aiResult);
+        given(analysisTokenProvider.parse("token", USER_ID)).willReturn(payload);
+        return payload;
     }
 
     /** 문서의 시연 예시 그대로 — 지표 38/52/64/25/78 + 돼지고기 김치찌개 = 60점. */
@@ -446,6 +549,15 @@ class SkinPlateServiceTest {
 
     /** VisionClient 가 돌려줬다고 가정하는 AI 원본. */
     private OpenAiFoodResult givenAiResult() {
+        return givenAiResult(1850);
+    }
+
+    /**
+     * sodiumMg 를 바꿔 받는 버전. toEntity 를 우회해 이 원본값을 그대로 쓰면 표준화
+     * 이전 나트륨이 새어나가 R04 감점 폭이 갈라진다 — simulateFromToken_beforeScoreMatchesAnalyze
+     * 가 그 우회를 잡아내려면 aiResult 의 원본값이 표준값(1850)과 달라야 한다.
+     */
+    private OpenAiFoodResult givenAiResult(int sodiumMg) {
         return new OpenAiFoodResult(
                 true, "돼지고기 김치찌개", "한식/찌개", "BOILED", true,
                 List.of(new OpenAiFoodResult.Ingredient("돼지고기", "ETC"),
@@ -453,7 +565,7 @@ class SkinPlateServiceTest {
                         new OpenAiFoodResult.Ingredient("두부", "ETC"),
                         new OpenAiFoodResult.Ingredient("고춧가루", "CAPSAICIN")),
                 new OpenAiFoodResult.Nutrition(520, new BigDecimal("28.5"), new BigDecimal("24.0"),
-                        new BigDecimal("32.0"), 1850, new BigDecimal("6.2")));
+                        new BigDecimal("32.0"), sodiumMg, new BigDecimal("6.2")));
     }
 
     /** foodAnalysisService.toEntity(null, aiResult) 가 돌려준다고 가정하는 결과 — user 는 null 이다. */
