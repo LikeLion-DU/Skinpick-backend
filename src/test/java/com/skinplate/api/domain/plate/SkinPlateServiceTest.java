@@ -34,6 +34,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.support.TransactionCallback;
@@ -50,6 +51,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -317,10 +319,14 @@ class SkinPlateServiceTest {
         assertThat(response.plateId()).isEqualTo(PLATE_ID);
         verify(skinPlateRepository, never()).save(any());
         verify(foodAnalysisRepository, never()).save(any());
+        // 락은 "이미 저장돼 있다"는 답이 나오는 이 갈래에서도 잡혀야 한다 — 동시에 두 번
+        // 누른 요청 중 하나가 바로 이 갈래로 떨어진다. 여기서 락을 건너뛰면 둘 다 jti
+        // 조회를 먼저 통과해버려 멱등성이 무력화된다.
+        verify(skinAnalysisRepository).findForUpdate(ANALYSIS_ID);
     }
 
     @Test
-    @DisplayName("락을 잡는다 — findForUpdate 가 소유 확인 뒤 호출된다")
+    @DisplayName("락을 잡는다 — findForUpdate → jti 조회 → save 순서로 호출된다")
     void saveRecord_locksSkinAnalysisRowForUpdate() {
         givenSkinAnalysis();
         givenUser();
@@ -335,6 +341,13 @@ class SkinPlateServiceTest {
         skinPlateService.saveRecord(USER_ID, "token");
 
         verify(skinAnalysisRepository).findForUpdate(ANALYSIS_ID);
+
+        // 순서 자체가 멱등성의 전제다. 락보다 jti 조회가 먼저 오면 동시 요청 둘이
+        // 모두 빈 결과를 보고 각각 저장한다 — 순서가 안 지켜지면 잠그는 의미가 없다.
+        InOrder inOrder = inOrder(skinAnalysisRepository, foodAnalysisRepository, skinPlateRepository);
+        inOrder.verify(skinAnalysisRepository).findForUpdate(ANALYSIS_ID);
+        inOrder.verify(foodAnalysisRepository).findIdByUserIdAndJti(USER_ID, "jti-lock");
+        inOrder.verify(skinPlateRepository).save(any());
     }
 
     @Test
