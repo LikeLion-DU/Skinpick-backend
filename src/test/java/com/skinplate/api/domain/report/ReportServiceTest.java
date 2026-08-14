@@ -113,6 +113,26 @@ class ReportServiceTest {
     }
 
     @Test
+    @DisplayName("반복 횟수가 같으면 감점 합계가 더 큰 쪽이 앞선다")
+    void penaltiesTieBreakByTotalDelta() {
+        // 두 룰 다 count=2 로 묶어 1차 비교(count)를 무력화한다 —
+        // 그래야 totalDelta 비교가 실제로 동작해야만 순서가 맞는다.
+        SkinPlate first = plate(1L, "떡볶이", 60, LocalDateTime.now());
+        addFeedback(first, FeedbackType.CAUTION, "R04", -8, "나트륨 과다");
+        addFeedback(first, FeedbackType.CAUTION, "R02", -12, "매운맛 자극");
+        SkinPlate second = plate(2L, "라면", 55, LocalDateTime.now());
+        addFeedback(second, FeedbackType.CAUTION, "R04", -8, "나트륨 과다");
+        addFeedback(second, FeedbackType.CAUTION, "R02", -12, "매운맛 자극");
+        given(skinPlateRepository.findInRange(anyLong(), any(), any()))
+                .willReturn(List.of(first, second));
+
+        // R04 합계 -16, R02 합계 -24 — 더 큰 감점(R02)이 앞서야 한다.
+        assertThat(reportService.get(USER_ID, ReportPeriod.WEEK).penalties())
+                .extracting(PenaltyDto::ruleCode)
+                .containsExactly("R02", "R04");
+    }
+
+    @Test
     @DisplayName("관련 음식은 그 룰이 적용된 끼니 수로 센다 — 같은 음식을 두 번 먹으면 2 다")
     void topFoodsCountMeals() {
         SkinPlate first = plate(1L, "라면", 55, LocalDateTime.now());
@@ -133,6 +153,12 @@ class ReportServiceTest {
     void todayFillsMealsNotTrend() {
         given(skinPlateRepository.findInRange(anyLong(), any(), any()))
                 .willReturn(List.of(plate(1L, "떡볶이", 60, LocalDateTime.now())));
+        // analyses 를 비워두면 TODAY 가 week 분기를 잘못 타도 추이가 어차피 비어 통과한다.
+        // 채워서 넣어야 "추이는 비운다"는 주장이 실제로 분기를 검증한다.
+        given(skinAnalysisRepository
+                .findByUserIdAndCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDesc(
+                        anyLong(), any(), any()))
+                .willReturn(List.of(analysis(72, LocalDateTime.now())));
 
         ReportResponse response = reportService.get(USER_ID, ReportPeriod.TODAY);
 
@@ -149,7 +175,10 @@ class ReportServiceTest {
                         anyLong(), any(), any()))
                 .willReturn(List.of(analysis(72, day.withHour(21)),   // 같은 날 늦은 것이 이긴다
                                     analysis(60, day)));
-        given(skinPlateRepository.findInRange(anyLong(), any(), any())).willReturn(List.of());
+        // plates 를 비워두면 WEEK 가 today 분기를 잘못 타도 먹은 목록이 어차피 비어 통과한다.
+        // 채워서 넣어야 "먹은 목록은 비운다"는 주장이 실제로 분기를 검증한다.
+        given(skinPlateRepository.findInRange(anyLong(), any(), any()))
+                .willReturn(List.of(plate(1L, "떡볶이", 60, LocalDateTime.now())));
 
         ReportResponse response = reportService.get(USER_ID, ReportPeriod.WEEK);
 
