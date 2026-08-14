@@ -3,7 +3,7 @@
 Skin Plate 백엔드. **AI 피부 분석 → 음식 분석 → 행동 제안**.
 **개발 2026-08-08 ~ 08-21 · GitHub 업로드 마감 08-21 · 발표 08-25.**
 **08-22~24 는 없는 기간으로 본다** — 업로드가 21일에 닫히므로 QA·버그 수정·배포까지 21일 안에 끝난다.
-Spring Boot 3.3.5 / Java 21 / PostgreSQL 16 / Flyway / Spring Security + jjwt / OpenAI gpt-4o.
+Spring Boot 3.3.5 / Java 21 / PostgreSQL(로컬 16 · Supabase 17) / Flyway / Spring Security + jjwt / OpenAI gpt-4o.
 Flutter 앱은 별도 저장소. 배포는 Docker + **가비아 VM**(2 vCore · 4GB · 무료 트래픽 1TB).
 HTTPS 는 자동이 아니다 — 리버스 프록시가 인증서와 **본문 상한 20MB**(3장 업로드)를 같이 맡는다.
 
