@@ -1,6 +1,8 @@
 # CLAUDE.md — skinplate-api
 
-Skin Plate 백엔드. **AI 피부 분석 → 음식 분석 → 행동 제안**. 해커톤 10일(2026-08-08 ~ 08-17).
+Skin Plate 백엔드. **AI 피부 분석 → 음식 분석 → 행동 제안**.
+**개발 2026-08-08 ~ 08-21 · GitHub 업로드 마감 08-21 · 발표 08-25.**
+**08-22~24 는 없는 기간으로 본다** — 업로드가 21일에 닫히므로 QA·버그 수정·배포까지 21일 안에 끝난다.
 Spring Boot 3.3.5 / Java 21 / PostgreSQL 16 / Flyway / Spring Security + jjwt / OpenAI gpt-4o.
 Flutter 앱은 별도 저장소. 배포는 Docker + **가비아 VM**(2 vCore · 4GB · 무료 트래픽 1TB).
 HTTPS 는 자동이 아니다 — 리버스 프록시가 인증서와 **본문 상한 20MB**(3장 업로드)를 같이 맡는다.
@@ -9,7 +11,7 @@ HTTPS 는 자동이 아니다 — 리버스 프록시가 인증서와 **본문 �
 
 | 파일 | 범위 |
 |---|---|
-| `SkinPlate_PRD.md` (v1.4) | 요구사항 · API 명세 · 룰 정의표 · 10일 일정 · 리스크 |
+| `SkinPlate_PRD.md` (v1.4) | 요구사항 · API 명세 · 룰 정의표 · 일정 · 리스크 |
 | `SkinPlate_DTO_Domain.md` | Entity · DTO · Rule Engine 스켈레톤 (파일 단위 코드) |
 
 - **문서 원본은 저장소의 이 파일들이다.** 작업 전 **버전 헤더를 확인**하고, 손에 든 사본이 더 최신이면 저장소를 먼저 교체한다 — 오래된 사본으로 리뷰하면 이미 고친 것이 계속 지적된다.
@@ -99,4 +101,5 @@ docker exec -i skinplate-db psql -U skinplate -d skinplate -tAc \
 - Controller에서 Entity 반환
 - 점수 계산을 LLM에 위임 (재현성이 이 제품의 주장이다)
 - `declaredSkinType`을 `PlateContext`에 넣기 — 자가 신고값은 표시·비교 전용
-- **Day 8 이후 기능 추가.** Day 9~10은 영상 촬영·편집 전용이다
+- **08-21 이후 커밋.** 그날 업로드가 닫힌다 — 기능·QA·배포·촬영이 전부 그 안에 들어간다
+- 기능 동결은 날짜가 아니라 **G5(배포본 E2E 1회 완주)** 로 판단한다. PRD 의 "Day 8 동결"은 08-17 발표 전제였고 무효다
