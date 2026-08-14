@@ -1896,6 +1896,7 @@ public class Recommendation extends BaseTimeEntity {
 | `INVALID_IMAGE` | 400 | 형식/용량 위반 |
 | `FACE_NOT_DETECTED` | 422 | 얼굴 미인식 |
 | `FOOD_NOT_DETECTED` | 422 | 음식 미인식 |
+| `ANALYSIS_EXPIRED` | 422 | 분석 토큰 만료(30분) — 다시 촬영해야 한다 |
 | `SKIN_ANALYSIS_NOT_FOUND` | 404 | 기준 피부 분석 없음 |
 | `AI_ANALYSIS_FAILED` | 502 | OpenAI 호출 실패 |
 | `AI_TIMEOUT` | 504 | OpenAI 타임아웃 |
@@ -1919,7 +1920,9 @@ public class Recommendation extends BaseTimeEntity {
 | 5 | POST | `/skin/analyses` | ✅ | 피부 사진 분석 | P0 |
 | 6 | GET | `/skin/analyses/latest` | ✅ | 최신 피부 분석 조회 | P0 |
 | 7 | GET | `/skin/analyses/{id}` | ✅ | 피부 분석 상세 | P1 |
-| 8 | POST | `/plates` | ✅ | 음식 분석 + Plate Score 생성 | P0 |
+| 8 | **POST** | **`/plates/analyze`** | ✅ | **음식 분석 + 분석 토큰 발급 (저장 안 함)** | **P0** |
+| 8-b | **POST** | **`/plates/records`** | ✅ | **분석 토큰으로 기록 저장** | **P0** |
+| 8-c | ~~POST~~ | ~~`/plates`~~ | ✅ | ~~음식 분석 + Plate Score 생성~~ · **폐기 예정** — 8·8-b 로 대체됐다. 앱 전환과 호출 0 확인 후 제거한다 | — |
 | 9 | **POST** | **`/plates/{id}/simulate`** | ✅ | **추천 행동 실행 시 점수 재계산 (저장 안 함)** | **P0** |
 | 10 | GET | `/plates/{id}` | ✅ | Plate 상세 | P1 |
 | 11 | GET | `/recommendations` | ✅ | 피부 기반 음식 추천 | P0 |
@@ -2164,9 +2167,13 @@ public class Recommendation extends BaseTimeEntity {
 
 ---
 
-#### ⑦ POST `/api/v1/plates` ★핵심
+#### ⑦ POST `/api/v1/plates/analyze` ★핵심
 
-음식 사진을 분석하고, 지정된 피부 분석 결과와 매칭하여 Skin Plate Score를 생성한다.
+음식 사진을 분석하고, 지정된 피부 분석 결과와 매칭하여 Skin Plate Score를 계산한다. **저장하지 않는다** — 결과와 함께 서명된 `analysisToken`을 돌려주고, 사용자가 [기록에 저장하기]를 눌렀을 때 ⑦-c 가 그 토큰으로 저장한다.
+
+> **분석과 기록을 분리한 이유** — 촬영만 해보고 저장하지 않은 음식이 히스토리·리포트에 섞이면 사용자가 자기 기록을 신뢰하지 않는다. 분석은 임시, 기록은 명시적 선택이다.
+>
+> 서버에 임시 상태를 두지 않으면서 클라이언트도 신뢰하지 않는 방법이 서명이다. 분석 결과를 서버가 서명해 넘기고 저장 시 되받아 검증하면, 그 데이터가 서버 자신의 출력임이 증명된다. (설계 근거: `docs/superpowers/specs/2026-08-14-analysis-record-separation-design.md`)
 
 **Request** — `multipart/form-data`
 
@@ -2175,7 +2182,46 @@ public class Recommendation extends BaseTimeEntity {
 | `image` | file | ✅ | 음식 사진 |
 | `skinAnalysisId` | long | ❌ | 생략 시 최신 피부 분석 자동 사용 |
 
-**Response 201**
+**Response 200** — 저장하지 않으므로 201 이 아니다. `plateId` 와 `createdAt` 이 없고, 대신 `analysisToken` 이 실린다. 나머지 필드는 아래 ⑦-c 응답과 같다.
+
+```json
+{
+  "success": true,
+  "data": {
+    "analysisToken": "eyJhbGciOiJIUzI1NiJ9...",
+    "skinAnalysisId": 101,
+    "plateScore": 60,
+    "baseScore": 70,
+    "summary": "...",
+    "food": { "…": "⑦-c 와 동일" },
+    "feedbacks": { "…": "⑦-c 와 동일" },
+    "appliedRules": ["R04", "R02", "R05", "R09"]
+  },
+  "error": null
+}
+```
+
+---
+
+#### ⑦-c POST `/api/v1/plates/records` ★핵심
+
+`analysisToken` 을 검증하고 **기록을 저장한다.** AI 를 다시 부르지 않는다.
+
+**Request** — `application/json`
+
+| 필드 | 타입 | 필수 | 설명 |
+|---|---|---|---|
+| `analysisToken` | string | ✅ | ⑦ 이 발급한 토큰. **이 필드 하나뿐이다** |
+
+> **요청 본문에 음식·영양·점수 필드를 두지 않는 것이 요구사항이다.** 받지 않으므로 조작할 대상이 없다. 저장되는 점수는 토큰 안의 AI 원본과 서버 DB 에서 읽은 피부 지표로 Rule Engine 이 다시 계산한다.
+
+**토큰 계약** — `sub`(userId) · `jti` · `iss`(`skinplate`) · `aud`(`plate-record`) · `iat` · `exp`(발급 후 30분) · `skinAnalysisId` · `food`. 저장 API 는 서명·만료·`iss`·`aud`·`sub`==인증 userId·클레임 존재·`skinAnalysisId` 소유를 전부 검증한다.
+
+> **서명 키는 인증 JWT 와 다르다.** `JwtAuthenticationFilter` 는 서명과 만료만 보고 `aud` 를 검사하지 않으므로, 같은 키로 서명하면 이 토큰이 `Bearer` 인증 토큰으로도 통한다. 그래서 `JWT_SECRET` 에서 `HMAC-SHA256(secret, "analysis")` 로 파생한 별도 키를 쓴다 — 인증 경로에서 서명 검증 자체가 실패한다. 새 시크릿·환경변수는 추가하지 않는다.
+
+**멱등성** — 같은 토큰을 다시 보내도 기록은 하나다. 판정 기준은 음식명·점수·시각 같은 추측값이 아니라 **토큰의 `jti`** 다(같은 음식을 두 번 먹는 것은 정상이다). 마이그레이션 없이 기존 `food_analysis.raw_ai_response`(jsonb) 최상위에 `_meta.jti` 를 형제 키로 기록하고, 저장 트랜잭션 안에서 `findForUpdate` 로 해당 피부 분석 행에 줄을 세운 뒤 조회한다.
+
+**Response 201** — 멱등 재요청도 201 이고 같은 `plateId` 를 돌려준다.
 
 ```json
 {

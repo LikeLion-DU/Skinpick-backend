@@ -513,6 +513,7 @@ public enum ErrorCode {
     INVALID_IMAGE       (HttpStatus.BAD_REQUEST,          "이미지 형식 또는 용량이 올바르지 않습니다."),
     FACE_NOT_DETECTED   (HttpStatus.UNPROCESSABLE_ENTITY, "얼굴을 인식하지 못했습니다. 밝은 곳에서 다시 촬영해 주세요."),
     FOOD_NOT_DETECTED   (HttpStatus.UNPROCESSABLE_ENTITY, "음식을 인식하지 못했습니다. 다시 촬영해 주세요."),
+    ANALYSIS_EXPIRED    (HttpStatus.UNPROCESSABLE_ENTITY, "분석 결과가 만료됐어요. 다시 촬영해 주세요."),
     AI_ANALYSIS_FAILED  (HttpStatus.BAD_GATEWAY,          "분석에 실패했습니다. 잠시 후 다시 시도해 주세요."),
     AI_TIMEOUT          (HttpStatus.GATEWAY_TIMEOUT,      "분석이 지연되고 있습니다. 다시 시도해 주세요."),
     RATE_LIMIT_EXCEEDED (HttpStatus.TOO_MANY_REQUESTS,    "오늘 분석 가능 횟수를 모두 사용했습니다."),
@@ -5927,7 +5928,8 @@ if (_consecutiveFailures >= 3) {
 | `POST /auth/signup`<br>`POST /auth/login`<br>`POST /auth/test-login` | `AuthResponse` | `accessToken` · `tokenType` · `expiresIn` · `user{userId,email,nickname}` | `AuthResponseDto` |
 | `GET /auth/me`<br>`PATCH /auth/me` | `MeResponse` | `userId` · `email` · `nickname` · **`declaredSkinType`**(미선택 시 키 생략) · **`isTestAccount`** · `joinedAt` | `MeResponseDto` |
 | `POST /skin/analyses`<br>`GET /skin/analyses/latest`<br>`GET /skin/analyses/{id}` | `SkinAnalysisResponse` | `skinAnalysisId` · `skinScore` · `metrics{5}` · `summary` · `highlights[{label,status}]` · **`skinTypeGap{declared,observed,matched,message}`**(미선택 시 키 생략) · `analyzedAt` | `SkinAnalysisDto` |
-| `POST /plates`<br>`GET /plates/{id}` | `SkinPlateResponse` | `plateId` · **`skinAnalysisId`** · `plateScore` · **`baseScore`** · `summary` · `food{...}` · `feedbacks{good,caution,action}` · `appliedRules[]` · `createdAt` | `SkinPlateDto` |
+| `POST /plates/analyze` | `PlateAnalysisResponse` | **`analysisToken`** · `skinAnalysisId` · `plateScore` · `baseScore` · `summary` · `food{...}` · `feedbacks{good,caution,action}` · `appliedRules[]` — **`plateId`·`createdAt` 없음(저장 전)** | `PlateAnalysisDto` |
+| `POST /plates/records`<br>`GET /plates/{id}` | `SkinPlateResponse` | `plateId` · **`skinAnalysisId`** · `plateScore` · **`baseScore`** · `summary` · `food{...}` · `feedbacks{good,caution,action}` · `appliedRules[]` · `createdAt` | `SkinPlateDto` |
 | `POST /plates/{id}/simulate` | `PlateSimulateResponse` | `plateId` · `beforeScore` · `afterScore` · `appliedActions[]` · `removedRules[]` · `summary` | `PlateSimulationDto` |
 | `GET /plates?from=&to=` | `PlateHistoryResponse` | `days[{date, skinScore, plates[{plateId, foodName, plateScore, recordedAt}]}]` | `PlateHistoryDto` |
 | `GET /reports?period=` | `ReportResponse` | `period` · `from` · `to` · `latestSkinScore` · `skinScoreTrend[]` · `recordCount` · `averagePlateScore` · `penalties[]` · `meals[]` | `ReportDto` |
