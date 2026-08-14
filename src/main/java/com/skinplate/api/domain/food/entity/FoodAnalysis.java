@@ -45,6 +45,12 @@ public class FoodAnalysis extends BaseTimeEntity {
     @OneToMany(mappedBy = "foodAnalysis", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<FoodIngredient> ingredients = new ArrayList<>();
 
+    /**
+     * AI 분석 원본 + 서버 메타데이터. 기록 저장(POST /plates/records)이 만든 행은
+     * 최상위 형제 키로 {@code _meta.jti} 를 얹어 멱등키로 쓴다 — 새 컬럼·테이블 없이
+     * 기존 jsonb 하나를 재사용한다. 이 컬럼이 없던 시절 행은 {@code _meta} 가 없고,
+     * {@code raw_ai_response->'_meta'->>'jti'} 는 그 행들에서 null 을 준다.
+     */
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb")
     private String rawAiResponse;

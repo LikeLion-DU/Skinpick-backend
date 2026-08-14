@@ -39,6 +39,8 @@ app:
     jwt:
       secret: ${JWT_SECRET}                        # 32바이트 이상
       validity-seconds: 604800                     # 7일
+    analysis-token:
+      validity-seconds: 1800                     # 30분
     test-account:
       enabled: ${TEST_ACCOUNT_ENABLED:true}
       password: ${TEST_ACCOUNT_PASSWORD:test1234!}

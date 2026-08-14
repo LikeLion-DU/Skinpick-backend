@@ -21,6 +21,7 @@ public enum ErrorCode {
     INVALID_IMAGE       (HttpStatus.BAD_REQUEST,          "이미지 형식 또는 용량이 올바르지 않습니다."),
     FACE_NOT_DETECTED   (HttpStatus.UNPROCESSABLE_ENTITY, "얼굴을 인식하지 못했습니다. 밝은 곳에서 다시 촬영해 주세요."),
     FOOD_NOT_DETECTED   (HttpStatus.UNPROCESSABLE_ENTITY, "음식을 인식하지 못했습니다. 다시 촬영해 주세요."),
+    ANALYSIS_EXPIRED    (HttpStatus.UNPROCESSABLE_ENTITY, "분석 결과가 만료됐어요. 다시 촬영해 주세요."),
     AI_ANALYSIS_FAILED  (HttpStatus.BAD_GATEWAY,          "분석에 실패했습니다. 잠시 후 다시 시도해 주세요."),
     AI_TIMEOUT          (HttpStatus.GATEWAY_TIMEOUT,      "분석이 지연되고 있습니다. 다시 시도해 주세요."),
     RATE_LIMIT_EXCEEDED (HttpStatus.TOO_MANY_REQUESTS,    "오늘 분석 가능 횟수를 모두 사용했습니다."),
