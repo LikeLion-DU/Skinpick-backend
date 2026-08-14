@@ -179,6 +179,25 @@ class AnalysisTokenProviderTest {
                 .isEqualTo(ErrorCode.INVALID_INPUT);
     }
 
+    @Test
+    @DisplayName("skinAnalysisId 는 있어도 food 클레임이 없으면 거부한다")
+    void rejectsTokenWithoutFoodClaim() throws Exception {
+        String token = Jwts.builder()
+                .subject("42")
+                .issuer("skinplate")
+                .audience().add("plate-record").and()
+                .issuedAt(Date.from(Instant.now()))
+                .expiration(Date.from(Instant.now().plusSeconds(THIRTY_MINUTES)))
+                .claim("skinAnalysisId", 7L)
+                .signWith(deriveAnalysisKey())
+                .compact();
+
+        assertThatThrownBy(() -> provider.parse(token, 42L))
+                .isInstanceOf(BusinessException.class)
+                .extracting(exception -> ((BusinessException) exception).getErrorCode())
+                .isEqualTo(ErrorCode.INVALID_INPUT);
+    }
+
     private static OpenAiFoodResult sampleFood() {
         return new OpenAiFoodResult(true, "돼지고기 김치찌개", "한식/찌개", "BOILED", true,
                 List.of(new OpenAiFoodResult.Ingredient("돼지고기", "PROTEIN"),
