@@ -60,8 +60,18 @@ class AnalysisTokenProviderTest {
     @DisplayName("서명이 위조된 토큰은 거부한다")
     void rejectsTamperedSignature() {
         String token = provider.issue(42L, 7L, sampleFood());
-        char lastChar = token.charAt(token.length() - 1);
-        String tampered = token.substring(0, token.length() - 1) + (lastChar == 'a' ? 'b' : 'a');
+        // 마지막 글자는 건드리지 않는다 — HS256 서명 32바이트(256비트)를 43글자 base64url 로
+        // 인코딩하면 마지막 글자는 유효 비트가 4개뿐이고 나머지 2비트는 버려진다(canonical
+        // 인코딩에서 0으로 고정). jjwt 의 Decoders.BASE64URL 은 이 dangling 비트를 무시하므로,
+        // 마지막 글자를 상위 4비트가 같은 다른 글자로 바꾸면(예: "Y" <-> "a") 디코딩된 서명
+        // 바이트가 우연히 똑같아져 위조가 감지되지 않는다 — 16번에 1번꼴로 이 테스트가
+        // 거짓으로 통과(정확히는 실패)한다. 뒤에서 두 번째 글자는 6비트가 전부 유효해
+        // 항상 실제로 다른 바이트로 디코딩된다.
+        int tamperIndex = token.length() - 2;
+        char targetChar = token.charAt(tamperIndex);
+        String tampered = token.substring(0, tamperIndex)
+                + (targetChar == 'a' ? 'b' : 'a')
+                + token.substring(tamperIndex + 1);
 
         assertThatThrownBy(() -> provider.parse(tampered, 42L))
                 .isInstanceOf(BusinessException.class)
@@ -140,6 +150,24 @@ class AnalysisTokenProviderTest {
                 .subject("42")
                 .issuer("skinplate")
                 .audience().add("something-else").and()
+                .issuedAt(Date.from(Instant.now()))
+                .expiration(Date.from(Instant.now().plusSeconds(THIRTY_MINUTES)))
+                .signWith(deriveAnalysisKey())
+                .compact();
+
+        assertThatThrownBy(() -> provider.parse(token, 42L))
+                .isInstanceOf(BusinessException.class)
+                .extracting(exception -> ((BusinessException) exception).getErrorCode())
+                .isEqualTo(ErrorCode.INVALID_INPUT);
+    }
+
+    @Test
+    @DisplayName("서명은 유효해도 skinAnalysisId·food 클레임이 없으면 거부한다")
+    void rejectsTokenWithoutRequiredClaims() throws Exception {
+        String token = Jwts.builder()
+                .subject("42")
+                .issuer("skinplate")
+                .audience().add("plate-record").and()
                 .issuedAt(Date.from(Instant.now()))
                 .expiration(Date.from(Instant.now().plusSeconds(THIRTY_MINUTES)))
                 .signWith(deriveAnalysisKey())

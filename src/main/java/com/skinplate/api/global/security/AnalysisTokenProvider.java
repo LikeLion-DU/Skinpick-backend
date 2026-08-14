@@ -93,8 +93,15 @@ public class AnalysisTokenProvider {
                 throw new BusinessException(ErrorCode.INVALID_INPUT);
             }
 
-            Long skinAnalysisId = claims.get("skinAnalysisId", Number.class).longValue();
-            OpenAiFoodResult food = objectMapper.convertValue(claims.get("food"), OpenAiFoodResult.class);
+            Number skinAnalysisIdClaim = claims.get("skinAnalysisId", Number.class);
+            Object foodClaim = claims.get("food");
+            if (skinAnalysisIdClaim == null || foodClaim == null) {
+                // 서명은 유효한데 클레임이 없다 — 이 서버가 발급한 토큰이 아니다.
+                throw new BusinessException(ErrorCode.INVALID_INPUT);
+            }
+
+            Long skinAnalysisId = skinAnalysisIdClaim.longValue();
+            OpenAiFoodResult food = objectMapper.convertValue(foodClaim, OpenAiFoodResult.class);
 
             return new AnalysisTokenPayload(userId, claims.getId(), skinAnalysisId, food);
         } catch (ExpiredJwtException e) {
