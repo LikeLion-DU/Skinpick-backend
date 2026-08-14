@@ -55,6 +55,14 @@ created_at >= from  AND  created_at < toExclusive
 
 ## 4. API 계약
 
+### 4.0 공통 규약 — 인가
+
+**두 API 모두 인증된 현재 사용자의 데이터만 조회한다.** 사용자 식별은 `@CurrentUser Long userId` 하나뿐이고, 요청 본문·쿼리의 userId 는 존재하더라도 무시한다.
+
+모든 조회 쿼리는 `user_id` 조건을 포함한다 — `skin_plate` · `skin_analysis` 둘 다. 집계 대상이 되는 `skin_plate_feedback` 은 `skin_plate` 를 거쳐서만 접근하므로 별도 조건이 필요 없다(부모가 이미 사용자로 좁혀져 있다).
+
+기간에 남의 기록이 섞일 여지를 없애는 것이 목적이다. 리포트는 숫자만 돌려주기 때문에 새어도 눈에 띄지 않는다 — 조회 단계에서 막는다.
+
 ### 4.1 `GET /api/v1/reports?period=TODAY|WEEK`
 
 | 파라미터 | 필수 | 의미 |
@@ -126,7 +134,7 @@ from=2026-08-08 & to=2026-08-14
 | 지표 | 출처 | 계산 | 빈 데이터 |
 |---|---|---|---|
 | `latestSkinScore` | `skin_analysis` | 기간 내 `created_at` 최신 1건의 `skin_score` | `null` |
-| `skinScoreTrend` | `skin_analysis` | 기간 내 **날짜별 최신** 1건. **있는 날만** 배열에 담는다 | `[]` |
+| `skinScoreTrend` | `skin_analysis` | **KST 달력일별 최신** `skin_analysis` 1건의 `skin_score`. 하루에 여러 번 찍었으면 `created_at` 이 가장 늦은 것. **있는 날만** 배열에 담는다(날짜 오름차순) | `[]` |
 | `recordCount` | `skin_plate` | 행 수 | `0` |
 | `averagePlateScore` | `skin_plate` | `round(avg(plate_score))` | `null` |
 | `penalties` | `skin_plate_feedback` | 아래 §5.1 | `[]` |
@@ -151,8 +159,10 @@ rule_code 로 그룹
   count       = 행 수
   totalDelta  = sum(score_delta)          (음수)
   label       = 그룹 내 message            (§5.2)
-  topFoods    = 그 룰이 걸린 plate 의 food_name 빈도 상위 3
+  topFoods    = 그 룰이 적용된 Plate 의 food_name 빈도 상위 3
 ```
+
+`topFoods` 는 **그 룰이 적용된 Plate 의 개수**를 센다. 같은 음식을 두 번 먹어 두 번 다 나트륨 감점을 받았으면 2 다 — 음식 종류가 아니라 반복된 끼니를 세는 것이 "무엇이 반복되나"라는 질문에 맞는 답이다.
 
 **정렬 (deterministic)**
 
@@ -173,6 +183,10 @@ R01 수분 보충 재료 · R05 단백질 충분 · R06 비타민 풍부 · R08 
 ```
 
 따라서 **`PlateRule` 수정 없음 · Flutter 룰 매핑 하드코딩 없음 · 새 매핑 테이블 없음.**
+
+**데이터 계약** — 같은 `rule_code` 그룹의 `message` 는 같은 라벨이다. 9개 룰이 전부 리터럴을 반환하므로 지금은 참이고, 집계는 이 전제 위에 선다. 그룹의 라벨은 **그룹 내 아무 행의 `message`** 를 쓴다(구현상 첫 행).
+
+이 전제가 깨지는 경우는 하나뿐이다 — 누군가 룰의 짧은 라벨을 문자열 조합으로 바꾸는 것. 그러면 같은 룰이 여러 라벨로 갈리는 게 아니라 **그룹 라벨이 어느 행을 집었느냐에 따라 달라진다.** 짧은 라벨은 리터럴로 유지한다.
 
 ## 6. 오늘 vs 이번 주 — 같은 레이아웃, 다른 강조점
 
