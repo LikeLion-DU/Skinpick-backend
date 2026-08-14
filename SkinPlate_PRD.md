@@ -2309,7 +2309,7 @@ public class Recommendation extends BaseTimeEntity {
     "afterScore": 68,
     "appliedActions": ["HALVE_SOUP"],
     "removedRules": ["R04"],
-    "summary": "국물을 절반만 남기면 나트륨 부담이 사라집니다."
+    "summary": "국물을 절반만 남기기 — 실행했을 때의 예상 점수입니다."
   },
   "error": null
 }
@@ -2358,7 +2358,7 @@ int after = engine.evaluate(new PlateContext(skin, copy)).score();
     "afterScore": 68,
     "appliedActions": ["HALVE_SOUP"],
     "removedRules": ["R04"],
-    "summary": "국물을 절반만 남기면 나트륨 부담이 사라집니다."
+    "summary": "국물을 절반만 남기기 — 실행했을 때의 예상 점수입니다."
   },
   "error": null
 }
