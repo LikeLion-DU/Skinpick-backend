@@ -65,6 +65,7 @@ import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 
 /**
  * 저장 시각이 실행 환경의 시간대를 따라가면, 같은 컬럼이 개발 맥에서는 KST 로
@@ -84,10 +85,6 @@ class JpaConfigTest {
 
         assertThat(actual)
                 .isCloseTo(LocalDateTime.now(KST), within(5, ChronoUnit.SECONDS));
-    }
-
-    private static org.assertj.core.api.TemporalUnitOffset within(long amount, ChronoUnit unit) {
-        return new org.assertj.core.api.TemporalUnitWithinOffset(amount, unit);
     }
 }
 ```
@@ -354,7 +351,7 @@ git commit -m "feat(global): KST 달력일 조회 구간 · 범위 검증"
 
 - [ ] **Step 1: `SkinPlateRepository` 를 고친다**
 
-`findByUserIdOrderByCreatedAtDesc` 를 **지우고**(호출자 0) 아래를 넣는다. import 3개(`EntityGraph`, `Query`, `Param`, `LocalDateTime`)도 함께.
+`findByUserIdOrderByCreatedAtDesc` 를 **지우고**(호출자 0) 아래를 넣는다. import 4개(`EntityGraph`, `Query`, `Param`, `LocalDateTime`)도 함께.
 
 ```java
     /**
@@ -537,8 +534,7 @@ import com.skinplate.api.domain.food.entity.FoodAnalysis;
 import com.skinplate.api.domain.food.entity.Nutrition;
 import com.skinplate.api.domain.plate.entity.FeedbackType;
 import com.skinplate.api.domain.plate.entity.SkinPlate;
-import com.skinplate.api.domain.plate.engine.PlateEvaluation;
-import com.skinplate.api.domain.plate.engine.RuleResult;
+import com.skinplate.api.domain.plate.entity.SkinPlateFeedback;
 import com.skinplate.api.domain.plate.repository.SkinPlateRepository;
 import com.skinplate.api.domain.report.dto.PenaltyDto;
 import com.skinplate.api.domain.report.dto.ReportPeriod;
@@ -716,19 +712,14 @@ class ReportServiceTest {
         return analysis;
     }
 
-    /**
-     * SkinPlateFeedback 의 팩토리는 private 이다. 운영 코드가 쓰는 경로 그대로
-     * RuleResult → PlateEvaluation.toFeedbacks() 를 거쳐 만든다.
-     */
+    /** 인자 순서는 (ruleCode, message, scoreDelta, order) 다. */
     private static void addFeedback(SkinPlate plate, FeedbackType type, String ruleCode,
                                     int delta, String message) {
-        RuleResult result = type == FeedbackType.CAUTION
-                ? RuleResult.caution(ruleCode, delta, message)
-                : type == FeedbackType.GOOD
-                        ? RuleResult.good(ruleCode, delta, message)
-                        : RuleResult.caution(ruleCode, 0, "무시", message, 0);  // ACTION 행 생성용
-
-        plate.addFeedbacks(new PlateEvaluation(0, List.of(result), "").toFeedbacks());
+        plate.addFeedback(switch (type) {
+            case GOOD    -> SkinPlateFeedback.good(ruleCode, message, delta, 0);
+            case CAUTION -> SkinPlateFeedback.caution(ruleCode, message, delta, 0);
+            case ACTION  -> SkinPlateFeedback.action(ruleCode, message, 0, 0);
+        });
     }
 }
 ```
@@ -738,10 +729,8 @@ class ReportServiceTest {
 Run: `./gradlew test --tests '*ReportServiceTest'`
 Expected: FAIL — `ReportService` 없음
 
-> `SkinPlateFeedback` 의 팩토리는 **private** 이라 테스트에서 직접 못 부른다.
-> `PlateEvaluation(score, List<RuleResult>, summary).toFeedbacks()` 가 공개 경로이고,
-> 위 픽스처가 그 경로를 쓴다. `PlateEvaluation` 생성자 인자 순서가 다르면 맞춘다:
-> `grep -n "public record PlateEvaluation" -A6 src/main/java/com/skinplate/api/domain/plate/engine/PlateEvaluation.java`
+> `SkinPlateFeedback.good/caution/action` 은 **public** 이다(`of` 만 private). 인자 순서는
+> `(ruleCode, message, scoreDelta, order)` — `message` 가 두 번째다. `SkinPlate.addFeedback` 은 단수형이 있다.
 
 - [ ] **Step 3: 최소 구현**
 
@@ -750,7 +739,6 @@ package com.skinplate.api.domain.report.service;
 
 import com.skinplate.api.domain.plate.entity.FeedbackType;
 import com.skinplate.api.domain.plate.entity.SkinPlate;
-import com.skinplate.api.domain.plate.entity.SkinPlateFeedback;
 import com.skinplate.api.domain.plate.repository.SkinPlateRepository;
 import com.skinplate.api.domain.report.dto.MealDto;
 import com.skinplate.api.domain.report.dto.PenaltyDto;
@@ -1273,19 +1261,18 @@ public class PlateHistoryService {
 
         List<SkinPlate> plates =
                 skinPlateRepository.findInRange(userId, range.from(), range.toExclusive());
-        Map<LocalDate, Integer> scanScorePerDay = scanScorePerDay(userId, range);
+        Map<LocalDate, Integer> skinScorePerDay = skinScorePerDay(userId, range);
 
         return new PlateHistoryResponse(plates.stream()
-                .collect(Collectors.groupingBy(plate -> plate.getCreatedAt().toLocalDate(),
-                        LinkedHashMap::new, Collectors.toList()))
+                .collect(Collectors.groupingBy(plate -> plate.getCreatedAt().toLocalDate()))
                 .entrySet().stream()
                 .sorted(Map.Entry.<LocalDate, List<SkinPlate>>comparingByKey().reversed())
-                .map(entry -> toDay(entry.getKey(), entry.getValue(), scanScorePerDay))
+                .map(entry -> toDay(entry.getKey(), entry.getValue(), skinScorePerDay))
                 .toList());
     }
 
     private PlateHistoryDayDto toDay(LocalDate date, List<SkinPlate> plates,
-                                     Map<LocalDate, Integer> scanScorePerDay) {
+                                     Map<LocalDate, Integer> skinScorePerDay) {
         List<SkinPlate> sorted = plates.stream()
                 .sorted(Comparator.comparing(SkinPlate::getCreatedAt).reversed()
                                   .thenComparing(Comparator.comparing(SkinPlate::getId).reversed()))
@@ -1294,7 +1281,7 @@ public class PlateHistoryService {
         // 그날 얼굴을 안 찍었어도 빈칸을 두지 않는다. 모든 기록에는 채점 기준이 된
         // 분석이 반드시 있고(skin_analysis_id NOT NULL), 화면이 "-" 를 띄우면
         // 같은 기록을 상세로 열었을 때 점수가 나오는 모순이 생긴다.
-        Integer skinScore = scanScorePerDay.getOrDefault(date,
+        Integer skinScore = skinScorePerDay.getOrDefault(date,
                 sorted.get(sorted.size() - 1).getSkinAnalysis().getSkinScore());
 
         return new PlateHistoryDayDto(date, skinScore, sorted.stream()
@@ -1305,7 +1292,7 @@ public class PlateHistoryService {
     }
 
     /** 그날 찍은 분석 중 가장 늦은 것. 입력이 내림차순이라 첫 등장이 최신이다. */
-    private Map<LocalDate, Integer> scanScorePerDay(Long userId, DateRange range) {
+    private Map<LocalDate, Integer> skinScorePerDay(Long userId, DateRange range) {
         Map<LocalDate, Integer> perDay = new LinkedHashMap<>();
 
         for (SkinAnalysis analysis : skinAnalysisRepository
@@ -1435,10 +1422,11 @@ Expected: FAIL — `SkinPlateController` 생성자 인자가 하나다
 
 - [ ] **Step 3: 컨트롤러에 엔드포인트를 더한다**
 
-`SkinPlateController` 에 필드와 메서드를 추가한다. `@RequiredArgsConstructor` 가 두 인자 생성자를 만들어 준다.
+`SkinPlateController` 에 필드와 메서드를 추가한다. `@RequiredArgsConstructor` 는 **필드 선언 순서대로** 생성자 인자를 만든다 — 그래서 **기존 `skinPlateService` 아래에** 둔다. 위에 두면 테스트의 `new SkinPlateController(skinPlateService, plateHistoryService)` 가 인자 순서와 어긋난다.
 
 ```java
-    private final PlateHistoryService plateHistoryService;
+    private final SkinPlateService skinPlateService;      // 기존
+    private final PlateHistoryService plateHistoryService; // ← 아래에 추가
 ```
 
 ```java
@@ -1505,7 +1493,14 @@ PORT=18080 SPRING_PROFILES_ACTIVE=local TEST_ACCOUNT_ENABLED=true \
 sleep 20 && curl -s localhost:18080/api/v1/health
 ```
 
-- [ ] **Step 2: 기록을 두 건 만든다**
+- [ ] **Step 2: 기준선을 적어 두고 기록을 두 건 만든다**
+
+개발 DB 에는 이미 기록이 쌓여 있다. **절대값이 아니라 증분으로 확인한다.**
+
+```bash
+docker exec -i skinplate-db psql -U skinplate -d skinplate -tAc \
+  "select count(*) from skin_plate where user_id=1;"   # ← 이 값을 적어 둔다
+```
 
 ```bash
 T=$(curl -s -X POST localhost:18080/api/v1/auth/test-login \
@@ -1528,9 +1523,11 @@ curl -s "localhost:18080/api/v1/reports?period=TODAY" -H "Authorization: Bearer 
 curl -s "localhost:18080/api/v1/reports?period=WEEK"  -H "Authorization: Bearer $T" | python3 -m json.tool
 ```
 
-Expected — TODAY: `recordCount` 2, `averagePlateScore` 60, `meals` 2건, `skinScoreTrend` `[]`.
-WEEK: `skinScoreTrend` 1건, `meals` `[]`, `penalties` 에 `나트륨 과다`·`매운맛 자극` 이 라벨로 보인다.
-**두 응답 모두 `latestSkinScore` 가 55 여야 한다** (Mock 지표 38/52/64/25/78).
+Expected — TODAY: `recordCount` 가 **Step 2 기준선보다 2 늘어 있다**. `meals` 에 방금 만든 두 건이 있고 각 `plateScore` 는 **60**, `skinScoreTrend` 는 `[]`.
+WEEK: `skinScoreTrend` 에 점이 있고, `meals` 는 `[]`, `penalties` 라벨이 `나트륨 과다`·`매운맛 자극` 로 보인다.
+**두 응답 모두 `latestSkinScore` 가 55 다** (Mock 지표 38/52/64/25/78).
+
+절대값(평균·총 개수)은 기존 데이터에 좌우되므로 보지 않는다. **건별 값(60점·55점·라벨)이 검증 대상이다.**
 
 - [ ] **Step 4: 히스토리를 확인한다**
 
@@ -1540,7 +1537,7 @@ curl -s "localhost:18080/api/v1/plates?from=$TODAY&to=$TODAY" \
   -H "Authorization: Bearer $T" | python3 -m json.tool
 ```
 
-Expected: `days` 1개, 그 안에 `plates` 2건, `skinScore` 55, 시각 내림차순.
+Expected: `days` 에 오늘이 있고, 그 안 `plates` 맨 앞 두 건이 방금 만든 것(점수 60), `skinScore` 55, 시각 내림차순.
 
 - [ ] **Step 5: 경계와 오류를 확인한다**
 
@@ -1594,10 +1591,10 @@ pkill -f "skinplate-api-0.0.1-SNAPSHOT.jar"; rm -f /tmp/e2e.jpg
 `GET /plates?date=` · `S09 히스토리` 가 제외 목록에 남아 있는 곳을 찾아 고친다. **계획은 `?date=` 였지만 구현은 `?from=&to=` 범위 조회다.**
 
 ```bash
-grep -n "GET /plates?date=\|S09 히스토리" SkinPlate_PRD.md SkinPlate_DTO_Domain.md
+grep -n "S09\|히스토리\|plates?date=" SkinPlate_PRD.md SkinPlate_DTO_Domain.md
 ```
 
-각 줄에서 히스토리 항목을 빼고, 남은 제외 항목(결과 공유·지표 추이 차트 등)은 그대로 둔다.
+**여러 곳에 흩어져 있다** — PRD 의 화면 정의(S09 P2)·축소 목록·P2 표·G3 컷 목록, 설계서의 제외 목록. 각 줄에서 히스토리 항목만 빼고, 남은 제외 항목(결과 공유·지표 추이 차트 등)은 그대로 둔다.
 
 - [ ] **Step 3: 설계서 계약 대조표에 두 줄을 넣는다**
 
@@ -1612,10 +1609,14 @@ grep -n "GET /skin/analyses/latest" SkinPlate_DTO_Domain.md
 | `GET /reports?period=` | `ReportResponse` | `period` · `from` · `to` · `latestSkinScore` · `skinScoreTrend[]` · `recordCount` · `averagePlateScore` · `penalties[]` · `meals[]` | `ReportDto` |
 ```
 
-- [ ] **Step 4: 커밋**
+- [ ] **Step 4: 스펙의 `attributePaths` 를 코드에 맞춘다**
+
+`docs/superpowers/specs/2026-08-14-history-and-reports-design.md` §8 의 스니펫이 두 개(`feedbacks`, `foodAnalysis`)로 적혀 있는데 구현은 세 개다 — `PlateHistoryService` 가 `getSkinAnalysis().getSkinScore()` 를 읽는다. `"skinAnalysis"` 를 더한다.
+
+- [ ] **Step 5: 커밋**
 
 ```bash
-git add SkinPlate_PRD.md SkinPlate_DTO_Domain.md
+git add SkinPlate_PRD.md SkinPlate_DTO_Domain.md docs/superpowers/specs/
 git commit -m "docs(spec): 히스토리·리포트 엔드포인트를 명세에 반영"
 ```
 
@@ -1626,7 +1627,7 @@ git commit -m "docs(spec): 히스토리·리포트 엔드포인트를 명세에 
 - [ ] **Step 1: 전체 빌드**
 
 Run: `./gradlew clean build`
-Expected: BUILD SUCCESSFUL — 기존 83건 + 신규 24건
+Expected: BUILD SUCCESSFUL — 총 108건 (기존 83 + 신규 25: JpaConfig 1 · DateRange 7 · ReportService 7 · ReportController 3 · PlateHistoryService 4 · PlateHistoryController 3)
 
 - [ ] **Step 2: 푸시하고 PR 을 연다**
 
