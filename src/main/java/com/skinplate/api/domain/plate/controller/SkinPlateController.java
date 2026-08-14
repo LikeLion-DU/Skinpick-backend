@@ -1,25 +1,31 @@
 package com.skinplate.api.domain.plate.controller;
 
+import com.skinplate.api.domain.plate.dto.PlateHistoryResponse;
 import com.skinplate.api.domain.plate.dto.PlateSimulateRequest;
 import com.skinplate.api.domain.plate.dto.PlateSimulateResponse;
 import com.skinplate.api.domain.plate.dto.SkinPlateResponse;
+import com.skinplate.api.domain.plate.service.PlateHistoryService;
 import com.skinplate.api.domain.plate.service.SkinPlateService;
 import com.skinplate.api.global.common.ApiResponse;
 import com.skinplate.api.global.security.CurrentUser;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.time.LocalDate;
+
 @RestController
 @RequestMapping("/api/v1/plates")
 @RequiredArgsConstructor
 public class SkinPlateController {
 
-    private final SkinPlateService skinPlateService;
+    private final SkinPlateService skinPlateService;      // 기존
+    private final PlateHistoryService plateHistoryService; // ← 아래에 추가
 
     /**
      * skinAnalysisId 는 선택이다. 생략하면 서버가 최신 피부 분석을 쓴다 —
@@ -52,5 +58,20 @@ public class SkinPlateController {
             @Valid @RequestBody PlateSimulateRequest request) {
 
         return ApiResponse.ok(skinPlateService.simulate(userId, plateId, request.actions()));
+    }
+
+    /**
+     * from·to 는 KST 달력일이고 to 도 포함한다.
+     * 2026-08-08 ~ 2026-08-14 는 8월 15일 자정 직전까지다.
+     *
+     * 둘 다 필수다 — 없으면 한 번의 호출이 사용자의 전체 기록을 메모리로 끌어올린다.
+     */
+    @GetMapping
+    public ApiResponse<PlateHistoryResponse> history(
+            @CurrentUser Long userId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+
+        return ApiResponse.ok(plateHistoryService.get(userId, from, to));
     }
 }
