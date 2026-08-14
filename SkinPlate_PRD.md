@@ -843,15 +843,17 @@ ENTRYPOINT ["java", "-jar", "app.jar"]
 
 > **다만 지연이 하나 붙는다.** DB 가 외부에 있으므로 쿼리마다 네트워크 왕복이 생긴다. 이 API 는 요청당 쿼리가 몇 개뿐이고 무거운 건 OpenAI 대기라 체감되지 않지만, **VM 안에 Postgres 를 올리는 쪽이 빠르다는 사실 자체는 맞다.** 그 속도보다 데이터가 남는 쪽을 택한 것이다.
 
+**연결은 Session Pooler 로 붙는다.** Direct connection(`db.<project-ref>.supabase.co`)은 IPv4 애드온(유료) 없이는 **IPv6 전용**이라 가비아 VM 에서 이름은 풀리는데 연결이 안 된다. Transaction Pooler(6543)는 **Flyway 가 깨진다** — 마이그레이션 중 잡는 advisory lock 이 세션 단위인데 트랜잭션 풀링은 트랜잭션마다 백엔드를 갈아끼운다. Session Pooler(5432)만 IPv4 이면서 세션 의미론이 그대로라 Flyway·Hibernate·HikariCP 를 아무것도 안 고치고 쓴다.
+
 | 환경변수 | 값 | 비고 |
 |---|---|---|
-| `DB_HOST` | `db.<project-ref>.supabase.co` | 프로젝트 생성 시 발급 |
-| `DB_PORT` | `5432` | |
-| **`DB_NAME`** | **`postgres`** | ★ **`skinplate`가 아니다.** Supabase 기본 DB 이름이 `postgres`다. **안 바꾸면 배포가 DB 연결에서 죽는다** |
-| `DB_USER` | `postgres` | |
+| `DB_JDBC_URL` | `jdbc:postgresql://aws-<region>.pooler.supabase.com:5432/postgres?sslmode=require` | 대시보드 **Connect > Session pooler** 에서 복사. `DB_HOST`·`DB_PORT`·`DB_NAME` 을 대신한다 |
+| `DB_USER` | `postgres.<project-ref>` | ★ Pooler 는 사용자명에 project-ref 가 붙는다. 그냥 `postgres` 면 인증이 실패한다 |
 | `DB_PASSWORD` | 프로젝트 생성 시 지정한 값 | `.env`·저장소 커밋 금지 |
 
-> **`DB_NAME`이 이 배포의 유일한 함정이다.** 로컬은 `skinplate`, Supabase는 `postgres`다. 로컬 `.env`를 그대로 복사해 배포 환경변수에 붙이면 기동 로그가 `FATAL: database "skinplate" does not exist`로 끝난다. 애플리케이션 코드는 멀쩡한데 원인을 앱에서 찾게 되는 종류의 실패다.
+> **DB 이름은 `postgres`다. `skinplate`가 아니다.** 위 URL 에 이미 반영돼 있지만, `DB_HOST` 방식으로 되돌린다면 `DB_NAME=postgres` 를 반드시 같이 넘긴다. 로컬 `.env`를 그대로 복사해 붙이면 기동 로그가 `FATAL: database "skinplate" does not exist`로 끝난다. 애플리케이션 코드는 멀쩡한데 원인을 앱에서 찾게 되는 종류의 실패다.
+>
+> **`spring.flyway.baseline-version` 은 `0`이어야 한다.** `baseline-on-migrate: true` 와 Flyway 기본값 `1`이 만나면, public 스키마에 객체가 하나라도 있는 DB — Supabase 는 SQL 에디터를 한 번 쓰거나 확장을 하나 깔면 그렇게 된다 — 에서 **V1 을 "이미 적용됨"으로 기록하고 건너뛴다.** 그 다음 V2 가 `relation "skin_analysis" does not exist` 로 죽는데, 로그만 보면 V2 가 잘못된 것처럼 보인다.
 >
 > **개발 중에는 로컬 Docker Postgres를 그대로 쓴다.** Supabase는 배포용이다. `docker compose up -d postgres` + `DB_NAME=skinplate` 조합은 Day 2~10 내내 바뀌지 않는다.
 
@@ -3721,15 +3723,20 @@ spring:
 
 **DB 환경변수 — 로컬과 배포가 다르다**
 
-| 변수 | 로컬 (Docker) | 배포 (Supabase) |
+| 변수 | 로컬 (Docker) | 배포 (Supabase Session Pooler) |
 |---|---|---|
-| `DB_HOST` | `localhost` | `db.<project-ref>.supabase.co` |
-| `DB_PORT` | `5432` | `5432` |
-| **`DB_NAME`** | `skinplate` | **`postgres`** ★ |
-| `DB_USER` | `skinplate` | `postgres` |
+| `DB_JDBC_URL` | (안 씀 — 아래 3개로 조립된다) | `jdbc:postgresql://aws-<region>.pooler.supabase.com:5432/postgres?sslmode=require` ★ |
+| `DB_HOST` | `localhost` | (안 씀) |
+| `DB_PORT` | `5432` | (안 씀) |
+| **`DB_NAME`** | `skinplate` | (URL 에 포함 — **`postgres`**, `skinplate` 아니다) |
+| `DB_USER` | `skinplate` | `postgres.<project-ref>` ★ |
 | `DB_PASSWORD` | `skinplate` | 프로젝트 생성 시 지정 |
 
-> ★ **`DB_NAME=postgres`다. `skinplate`가 아니다.** Supabase 기본 DB 이름이 `postgres`이고, 안 바꾸면 배포가 DB 연결에서 죽는다(`FATAL: database "skinplate" does not exist`). **로컬 `.env`를 그대로 배포 환경변수에 복사하면 반드시 걸린다.**
+> ★ **Pooler 는 Direct connection 과 사용자명이 다르다.** `postgres` 가 아니라 `postgres.<project-ref>` 다. 그냥 `postgres` 로 넣으면 인증에서 막힌다.
+>
+> ★ **DB 이름은 `postgres`다. `skinplate`가 아니다.** 로컬 `.env`를 그대로 배포 환경변수에 복사하면 `FATAL: database "skinplate" does not exist` 로 끝난다.
+>
+> Direct connection(`db.<project-ref>.supabase.co`)을 쓰지 않는 이유와 Transaction Pooler(6543)가 Flyway 를 깨뜨리는 이유는 §9.6 참고.
 
 ## 부록 B. 로컬 실행
 

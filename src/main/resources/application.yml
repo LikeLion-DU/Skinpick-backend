@@ -9,7 +9,9 @@ spring:
   profiles.active: ${SPRING_PROFILES_ACTIVE:local}
 
   datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:skinplate}
+    # Supabase 는 sslmode 를 URL 에 실어야 해서 전체 URL 을 덮어쓸 구멍을 둔다.
+    # DB_JDBC_URL 을 안 주면 아래 조합이 그대로 로컬 Docker 를 가리킨다.
+    url: ${DB_JDBC_URL:jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:skinplate}}
     username: ${DB_USER:skinplate}
     password: ${DB_PASSWORD:skinplate}
 
@@ -23,6 +25,11 @@ spring:
   flyway:
     enabled: true
     baseline-on-migrate: true
+    # ★ 0 이어야 한다. 기본값 1 이면 public 스키마에 객체가 하나라도 있는 DB —
+    #   Supabase 는 SQL 에디터를 한 번만 써도 그렇게 된다 — 에서 V1 을 "이미 적용됨"으로
+    #   기록하고 건너뛴 뒤 V2 가 `relation "skin_analysis" does not exist` 로 죽는다.
+    #   0 으로 두면 baseline 은 0 에 찍히고 V1 부터 정상 적용된다.
+    baseline-version: 0
 
   servlet.multipart:
     max-file-size: 5MB
