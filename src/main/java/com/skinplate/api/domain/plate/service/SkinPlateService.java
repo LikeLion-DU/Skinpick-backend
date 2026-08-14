@@ -29,6 +29,7 @@ import com.skinplate.api.domain.user.entity.AppUser;
 import com.skinplate.api.domain.user.repository.AppUserRepository;
 import com.skinplate.api.global.exception.BusinessException;
 import com.skinplate.api.global.exception.ErrorCode;
+import com.skinplate.api.global.security.AnalysisTokenPayload;
 import com.skinplate.api.global.security.AnalysisTokenProvider;
 import com.skinplate.api.infra.openai.dto.OpenAiFoodResult;
 import lombok.RequiredArgsConstructor;
@@ -39,6 +40,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
@@ -76,7 +78,8 @@ public class SkinPlateService {
 
         OpenAiFoodResult aiResult = foodAnalysisService.recognize(image);
 
-        return transactionTemplate.execute(status -> save(userId, aiResult, resolvedId));
+        // create() 는 다음 태스크(POST /plates 제거)에서 함께 정리한다.
+        return transactionTemplate.execute(status -> save(userId, aiResult, resolvedId, null));
     }
 
     /**
@@ -115,6 +118,42 @@ public class SkinPlateService {
                 evaluation.appliedRuleCodes());
     }
 
+    /**
+     * analyze() 가 발급한 토큰을 되받아 기록을 저장한다. 점수는 여기서 다시 계산된다 —
+     * 토큰이 나르는 건 AI 원본(payload.food())뿐이고, 클라이언트가 보낸 점수·영양값은
+     * 애초에 받지 않는다(PlateRecordRequest 필드는 analysisToken 하나뿐이라 조작할 대상이 없다).
+     *
+     * 락 · jti 조회 · 저장이 반드시 한 트랜잭션 안에 있어야 한다. create() 처럼 피부 분석
+     * 조회를 트랜잭션 밖으로 꺼내면 findForUpdate 락이 트랜잭션 없이 걸려
+     * TransactionRequiredException 이 난다 — 저장할 AI 응답이 이미 있으니(재호출이 없으니)
+     * 트랜잭션을 아낄 이유도 없다. 처음부터 안에 둔다.
+     */
+    public SkinPlateResponse saveRecord(Long userId, String analysisToken) {
+        AnalysisTokenPayload payload = analysisTokenProvider.parse(analysisToken, userId);
+
+        return transactionTemplate.execute(status -> {
+            // 소유 확인 — 토큰의 skinAnalysisId 로 조회한다. 최신 분석으로 갈아타지 않는다.
+            SkinAnalysis skinAnalysis = resolveSkinAnalysis(userId, payload.skinAnalysisId());
+
+            // 이 분석 행에 줄을 세운다. RecommendationService.createOnce 와 같은 방식 —
+            // 반환값은 쓰지 않는다, 목적은 동시 요청을 순서대로 세우는 것뿐이다.
+            skinAnalysisRepository.findForUpdate(skinAnalysis.getId());
+
+            Optional<Long> existingFoodId =
+                    foodAnalysisRepository.findIdByUserIdAndJti(userId, payload.jti());
+
+            if (existingFoodId.isPresent()) {
+                // 같은 토큰이 다시 왔다 — 새로 만들지 않고 이미 저장된 기록을 그대로 돌려준다.
+                SkinPlate existing = skinPlateRepository
+                        .findByFoodAnalysisIdAndUserId(existingFoodId.get(), userId)
+                        .orElseThrow(() -> new BusinessException(ErrorCode.PLATE_NOT_FOUND));
+                return SkinPlateResponse.from(existing, parseAppliedRules(existing.getAppliedRules()));
+            }
+
+            return save(userId, payload.food(), skinAnalysis.getId(), payload.jti());
+        });
+    }
+
     @Transactional(readOnly = true)
     public SkinPlateResponse get(Long userId, Long plateId) {
         SkinPlate plate = skinPlateRepository.findByIdAndUserId(plateId, userId)
@@ -151,14 +190,15 @@ public class SkinPlateService {
 
     // ---- 내부 ----
 
-    private SkinPlateResponse save(Long userId, OpenAiFoodResult aiResult, Long skinAnalysisId) {
+    /** jti 는 saveRecord() 만 넘긴다(멱등키). create() 는 null — 다음 태스크에서 create() 를 제거할 때 함께 정리한다. */
+    private SkinPlateResponse save(Long userId, OpenAiFoodResult aiResult, Long skinAnalysisId, String jti) {
         AppUser user = userRepository.findById(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
 
         SkinAnalysis skinAnalysis = resolveSkinAnalysis(userId, skinAnalysisId);
 
         FoodAnalysis food = foodAnalysisRepository.save(
-                foodAnalysisService.toEntity(user, aiResult));
+                foodAnalysisService.toEntity(user, aiResult, jti));
 
         PlateEvaluation evaluation =
                 engine.evaluate(new PlateContext(skinAnalysis.getMetrics(), food));

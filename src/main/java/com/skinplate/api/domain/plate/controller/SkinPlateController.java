@@ -2,6 +2,7 @@ package com.skinplate.api.domain.plate.controller;
 
 import com.skinplate.api.domain.plate.dto.PlateAnalysisResponse;
 import com.skinplate.api.domain.plate.dto.PlateHistoryResponse;
+import com.skinplate.api.domain.plate.dto.PlateRecordRequest;
 import com.skinplate.api.domain.plate.dto.PlateSimulateRequest;
 import com.skinplate.api.domain.plate.dto.PlateSimulateResponse;
 import com.skinplate.api.domain.plate.dto.SkinPlateResponse;
@@ -55,6 +56,19 @@ public class SkinPlateController {
             @RequestParam(value = "skinAnalysisId", required = false) Long skinAnalysisId) {
 
         return ApiResponse.ok(skinPlateService.analyze(userId, image, skinAnalysisId));
+    }
+
+    /**
+     * analyze() 의 토큰을 되받아 기록을 확정한다. 실제로 행을 만드므로 201 이다 —
+     * 멱등 재요청도 201 이고 같은 plateId 를 돌려준다(중복 저장은 되지 않는다).
+     */
+    @PostMapping("/records")
+    public ResponseEntity<ApiResponse<SkinPlateResponse>> saveRecord(
+            @CurrentUser Long userId,
+            @Valid @RequestBody PlateRecordRequest request) {
+
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.ok(skinPlateService.saveRecord(userId, request.analysisToken())));
     }
 
     @GetMapping("/{plateId}")

@@ -2,6 +2,7 @@ package com.skinplate.api.domain.food.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.skinplate.api.domain.food.entity.CookingMethod;
 import com.skinplate.api.domain.food.entity.FoodAnalysis;
 import com.skinplate.api.domain.food.entity.FoodIngredient;
@@ -68,6 +69,14 @@ public class FoodAnalysisService {
      * 표준 DB 값으로 바꿔 재현성을 확보한다. (설계서 §1.22.1)
      */
     public FoodAnalysis toEntity(AppUser user, OpenAiFoodResult aiResult) {
+        return toEntity(user, aiResult, null);
+    }
+
+    /**
+     * 기록 저장(POST /plates/records)이 쓰는 경로. jti 를 raw_ai_response 에
+     * 형제 키로 얹어 멱등키로 남긴다 — null 이면 기존 create() 와 동일하다.
+     */
+    public FoodAnalysis toEntity(AppUser user, OpenAiFoodResult aiResult, String jti) {
         String foodName = trim(aiResult.foodName(), NAME_MAX_LENGTH);
 
         Nutrition nutrition = StandardNutrition.find(foodName)
@@ -84,7 +93,7 @@ public class FoodAnalysisService {
                 nutrition,
                 toCookingMethod(aiResult.cookingMethod()),
                 aiResult.spicy(),
-                toJson(aiResult));
+                toJson(aiResult, jti));
 
         food.addIngredients(toIngredients(aiResult.ingredients()));
         return food;
@@ -149,10 +158,20 @@ public class FoodAnalysisService {
         return value.substring(0, end);
     }
 
-    /** raw_ai_response 는 jsonb 다. 프롬프트를 바꿔도 과거 데이터를 재해석할 수 있다. */
-    private String toJson(OpenAiFoodResult aiResult) {
+    /**
+     * raw_ai_response 는 jsonb 다. 프롬프트를 바꿔도 과거 데이터를 재해석할 수 있다.
+     *
+     * jti 가 있으면 트리에 _meta 형제 키 하나만 얹는다. 문자열을 직접 조작하거나
+     * Map 으로 옮겨 담으면 기존 키 순서·타입이 흔들린다 — valueToTree 로 트리를 얻어
+     * 얹은 뒤 다시 직렬화해야 원본 키가 그대로 살아남는다.
+     */
+    private String toJson(OpenAiFoodResult aiResult, String jti) {
         try {
-            return objectMapper.writeValueAsString(aiResult);
+            ObjectNode node = objectMapper.valueToTree(aiResult);
+            if (jti != null) {
+                node.putObject("_meta").put("jti", jti);
+            }
+            return objectMapper.writeValueAsString(node);
         } catch (JsonProcessingException e) {
             throw new BusinessException(ErrorCode.AI_ANALYSIS_FAILED, e);
         }

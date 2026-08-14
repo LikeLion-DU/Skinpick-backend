@@ -14,6 +14,9 @@ public interface SkinPlateRepository extends JpaRepository<SkinPlate, Long> {
 
     Optional<SkinPlate> findByIdAndUserId(Long id, Long userId);
 
+    /** 멱등 재요청에서 기존 기록을 되찾는 경로. food_analysis_id 가 UNIQUE 라 결과는 최대 하나다. */
+    Optional<SkinPlate> findByFoodAnalysisIdAndUserId(Long foodAnalysisId, Long userId);
+
     /**
      * 리포트·히스토리용 기간 조회. userId 조건이 빠지면 남의 기록이 섞이는데,
      * 단일 사용자 개발 DB 에서는 그대로 통과한다. 조건을 쿼리에 박아 둔다.
