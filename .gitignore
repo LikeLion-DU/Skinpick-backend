@@ -20,3 +20,6 @@ build/
 
 # OS
 .DS_Store
+
+# superpowers 작업 공간 — 원장·브리프·리뷰 패키지는 스크래치다
+.superpowers/
