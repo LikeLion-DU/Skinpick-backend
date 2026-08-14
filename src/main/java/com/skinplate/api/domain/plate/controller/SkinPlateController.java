@@ -24,8 +24,9 @@ import java.time.LocalDate;
 @RequiredArgsConstructor
 public class SkinPlateController {
 
-    private final SkinPlateService skinPlateService;      // 기존
-    private final PlateHistoryService plateHistoryService; // ← 아래에 추가
+    // @RequiredArgsConstructor 가 필드 선언 순서로 생성자를 만들기 때문에 순서를 바꾸면 테스트의 new SkinPlateController(...) 인자 순서가 깨진다
+    private final SkinPlateService skinPlateService;
+    private final PlateHistoryService plateHistoryService;
 
     /**
      * skinAnalysisId 는 선택이다. 생략하면 서버가 최신 피부 분석을 쓴다 —

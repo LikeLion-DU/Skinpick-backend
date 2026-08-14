@@ -5943,6 +5943,7 @@ if (_consecutiveFailures >= 3) {
 | 4 | `expectedGain` ≠ `scoreDelta.abs()` | 서버 엔티티에 별도 컬럼, 앱 `ActionDto`에 별도 필드. **합산으로 "실행 후 점수"를 만들지 말 것** |
 | 5 | `PlateActionCode` · `SkinType` 이름 | 서버 enum 이름(`HALVE_SOUP`, `OILY` 등)을 앱이 그대로 보낸다. 한쪽만 이름을 바꾸면 400이 난다 |
 | 6 | `declaredSkinType` · `skinTypeGap` 이 **없는 것**과 **`UNKNOWN`인 것** | 앱 파서에 기본값을 두지 않는다. `null`이면 선택 칩, 값이 있으면 갭 카드 |
+| 7 | `days[].skinScore`(그 날 분석이 없으면 그 날 첫 Plate 채점 당시 점수로 폴백돼 **항상 존재**) ↔ `skinScoreTrend[]`(분석이 있는 날짜만) | 히스토리엔 점수가 있는데 트렌드 그래프엔 그 날짜가 없는 게 정상이다. 앱은 history 의 skinScore 를 "그날의 측정"이 아니라 **기준(baseline) 점수**로 라벨링한다 |
 
 ---
 
