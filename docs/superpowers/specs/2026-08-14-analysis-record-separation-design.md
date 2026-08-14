@@ -48,7 +48,7 @@ multipart/form-data
 
 > **200 인 이유는 코드베이스의 선례다.** 같은 컨트롤러의 `POST /{plateId}/simulate` 가 이미 200 이고 주석까지 달려 있다 — *"저장하지 않으므로 200 이다."* 반대로 `POST /plates`(`SkinPlateController:42`) 와 `POST /skin/analyses`(`SkinAnalysisController:38`) 는 실제로 행을 만들기 때문에 `ResponseEntity.status(CREATED)` 를 쓴다.
 >
-> **규칙이 기계적이다** — 생성하면 `ResponseEntity.status(CREATED)`, 아니면 `ApiResponse<T>` 를 그대로 반환(200). `analyze` 는 아무것도 만들지 않으므로 후자다.
+> **POST 는 규칙이 일관된다** — 행을 만들면 `ResponseEntity.status(CREATED)`, 아니면 `ApiResponse<T>` 를 그대로 반환(200). `analyze` 는 아무것도 만들지 않으므로 후자다.
 
 `data` (`ApiResponse` 로 감싼다):
 
@@ -90,7 +90,7 @@ multipart/form-data
 > **만료를 401 로 내리면 사용자가 로그아웃된다.** 앱 코드로 확인했다:
 >
 > ```dart
-> // unauthorized_interceptor.dart:24
+> // unauthorized_interceptor.dart:25-27
 > final isAuthRequest = err.requestOptions.path.contains('/auth/');
 > if (err.response?.statusCode == 401 && !isAuthRequest) {
 >   await _tokenStorage.clear();   // ← 토큰을 지운다
@@ -179,7 +179,9 @@ plateScore · baseScore · feedbacks · appliedRules   ← 저장되는 값
 
 **요청 본문은 `analysisToken` 하나다.** `food`·`nutrition`·`plateScore`·`baseScore`·`feedbacks`·`appliedRules` 를 받는 필드가 존재하지 않는다 — 받지 않으므로 조작할 대상이 없다.
 
-피부 지표를 토큰에 넣지 않고 DB 에서 다시 읽는 이유 — **분석과 저장 사이에 새 피부 분석이 들어올 수 있다.** 저장 시점의 서버 상태가 기준이다.
+**토큰의 `skinAnalysisId` 로 조회한다 — 최신 분석으로 갈아타지 않는다.** 분석 시점에 쓰인 그 피부 분석이 기준이다.
+
+피부 지표를 토큰에 싣지 않고 DB 에서 읽는 이유는 두 가지다. 토큰이 그만큼 커지지 않고, **§4.3 의 존재·소유 재확인이 같은 조회로 끝난다.** `SkinAnalysis` 는 수정 경로가 없으므로 지표 자체는 분석 때와 같다.
 
 **OpenAI 는 이 단계에서 호출하지 않는다.** 인식 결과는 이미 토큰 안에 있다.
 
@@ -230,7 +232,7 @@ food_analysis.raw_ai_response   min 368 / avg 419 / max 431 bytes   (37/37 채�
 ──────────────────────────────────────────────────────────────────
 ```
 
-**1번이 동시성을 끊는다.** 추천 생성(`RecommendationService:79`)이 같은 문제를 같은 방식으로 이미 푼다 — 락 → 재확인 → 삽입이 한 `@Transactional` 안에 있다. 새 코드 0.
+**1번이 동시성을 끊는다.** 추천 생성(`RecommendationService:81`)이 같은 문제를 같은 방식으로 이미 푼다 — 락 → 재확인 → 삽입이 한 `@Transactional` 안에 있다. 새 코드 0.
 
 ```
 요청 A  락 획득 → jti 없음 → 저장 → commit(락 해제)
@@ -308,7 +310,9 @@ Optional<Long> findIdByUserIdAndJti(@Param("userId") Long userId, @Param("jti") 
 
 ### 7.2 이탈 시
 
-Android back · 화면 pop · 카메라 재진입 · 백그라운드 · 앱 종료 — **전부 서버 호출 없이 임시 결과가 사라진다.** `PlateState` 가 화면 상태이므로 별도 정리 코드가 필요 없다.
+Android back · 화면 pop · 카메라 재진입 · 백그라운드 · 앱 종료 — **전부 서버 호출 없이 끝난다.** 저장을 누르지 않았으므로 서버에는 아무것도 없다.
+
+**정확한 메커니즘을 알고 있어야 한다** — `plateNotifierProvider` 는 keep-alive 라 화면을 나가도 상태가 살아 있다(`reset()` 은 존재하지만 호출하는 곳이 없다). 임시 결과는 **다음 `create()` 가 덮어쓸 때** 사라진다. 기능상 문제는 없다(서버 상태가 없고 `SAVED` 가드가 있다). 다만 **"화면을 나가면 정리된다"고 가정하고 구현하면 안 된다** — 그런 처리는 일어나지 않는다.
 
 `SAVED` 이후 뒤로 가면 기록은 남는다(이미 저장됐다).
 
@@ -340,7 +344,9 @@ Android back · 화면 pop · 카메라 재진입 · 백그라운드 · 앱 종�
 | `controller.takePicture()` (`food_capture_page:225`) | JPEG |
 | `PhotoPicker.fromGallery()` (`photo_picker.dart:25`) | **원본 포맷** — PNG·WebP 가능 |
 
-`.jpg` 라는 이름이 내용과 어긋나지 않도록 저장 직전에 `image` 패키지로 디코드 → `encodeJpg` 한다. **`image: ^4.2.0` 이 이미 있다**(얼굴 크롭용) — 새 의존성 0. 디코드가 실패하면 §12 의 fallback 경로로 떨어진다.
+`imageQuality: 80` 이 JPEG 를 보장하지도 않는다. `image_picker_android` 의 `ImageResizer.java:181` 이 **알파 채널이 있으면 PNG 로 압축**하고, 디코드 못 하는 파일은 아예 원본 경로를 그대로 돌려준다.
+
+`.jpg` 라는 이름이 내용과 어긋나지 않도록 저장 직전에 `image` 패키지로 디코드 → `encodeJpg` 한다. **`image: ^4.2.0` 이 이미 있다**(얼굴 크롭용) — 새 의존성 0. 디코드가 실패하면 위 5번 fallback 으로 떨어진다.
 
 `path_provider` 는 `pubspec.yaml` 에 **없다.** 이것만 최소 의존성으로 추가한다.
 
@@ -413,10 +419,8 @@ core/error/failure.dart       shouldRetakePhoto 에 ANALYSIS_EXPIRED (한 줄)
 | 토큰 | 정상 발급 · 서명 불일치 거부 · **인증 키로 서명한 토큰 거부** · 만료 거부 · `iss`/`aud` 불일치 거부 · `sub`≠인증 userId 거부 |
 | **역방향** | **analysisToken 을 `Bearer` 로 보내면 401** — §4.1 의 위험을 고정한다 |
 | 소유 | 남의 `skinAnalysisId` → 404 |
-| 저장 | 정상 저장 · `_meta.jti` 기록 · 기존 필드 구조 보존 |
-| 멱등 | 같은 jti 재요청 → **같은 plateId, 행 증가 0** |
-| 동시성 | 같은 분석 동시 저장 → 1건 · 다른 분석 동시 저장 → 2건 |
-| 호환 | `_meta` 없는 기존 행이 조회를 깨뜨리지 않는다 |
+| 저장 | 정상 저장 · `_meta.jti` 가 직렬화 결과에 들어간다 · 기존 필드 구조 보존 |
+| 멱등 | 같은 jti 재요청 → **같은 plateId 반환, `save` 미호출** |
 | **재평가** | **토큰의 `food` + 서버 조회 `SkinMetrics` 로 엔진이 다시 돈다** — 토큰의 food 를 바꿔 서명하면 점수가 따라 바뀐다 |
 | **조작 불가** | **요청 본문에 점수·영양값을 넣을 경로가 없다** — `PlateRecordRequest` 에 `analysisToken` 외 필드가 없음을 검증 |
 | **AI 재호출 0** | record 단계에서 OpenAI Mock 호출 횟수 = 0 |
@@ -425,13 +429,28 @@ core/error/failure.dart       shouldRetakePhoto 에 ANALYSIS_EXPIRED (한 줄)
 
 **반드시 넣는다** — 422 `ANALYSIS_EXPIRED` 가 ① **로그아웃을 일으키지 않고**(토큰 저장소 유지) ② **`shouldRetakePhoto` 를 true 로 만든다**. 이 두 줄이 §3.2 의 두 함정을 다시 못 들어오게 막는다.
 
-**E2E**
+### 11.1 DB 의존 검증은 E2E 로 내린다 — 단위 테스트로 못 쓴다
+
+**이 저장소에는 통합 테스트 인프라가 없다.** `build.gradle` 에 Testcontainers 도 H2 도 없고, `@SpringBootTest` 가 **0건**이며 `src/test/resources` 디렉터리 자체가 없다. 기존 110개는 전부 Mockito · standalone MockMvc · `ApplicationContextRunner` 다.
+
+**Testcontainers 를 넣지 않는다.** 새 의존성 · 새 테스트 프로파일 · 느린 기동을 남은 일정에 얹을 이유가 없고, 이 프로젝트는 이미 **docker-compose DB 상대의 수동 E2E**(G2) 로 이 층을 검증해 왔다. 아래 셋은 그 방식으로 확인한다.
+
+| 검증 | 방법 |
+|---|---|
+| 동일 분석 동시 저장 → 1건 | 같은 토큰으로 `curl` 2개를 동시에 쏘고 `select count(*)` |
+| 서로 다른 분석 동시 저장 → 2건 | 위와 같게, 토큰 2개 |
+| `_meta` 없는 기존 행 호환 | 네이티브 쿼리를 실 DB 에 직접 실행 — **이미 확인했다**(37행 전부 null) |
+
+**단위 테스트로 남는 것** — 토큰 검증 7종 · 역방향 거부 · 재평가 · 조작 경로 부재 · AI 재호출 0 · 멱등 분기(`save` 미호출). 이쪽이 로직의 대부분이고 Mockito 로 전부 커버된다.
+
+### 11.2 E2E
 
 ```
 분석 → 저장 안 함 → 나가기        → 히스토리 0건
 분석 → 저장                       → 히스토리 1건
 저장 타임아웃 → 같은 토큰 재시도    → 최종 1건
 저장 버튼 연타                     → 최종 1건
+같은 토큰 동시 요청 2개             → 최종 1건   ← 11.1 의 직렬화 검증
 ```
 
 ## 12. 작업량 · 리스크
