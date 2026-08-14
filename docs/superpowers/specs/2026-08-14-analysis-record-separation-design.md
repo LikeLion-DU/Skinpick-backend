@@ -43,8 +43,12 @@
 multipart/form-data
   image           file   필수
   skinAnalysisId  Long   선택 — 생략하면 최신 피부 분석
-→ 201
+→ 200
 ```
+
+> **200 인 이유는 코드베이스의 선례다.** 같은 컨트롤러의 `POST /{plateId}/simulate` 가 이미 200 이고 주석까지 달려 있다 — *"저장하지 않으므로 200 이다."* 반대로 `POST /plates`(`SkinPlateController:42`) 와 `POST /skin/analyses`(`SkinAnalysisController:38`) 는 실제로 행을 만들기 때문에 `ResponseEntity.status(CREATED)` 를 쓴다.
+>
+> **규칙이 기계적이다** — 생성하면 `ResponseEntity.status(CREATED)`, 아니면 `ApiResponse<T>` 를 그대로 반환(200). `analyze` 는 아무것도 만들지 않으므로 후자다.
 
 `data` (`ApiResponse` 로 감싼다):
 
@@ -159,7 +163,27 @@ SecretKey analysisKey = Keys.hmacShaKeyFor(derived);
 SkinPlateService.resolveSkinAnalysis(userId, skinAnalysisId)   // findByIdAndUserId → 없으면 404
 ```
 
-### 4.4 페이로드 크기 — 실측 근거
+### 4.4 저장 시 점수는 서버가 다시 계산한다
+
+**분석 응답의 점수를 그대로 저장하지 않는다.** 저장에 쓰이는 입력은 두 개뿐이다.
+
+```
+analysisToken.food          ← 서명으로 무결성이 보장된 AI 원본
+        +
+서버 DB 의 SkinMetrics       ← token.skinAnalysisId 로 조회
+        ↓
+   PlateRuleEngine           ← 기존 엔진 그대로
+        ↓
+plateScore · baseScore · feedbacks · appliedRules   ← 저장되는 값
+```
+
+**요청 본문은 `analysisToken` 하나다.** `food`·`nutrition`·`plateScore`·`baseScore`·`feedbacks`·`appliedRules` 를 받는 필드가 존재하지 않는다 — 받지 않으므로 조작할 대상이 없다.
+
+피부 지표를 토큰에 넣지 않고 DB 에서 다시 읽는 이유 — **분석과 저장 사이에 새 피부 분석이 들어올 수 있다.** 저장 시점의 서버 상태가 기준이다.
+
+**OpenAI 는 이 단계에서 호출하지 않는다.** 인식 결과는 이미 토큰 안에 있다.
+
+### 4.5 페이로드 크기 — 실측 근거
 
 ```
 food_analysis.raw_ai_response   min 368 / avg 419 / max 431 bytes   (37/37 채워짐, 2026-08-14 실측)
@@ -254,6 +278,20 @@ Optional<Long> findIdByUserIdAndJti(@Param("userId") Long userId, @Param("jti") 
 
 의도적으로 남긴다. 발생하려면 "응답 유실 + 30분 방치 + 재촬영"이 겹쳐야 하고, 막으려면 만료된 토큰도 일단 파싱해야 해서 **만료 정책 자체가 무의미해진다.** 사용자는 히스토리에서 중복을 볼 수 있고, 삭제 기능(P2)이 들어오면 자연히 해소된다.
 
+### 6.3 중복 식별자는 jti 하나뿐이다
+
+> **멱등성은 동일 `analysisToken.jti` 에 대해서만 보장한다. 새로운 분석을 수행하면 새로운 jti 가 발급되므로, 사용자가 동일한 음식을 다시 촬영한 경우 정상적인 별도 기록으로 처리한다.**
+
+따라서 다음 휴리스틱은 **구현하지 않는다.**
+
+- `foodName` 동일 여부
+- `plateScore` 동일 여부
+- `createdAt` 시간 차이
+- 이미지 유사도
+- 동일 음식명 + 짧은 시간 간격
+
+**같은 음식을 두 번 먹는 것은 정상이다.** 추측으로 막으면 정상 기록을 잃는다 — 잃은 기록은 사용자가 복구할 방법이 없고(삭제·수정 기능이 없다), 중복은 눈에 보이기라도 한다.
+
 ## 7. Flutter
 
 ### 7.1 결과 화면 상태
@@ -281,13 +319,30 @@ Android back · 화면 pop · 카메라 재진입 · 백그라운드 · 앱 종�
 [기록에 저장]  → Plate 저장 성공 → imageBytes 를 앱 전용 영구 저장소에 기록
 ```
 
-**저장에 성공한 뒤에만 쓴다.** 분석만 하고 나간 사진은 디스크에 남지 않는다.
+**저장에 성공한 뒤에만 쓴다.** 분석만 하고 나간 사진은 이 디렉터리에 기록하지 않는다.
 
-- 위치: `path_provider` 의 **application documents** (캐시 디렉터리 아님 — OS 가 임의로 비운다)
-- 파일명: `plates/{plateId}.jpg`
-- 수명: 앱 재실행에 유지 · 앱 삭제 시 삭제 · 기기 이동 없음
+**저장 절차**
 
-`path_provider` 는 현재 `pubspec.yaml` 에 **없다.** 최소 의존성으로 추가한다. `image ^4.2.0` 은 이미 있다.
+```
+1. getApplicationDocumentsDirectory()
+2. <documents>/plates 가 없으면 create(recursive: true)
+3. <documents>/plates/{plateId}.jpg 에 기록
+4. 히스토리: 파일이 있으면 Image.file 로 표시
+5. 파일이 없거나 읽기 실패면 음식 아이콘 fallback
+```
+
+캐시 디렉터리를 쓰지 않는다 — OS 가 임의로 비운다. 수명은 **앱 재실행에 유지 · 앱 삭제 시 삭제 · 기기 이동 없음.**
+
+**JPEG 로 변환한 뒤 저장한다.** 코드로 확인한 결과 **JPEG 가 보장되지 않는다** — 음식 사진의 출처가 둘이다.
+
+| 경로 | 포맷 |
+|---|---|
+| `controller.takePicture()` (`food_capture_page:225`) | JPEG |
+| `PhotoPicker.fromGallery()` (`photo_picker.dart:25`) | **원본 포맷** — PNG·WebP 가능 |
+
+`.jpg` 라는 이름이 내용과 어긋나지 않도록 저장 직전에 `image` 패키지로 디코드 → `encodeJpg` 한다. **`image: ^4.2.0` 이 이미 있다**(얼굴 크롭용) — 새 의존성 0. 디코드가 실패하면 §12 의 fallback 경로로 떨어진다.
+
+`path_provider` 는 `pubspec.yaml` 에 **없다.** 이것만 최소 의존성으로 추가한다.
 
 ### 7.4 이미지 저장 실패 — 기록을 유지한다
 
@@ -362,7 +417,9 @@ core/error/failure.dart       shouldRetakePhoto 에 ANALYSIS_EXPIRED (한 줄)
 | 멱등 | 같은 jti 재요청 → **같은 plateId, 행 증가 0** |
 | 동시성 | 같은 분석 동시 저장 → 1건 · 다른 분석 동시 저장 → 2건 |
 | 호환 | `_meta` 없는 기존 행이 조회를 깨뜨리지 않는다 |
-| 재사용 | RuleEngine 재평가로 점수가 나온다 · **AI 재호출 0**(Mock 호출 횟수 검증) |
+| **재평가** | **토큰의 `food` + 서버 조회 `SkinMetrics` 로 엔진이 다시 돈다** — 토큰의 food 를 바꿔 서명하면 점수가 따라 바뀐다 |
+| **조작 불가** | **요청 본문에 점수·영양값을 넣을 경로가 없다** — `PlateRecordRequest` 에 `analysisToken` 외 필드가 없음을 검증 |
+| **AI 재호출 0** | record 단계에서 OpenAI Mock 호출 횟수 = 0 |
 
 **Flutter** — `READY` 상태 · 저장 중 disabled · `SAVED` 재저장 불가 · 실패 후 같은 토큰 재시도 · 저장 안 하고 나가면 record 호출 0 · 만료 안내 · 로컬 이미지 성공/실패(기록 유지 + fallback)
 
