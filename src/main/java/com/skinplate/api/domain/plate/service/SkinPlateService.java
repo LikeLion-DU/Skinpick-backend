@@ -3,6 +3,7 @@ package com.skinplate.api.domain.plate.service;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.skinplate.api.domain.food.dto.FoodAnalysisDto;
 import com.skinplate.api.domain.food.entity.CookingMethod;
 import com.skinplate.api.domain.food.entity.FoodAnalysis;
 import com.skinplate.api.domain.food.entity.FoodIngredient;
@@ -10,11 +11,14 @@ import com.skinplate.api.domain.food.entity.IngredientTag;
 import com.skinplate.api.domain.food.entity.Nutrition;
 import com.skinplate.api.domain.food.repository.FoodAnalysisRepository;
 import com.skinplate.api.domain.food.service.FoodAnalysisService;
+import com.skinplate.api.domain.plate.dto.FeedbackGroupDto;
+import com.skinplate.api.domain.plate.dto.PlateAnalysisResponse;
 import com.skinplate.api.domain.plate.dto.PlateSimulateResponse;
 import com.skinplate.api.domain.plate.dto.SkinPlateResponse;
 import com.skinplate.api.domain.plate.engine.PlateContext;
 import com.skinplate.api.domain.plate.engine.PlateEvaluation;
 import com.skinplate.api.domain.plate.engine.PlateRuleEngine;
+import com.skinplate.api.domain.plate.engine.RuleConstants;
 import com.skinplate.api.domain.plate.entity.PlateActionCode;
 import com.skinplate.api.domain.plate.entity.SkinPlate;
 import com.skinplate.api.domain.plate.repository.SkinPlateRepository;
@@ -25,6 +29,7 @@ import com.skinplate.api.domain.user.entity.AppUser;
 import com.skinplate.api.domain.user.repository.AppUserRepository;
 import com.skinplate.api.global.exception.BusinessException;
 import com.skinplate.api.global.exception.ErrorCode;
+import com.skinplate.api.global.security.AnalysisTokenProvider;
 import com.skinplate.api.infra.openai.dto.OpenAiFoodResult;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -56,6 +61,7 @@ public class SkinPlateService {
     private final PlateRuleEngine engine;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
+    private final AnalysisTokenProvider analysisTokenProvider;
 
     /**
      * AI 호출을 먼저 끝낸 뒤 저장 구간만 트랜잭션으로 감싼다.
@@ -71,6 +77,42 @@ public class SkinPlateService {
         OpenAiFoodResult aiResult = foodAnalysisService.recognize(image);
 
         return transactionTemplate.execute(status -> save(userId, aiResult, resolvedId));
+    }
+
+    /**
+     * 저장하지 않는다. 결과와 서명 토큰만 돌려주고, 저장은 이 토큰을 되받는
+     * POST /plates/records(Task 3) 가 한다. 순서는 create() 와 같다 — 피부 분석
+     * 확인이 AI 호출보다 먼저다. 이유도 같다: 유료 호출 전에 404 를 걸러야 한다.
+     *
+     * 트랜잭션을 열지 않는다. 저장이 없으니 감쌀 구간도 없다.
+     */
+    public PlateAnalysisResponse analyze(Long userId, MultipartFile image, Long skinAnalysisId) {
+        SkinAnalysis skinAnalysis = resolveSkinAnalysis(userId, skinAnalysisId);
+
+        OpenAiFoodResult aiResult = foodAnalysisService.recognize(image);
+
+        // user = null — detachedCopy() 와 같은 이유로 저장 불가 상태로 만들어
+        // 실수로 persist 되는 것을 막는다. toEntity 를 그대로 태우는 이유는 표준
+        // 영양값 덮어쓰기·문자열 trim 이 여기서 일어나기 때문이다 — 건너뛰면 analyze
+        // 의 점수와 Task 3 의 저장 점수가 달라진다.
+        FoodAnalysis food = foodAnalysisService.toEntity(null, aiResult);
+
+        PlateEvaluation evaluation =
+                engine.evaluate(new PlateContext(skinAnalysis.getMetrics(), food));
+
+        // 토큰에는 AI 원본(aiResult)을 담는다. FoodAnalysis 엔티티가 아니다 —
+        // Task 3 이 이 토큰을 받아 같은 toEntity 를 다시 태워야 같은 점수가 나온다.
+        String analysisToken = analysisTokenProvider.issue(userId, skinAnalysis.getId(), aiResult);
+
+        return new PlateAnalysisResponse(
+                analysisToken,
+                skinAnalysis.getId(),
+                evaluation.score(),
+                RuleConstants.BASE_SCORE,
+                evaluation.summary(),
+                FoodAnalysisDto.from(food),
+                FeedbackGroupDto.from(evaluation.toFeedbacks()),
+                evaluation.appliedRuleCodes());
     }
 
     @Transactional(readOnly = true)

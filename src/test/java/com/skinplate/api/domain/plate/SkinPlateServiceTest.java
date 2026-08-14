@@ -8,8 +8,10 @@ import com.skinplate.api.domain.food.entity.IngredientTag;
 import com.skinplate.api.domain.food.entity.Nutrition;
 import com.skinplate.api.domain.food.repository.FoodAnalysisRepository;
 import com.skinplate.api.domain.food.service.FoodAnalysisService;
+import com.skinplate.api.domain.plate.dto.PlateAnalysisResponse;
 import com.skinplate.api.domain.plate.dto.PlateSimulateResponse;
 import com.skinplate.api.domain.plate.engine.PlateRuleEngine;
+import com.skinplate.api.domain.plate.engine.RuleConstants;
 import com.skinplate.api.domain.plate.engine.rules.*;
 import com.skinplate.api.domain.plate.entity.PlateActionCode;
 import com.skinplate.api.domain.plate.entity.SkinPlate;
@@ -22,6 +24,7 @@ import com.skinplate.api.domain.user.entity.AppUser;
 import com.skinplate.api.domain.user.repository.AppUserRepository;
 import com.skinplate.api.global.exception.BusinessException;
 import com.skinplate.api.global.exception.ErrorCode;
+import com.skinplate.api.global.security.AnalysisTokenProvider;
 import com.skinplate.api.infra.openai.dto.OpenAiFoodResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -59,17 +62,20 @@ class SkinPlateServiceTest {
     private static final Long ANALYSIS_ID = 100L;
 
     private SkinAnalysisRepository skinAnalysisRepository;
+    private FoodAnalysisRepository foodAnalysisRepository;
     private SkinPlateRepository skinPlateRepository;
     private FoodAnalysisService foodAnalysisService;
+    private AnalysisTokenProvider analysisTokenProvider;
     private SkinPlateService skinPlateService;
 
     @BeforeEach
     void setUp() {
         AppUserRepository userRepository = mock(AppUserRepository.class);
         skinAnalysisRepository = mock(SkinAnalysisRepository.class);
-        FoodAnalysisRepository foodAnalysisRepository = mock(FoodAnalysisRepository.class);
+        foodAnalysisRepository = mock(FoodAnalysisRepository.class);
         skinPlateRepository = mock(SkinPlateRepository.class);
         foodAnalysisService = mock(FoodAnalysisService.class);
+        analysisTokenProvider = mock(AnalysisTokenProvider.class);
 
         TransactionTemplate transactionTemplate = mock(TransactionTemplate.class);
         given(transactionTemplate.execute(any())).willAnswer(invocation ->
@@ -83,7 +89,7 @@ class SkinPlateServiceTest {
         skinPlateService = new SkinPlateService(
                 userRepository, skinAnalysisRepository, foodAnalysisRepository,
                 skinPlateRepository, foodAnalysisService, engine,
-                new ObjectMapper(), transactionTemplate);
+                new ObjectMapper(), transactionTemplate, analysisTokenProvider);
     }
 
     @Test
@@ -156,6 +162,65 @@ class SkinPlateServiceTest {
         verify(foodAnalysisService, never()).recognize(any());
     }
 
+    @Test
+    @DisplayName("analyze 는 아무것도 저장하지 않는다 — foodAnalysisRepository·skinPlateRepository 둘 다 save 가 안 불린다")
+    void analyze_savesNothing() {
+        givenSkinAnalysis();
+        OpenAiFoodResult aiResult = givenAiResult();
+        given(foodAnalysisService.recognize(any())).willReturn(aiResult);
+        given(foodAnalysisService.toEntity(null, aiResult)).willReturn(givenFood());
+        given(analysisTokenProvider.issue(USER_ID, ANALYSIS_ID, aiResult)).willReturn("signed-token");
+
+        skinPlateService.analyze(USER_ID, image(), ANALYSIS_ID);
+
+        verify(foodAnalysisRepository, never()).save(any());
+        verify(skinPlateRepository, never()).save(any());
+    }
+
+    @Test
+    @DisplayName("발급된 분석 토큰이 응답에 그대로 실린다")
+    void analyze_returnsIssuedToken() {
+        givenSkinAnalysis();
+        OpenAiFoodResult aiResult = givenAiResult();
+        given(foodAnalysisService.recognize(any())).willReturn(aiResult);
+        given(foodAnalysisService.toEntity(null, aiResult)).willReturn(givenFood());
+        given(analysisTokenProvider.issue(USER_ID, ANALYSIS_ID, aiResult)).willReturn("signed-token");
+
+        PlateAnalysisResponse response = skinPlateService.analyze(USER_ID, image(), ANALYSIS_ID);
+
+        assertThat(response.analysisToken()).isEqualTo("signed-token");
+        verify(analysisTokenProvider).issue(USER_ID, ANALYSIS_ID, aiResult);
+    }
+
+    @Test
+    @DisplayName("analyze 도 피부 분석 확인이 AI 호출보다 먼저다")
+    void analyze_withoutSkinAnalysis_failsBeforeCallingAi() {
+        given(skinAnalysisRepository.findByIdAndUserId(ANALYSIS_ID, USER_ID))
+                .willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> skinPlateService.analyze(USER_ID, image(), ANALYSIS_ID))
+                .isInstanceOf(BusinessException.class)
+                .extracting(exception -> ((BusinessException) exception).getErrorCode())
+                .isEqualTo(ErrorCode.SKIN_ANALYSIS_NOT_FOUND);
+
+        verify(foodAnalysisService, never()).recognize(any());
+    }
+
+    @Test
+    @DisplayName("plateScore 는 엔진 결과와 같고 baseScore 는 항상 RuleConstants.BASE_SCORE 다")
+    void analyze_scoreMatchesEngine() {
+        givenSkinAnalysis();
+        OpenAiFoodResult aiResult = givenAiResult();
+        given(foodAnalysisService.recognize(any())).willReturn(aiResult);
+        given(foodAnalysisService.toEntity(null, aiResult)).willReturn(givenFood());
+        given(analysisTokenProvider.issue(USER_ID, ANALYSIS_ID, aiResult)).willReturn("signed-token");
+
+        PlateAnalysisResponse response = skinPlateService.analyze(USER_ID, image(), ANALYSIS_ID);
+
+        assertThat(response.plateScore()).isEqualTo(60);
+        assertThat(response.baseScore()).isEqualTo(RuleConstants.BASE_SCORE);
+    }
+
     // ---- 픽스처 ----
 
     private PlateSimulateResponse simulate(PlateActionCode... actions) {
@@ -186,5 +251,49 @@ class SkinPlateServiceTest {
         given(skinPlateRepository.findByIdAndUserId(PLATE_ID, USER_ID))
                 .willReturn(Optional.of(plate));
         return plate;
+    }
+
+    /** analyze() 전용 픽스처. 지표는 givenPlate() 와 같은 시연 값 — 같은 음식이면 같은 60점이 나와야 한다. */
+    private SkinAnalysis givenSkinAnalysis() {
+        AppUser user = AppUser.create("test@skinplate.app", "encoded", "테스트유저");
+        ReflectionTestUtils.setField(user, "id", USER_ID);
+
+        SkinAnalysis analysis = SkinAnalysis.create(
+                user, SkinMetrics.of(38, 52, 64, 25, 78), 55, "요약", "{}");
+        ReflectionTestUtils.setField(analysis, "id", ANALYSIS_ID);
+
+        given(skinAnalysisRepository.findByIdAndUserId(ANALYSIS_ID, USER_ID))
+                .willReturn(Optional.of(analysis));
+        return analysis;
+    }
+
+    /** VisionClient 가 돌려줬다고 가정하는 AI 원본. */
+    private OpenAiFoodResult givenAiResult() {
+        return new OpenAiFoodResult(
+                true, "돼지고기 김치찌개", "한식/찌개", "BOILED", true,
+                List.of(new OpenAiFoodResult.Ingredient("돼지고기", "ETC"),
+                        new OpenAiFoodResult.Ingredient("김치", "PROBIOTIC"),
+                        new OpenAiFoodResult.Ingredient("두부", "ETC"),
+                        new OpenAiFoodResult.Ingredient("고춧가루", "CAPSAICIN")),
+                new OpenAiFoodResult.Nutrition(520, new BigDecimal("28.5"), new BigDecimal("24.0"),
+                        new BigDecimal("32.0"), 1850, new BigDecimal("6.2")));
+    }
+
+    /** foodAnalysisService.toEntity(null, aiResult) 가 돌려준다고 가정하는 결과 — user 는 null 이다. */
+    private FoodAnalysis givenFood() {
+        FoodAnalysis food = FoodAnalysis.create(null, "돼지고기 김치찌개", "한식/찌개",
+                Nutrition.of(520, new BigDecimal("28.5"), new BigDecimal("24.0"),
+                        new BigDecimal("32.0"), 1850, new BigDecimal("6.2")),
+                CookingMethod.BOILED, true, "{}");
+        List.of(new String[]{"돼지고기", "ETC"}, new String[]{"김치", "PROBIOTIC"},
+                new String[]{"두부", "ETC"}, new String[]{"고춧가루", "CAPSAICIN"})
+                .forEach(pair -> food.addIngredient(
+                        FoodIngredient.of(pair[0], IngredientTag.valueOf(pair[1]))));
+        return food;
+    }
+
+    private MultipartFile image() {
+        return new MockMultipartFile("image", "food.jpg", "image/jpeg",
+                new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, (byte) 0xE0});
     }
 }

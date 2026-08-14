@@ -1,5 +1,6 @@
 package com.skinplate.api.domain.plate.controller;
 
+import com.skinplate.api.domain.plate.dto.PlateAnalysisResponse;
 import com.skinplate.api.domain.plate.dto.PlateHistoryResponse;
 import com.skinplate.api.domain.plate.dto.PlateSimulateRequest;
 import com.skinplate.api.domain.plate.dto.PlateSimulateResponse;
@@ -40,6 +41,20 @@ public class SkinPlateController {
 
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.ok(skinPlateService.create(userId, image, skinAnalysisId)));
+    }
+
+    /**
+     * 분석만 하고 저장하지 않는다. 결과와 서명 토큰을 돌려주면 앱이 확인 후
+     * 그 토큰을 POST /plates/records 로 되돌려 보내 저장을 확정한다.
+     * 저장하지 않으므로 200 이다.
+     */
+    @PostMapping(path = "/analyze", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ApiResponse<PlateAnalysisResponse> analyze(
+            @CurrentUser Long userId,
+            @RequestPart("image") MultipartFile image,
+            @RequestParam(value = "skinAnalysisId", required = false) Long skinAnalysisId) {
+
+        return ApiResponse.ok(skinPlateService.analyze(userId, image, skinAnalysisId));
     }
 
     @GetMapping("/{plateId}")
