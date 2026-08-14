@@ -68,8 +68,14 @@ public class SkinPlateService {
 
     /**
      * 저장하지 않는다. 결과와 서명 토큰만 돌려주고, 저장은 이 토큰을 되받는
-     * POST /plates/records(Task 3) 가 한다. 순서는 create() 와 같다 — 피부 분석
-     * 확인이 AI 호출보다 먼저다. 이유도 같다: 유료 호출 전에 404 를 걸러야 한다.
+     * POST /plates/records 가 한다.
+     *
+     * 기준이 될 피부 분석이 있는지는 <b>유료 호출 전에</b> 본다. 인덱스 읽기 한 번이다.
+     * 뒤로 미루면 피부 분석을 한 번도 안 한 사용자가 20초를 기다린 끝에 404 를 보고,
+     * 그 요청마다 gpt-4o 호출이 한 번씩 버려진다. 남의 id·오래된 id 도 마찬가지다.
+     *
+     * skinAnalysisId 는 선택이다. 생략하면 최신 피부 분석을 쓴다 —
+     * 앱이 홈에서 바로 음식만 찍고 들어오는 경로가 있기 때문이다.
      *
      * 트랜잭션을 열지 않는다. 저장이 없으니 감쌀 구간도 없다.
      */
@@ -107,8 +113,8 @@ public class SkinPlateService {
      * 토큰이 나르는 건 AI 원본(payload.food())뿐이고, 클라이언트가 보낸 점수·영양값은
      * 애초에 받지 않는다(PlateRecordRequest 필드는 analysisToken 하나뿐이라 조작할 대상이 없다).
      *
-     * 락 · jti 조회 · 저장이 반드시 한 트랜잭션 안에 있어야 한다. create() 처럼 피부 분석
-     * 조회를 트랜잭션 밖으로 꺼내면 findForUpdate 락이 트랜잭션 없이 걸려
+     * 락 · jti 조회 · 저장이 반드시 한 트랜잭션 안에 있어야 한다. 피부 분석 조회를
+     * analyze() 처럼 트랜잭션 밖으로 꺼내면 findForUpdate 락이 트랜잭션 없이 걸려
      * TransactionRequiredException 이 난다 — 저장할 AI 응답이 이미 있으니(재호출이 없으니)
      * 트랜잭션을 아낄 이유도 없다. 처음부터 안에 둔다.
      */

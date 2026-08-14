@@ -74,7 +74,7 @@ public class FoodAnalysisService {
 
     /**
      * 기록 저장(POST /plates/records)이 쓰는 경로. jti 를 raw_ai_response 에
-     * 형제 키로 얹어 멱등키로 남긴다 — null 이면 기존 create() 와 동일하다.
+     * 형제 키로 얹어 멱등키로 남긴다 — null 이면 _meta 를 붙이지 않는다(2인자 오버로드).
      */
     public FoodAnalysis toEntity(AppUser user, OpenAiFoodResult aiResult, String jti) {
         String foodName = trim(aiResult.foodName(), NAME_MAX_LENGTH);

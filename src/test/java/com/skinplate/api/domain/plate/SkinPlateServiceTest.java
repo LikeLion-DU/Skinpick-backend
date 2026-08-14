@@ -202,6 +202,25 @@ class SkinPlateServiceTest {
         verify(foodAnalysisService, never()).recognize(any());
     }
 
+    /**
+     * 위 테스트와 분기가 다르다. 저쪽은 id 를 준 경우(없거나 남의 것)이고,
+     * 이쪽은 id 를 생략해 최신 분석을 찾는 경로다 — 앱이 홈에서 음식만 찍고 들어올 때다.
+     * 피부 분석을 한 번도 안 한 사용자가 여기로 들어오므로 20초 낭비가 실제로 일어나는 쪽이다.
+     */
+    @Test
+    @DisplayName("피부 분석이 한 번도 없으면 — id 를 생략해도 AI 호출 전에 막는다")
+    void analyze_withoutAnySkinAnalysis_failsBeforeCallingAi() {
+        given(skinAnalysisRepository.findFirstByUserIdOrderByCreatedAtDesc(USER_ID))
+                .willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> skinPlateService.analyze(USER_ID, image(), null))
+                .isInstanceOf(BusinessException.class)
+                .extracting(exception -> ((BusinessException) exception).getErrorCode())
+                .isEqualTo(ErrorCode.SKIN_ANALYSIS_NOT_FOUND);
+
+        verify(foodAnalysisService, never()).recognize(any());
+    }
+
     @Test
     @DisplayName("plateScore 는 엔진 결과와 같고 baseScore 는 항상 RuleConstants.BASE_SCORE 다")
     void analyze_scoreMatchesEngine() {
@@ -521,7 +540,7 @@ class SkinPlateServiceTest {
         return analysis;
     }
 
-    /** saveRecord() 의 save() 경로가 찾는 사용자. create() 경로 테스트에는 필요 없어 여기서만 쓴다. */
+    /** saveRecord() 의 save() 경로가 찾는 사용자. 저장하지 않는 경로에는 필요 없어 여기서만 쓴다. */
     private AppUser givenUser() {
         AppUser user = AppUser.create("test@skinplate.app", "encoded", "테스트유저");
         ReflectionTestUtils.setField(user, "id", USER_ID);
