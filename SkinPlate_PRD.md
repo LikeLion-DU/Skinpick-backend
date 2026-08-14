@@ -849,7 +849,9 @@ ENTRYPOINT ["java", "-jar", "app.jar"]
 >
 > **`sslmode` 를 생략하면 안 된다.** 이 프로젝트는 SSL 을 강제하지 않아 `sslmode=disable` 로도 연결이 된다. pgjdbc 기본값 `prefer` 는 TLS 협상이 실패하면 **조용히 평문으로 떨어지는데**, 그 평문 경로가 실제로 열려 있다는 뜻이다.
 >
-> **Flyway 10.10.0 은 PostgreSQL 17 을 공식 지원하지 않는다.** 기동할 때마다 `PostgreSQL 17.6 is newer than this version of Flyway` 경고가 뜬다. V1~V3 은 정상 적용됐지만 "미검증"이라는 뜻이므로, 새 마이그레이션이 실패하면 여기를 먼저 의심한다. 올리려면 `build.gradle` 에 `ext['flyway.version'] = '10.20.1'` 한 줄이다.
+> **Flyway 는 10.22.0 으로 올려 뒀다.** Spring Boot 3.3.5 가 핀하는 10.10.0 은 PostgreSQL 16 까지만 지원해서 기동마다 `PostgreSQL 17.6 is newer than this version of Flyway` 경고가 떴다. `build.gradle` 의 `ext['flyway.version']` 한 줄로 올린다. **11.x 로 가면 안 된다** — Spring Boot 3.4 부터 지원이라 `FlywayAutoConfiguration` 이 깨진다.
+>
+> 올릴 때 확인한 것: 이미 V1~V3 이 적용된 DB 가 새 버전에서 checksum 검증을 통과하고(`up to date`), 빈 DB 에 새로 적용해도 checksum 3개가 이전과 동일하다. 즉 **이미 배포된 DB 와 앞으로 만들 DB 어느 쪽도 재적용이 필요 없다.**
 
 | 환경변수 | 값 | 비고 |
 |---|---|---|
