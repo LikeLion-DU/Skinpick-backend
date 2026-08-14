@@ -22,6 +22,10 @@ COPY --from=build /src/build/libs/*.jar app.jar
 # docker run -e 와 플랫폼 환경변수가 이 값을 덮으므로 로컬에서 띄워 보는 것도 그대로 된다.
 ENV SPRING_PROFILES_ACTIVE=prod
 
+# 저장 시각은 JpaConfig 가 KST 로 고정한다. 이건 로그 타임스탬프용이다 —
+# 시연 중 로그를 보면서 아홉 시간을 암산하지 않으려고 맞춰 둔다.
+ENV TZ=Asia/Seoul
+
 # EXPOSE 를 두지 않는다. 앱은 ${PORT} 에 바인딩하는데 EXPOSE 8080 이 남아 있으면
 # Railway 가 그걸 프록시 대상 포트로 읽어, 주입한 PORT 와 어긋나면 트래픽이
 # 닫힌 포트로 간다. 포트의 출처를 PORT 하나로 둔다.

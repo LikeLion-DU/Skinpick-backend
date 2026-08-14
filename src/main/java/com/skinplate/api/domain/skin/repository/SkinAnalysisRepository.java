@@ -7,6 +7,8 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 public interface SkinAnalysisRepository extends JpaRepository<SkinAnalysis, Long> {
@@ -19,6 +21,10 @@ public interface SkinAnalysisRepository extends JpaRepository<SkinAnalysis, Long
     Optional<SkinAnalysis> findByIdAndUserId(Long id, Long userId);
 
     Optional<SkinAnalysis> findFirstByUserIdOrderByCreatedAtDesc(Long userId);
+
+    /** 리포트 추이용. 이름에 UserId 가 들어가 조건을 빠뜨릴 수 없다. */
+    List<SkinAnalysis> findByUserIdAndCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDesc(
+            Long userId, LocalDateTime from, LocalDateTime toExclusive);
 
     /**
      * 추천 lazy 생성이 겹치지 않도록 이 분석 행에 줄을 세운다.

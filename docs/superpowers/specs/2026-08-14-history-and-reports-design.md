@@ -269,7 +269,7 @@ Dockerfile                                              ENV TZ=Asia/Seoul (최�
 `application.yml` 의 `default_batch_fetch_size: 100` 이 이미 N+1 을 한 번의 추가 쿼리로 접는다. `@EntityGraph` 는 그 왕복 한 번을 더 아끼는 것이지 N+1 을 막는 유일한 장치가 아니다. bag 이 `feedbacks` 하나뿐이라 `MultipleBagFetchException` 은 나지 않고, `Pageable` 을 쓰지 않으므로 인메모리 페이징 경고도 없다.
 
 ```java
-@EntityGraph(attributePaths = {"feedbacks", "foodAnalysis"})
+@EntityGraph(attributePaths = {"feedbacks", "foodAnalysis", "skinAnalysis"})
 @Query("select p from SkinPlate p where p.user.id = :userId "
      + "and p.createdAt >= :from and p.createdAt < :toExclusive order by p.createdAt desc")
 List<SkinPlate> findInRange(@Param("userId") Long userId,

@@ -5929,9 +5929,11 @@ if (_consecutiveFailures >= 3) {
 | `POST /skin/analyses`<br>`GET /skin/analyses/latest`<br>`GET /skin/analyses/{id}` | `SkinAnalysisResponse` | `skinAnalysisId` · `skinScore` · `metrics{5}` · `summary` · `highlights[{label,status}]` · **`skinTypeGap{declared,observed,matched,message}`**(미선택 시 키 생략) · `analyzedAt` | `SkinAnalysisDto` |
 | `POST /plates`<br>`GET /plates/{id}` | `SkinPlateResponse` | `plateId` · **`skinAnalysisId`** · `plateScore` · **`baseScore`** · `summary` · `food{...}` · `feedbacks{good,caution,action}` · `appliedRules[]` · `createdAt` | `SkinPlateDto` |
 | `POST /plates/{id}/simulate` | `PlateSimulateResponse` | `plateId` · `beforeScore` · `afterScore` · `appliedActions[]` · `removedRules[]` · `summary` | `PlateSimulationDto` |
+| `GET /plates?from=&to=` | `PlateHistoryResponse` | `days[{date, skinScore, plates[{plateId, foodName, plateScore, recordedAt}]}]` | `PlateHistoryDto` |
+| `GET /reports?period=` | `ReportResponse` | `period` · `from` · `to` · `latestSkinScore` · `skinScoreTrend[]` · `recordCount` · `averagePlateScore` · `penalties[]` · `meals[]` | `ReportDto` |
 | `GET /recommendations` | `RecommendationResponse` | `skinAnalysisId` · `recommend[]` · `avoid[]` · `generatedAt` | `RecommendationDto` |
 
-**어긋나기 쉬운 지점 5개**
+**어긋나기 쉬운 지점 7개**
 
 | # | 위험 | 대응 |
 |---|---|---|
@@ -5941,6 +5943,7 @@ if (_consecutiveFailures >= 3) {
 | 4 | `expectedGain` ≠ `scoreDelta.abs()` | 서버 엔티티에 별도 컬럼, 앱 `ActionDto`에 별도 필드. **합산으로 "실행 후 점수"를 만들지 말 것** |
 | 5 | `PlateActionCode` · `SkinType` 이름 | 서버 enum 이름(`HALVE_SOUP`, `OILY` 등)을 앱이 그대로 보낸다. 한쪽만 이름을 바꾸면 400이 난다 |
 | 6 | `declaredSkinType` · `skinTypeGap` 이 **없는 것**과 **`UNKNOWN`인 것** | 앱 파서에 기본값을 두지 않는다. `null`이면 선택 칩, 값이 있으면 갭 카드 |
+| 7 | `days[].skinScore`(그 날 분석이 없으면 그 날 첫 Plate 채점 당시 점수로 폴백돼 **항상 존재**) ↔ `skinScoreTrend[]`(분석이 있는 날짜만) | 히스토리엔 점수가 있는데 트렌드 그래프엔 그 날짜가 없는 게 정상이다. 앱은 history 의 skinScore 를 "그날의 측정"이 아니라 **기준(baseline) 점수**로 라벨링한다 |
 
 ---
 
@@ -5963,9 +5966,11 @@ if (_consecutiveFailures >= 3) {
 | 12 | S07 "왜 60점인가" 카드 + 시뮬레이션 버튼 | `skin_plate/presentation/` | 7~8 | **차별점을 화면으로 옮기는 작업.** 지금은 문서와 백엔드 로그에만 있다 |
 | 13 | **`kIsWeb` 카메라 분기 + `ConstrainedBox(maxWidth: 430)`** | `skin_analysis/` · `app/` | 7 | **웹 대응. 둘 합쳐 반나절**(PRD §19.2). 웹은 게이트·프리뷰를 건너뛰고 파일 선택으로 간다(§2.12) |
 
-**해커톤 범위에서 제외** — `GET /plates?date=` · S09 히스토리 · 결과 공유 · 온보딩 애니메이션 · 지표 추이 차트.
+**해커톤 범위에서 제외** — 결과 공유 · 온보딩 애니메이션 · 지표 추이 차트.
 
 > ~~API 컨테이너화~~ 는 제외 목록에서 **뺐다.** 노트북 시연 전제였고, PaaS 배포로 바뀌면서 **Dockerfile 이 필수가 됐다**(PRD §9.6).
+>
+> ~~`GET /plates?date=` · S09 히스토리~~ 도 제외 목록에서 뺐다. **계획은 `?date=` 단건 조회였지만 구현은 `GET /plates?from=&to=` 범위 조회다** — `PlateHistoryResponse`로 배포까지 검증됐다(PRD §14.2 #13).
 
 **시작하기**
 
