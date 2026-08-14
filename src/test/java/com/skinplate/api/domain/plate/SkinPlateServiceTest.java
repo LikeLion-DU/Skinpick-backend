@@ -159,23 +159,6 @@ class SkinPlateServiceTest {
     }
 
     @Test
-    @DisplayName("기준 피부 분석이 없으면 유료 호출 전에 막는다 — 20초 기다린 뒤 404 를 보지 않는다")
-    void create_withoutSkinAnalysis_failsBeforeCallingAi() {
-        given(skinAnalysisRepository.findFirstByUserIdOrderByCreatedAtDesc(USER_ID))
-                .willReturn(Optional.empty());
-
-        MultipartFile image = new MockMultipartFile("image", "food.jpg", "image/jpeg",
-                new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, (byte) 0xE0});
-
-        assertThatThrownBy(() -> skinPlateService.create(USER_ID, image, null))
-                .isInstanceOf(BusinessException.class)
-                .extracting(exception -> ((BusinessException) exception).getErrorCode())
-                .isEqualTo(ErrorCode.SKIN_ANALYSIS_NOT_FOUND);
-
-        verify(foodAnalysisService, never()).recognize(any());
-    }
-
-    @Test
     @DisplayName("analyze 는 아무것도 저장하지 않는다 — foodAnalysisRepository·skinPlateRepository 둘 다 save 가 안 불린다")
     void analyze_savesNothing() {
         givenSkinAnalysis();

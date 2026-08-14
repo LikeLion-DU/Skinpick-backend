@@ -33,20 +33,6 @@ public class SkinPlateController {
     private final PlateHistoryService plateHistoryService;
 
     /**
-     * skinAnalysisId 는 선택이다. 생략하면 서버가 최신 피부 분석을 쓴다 —
-     * 앱이 홈에서 바로 음식만 찍고 들어오는 경로가 있기 때문이다.
-     */
-    @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<ApiResponse<SkinPlateResponse>> create(
-            @CurrentUser Long userId,
-            @RequestPart("image") MultipartFile image,
-            @RequestParam(value = "skinAnalysisId", required = false) Long skinAnalysisId) {
-
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.ok(skinPlateService.create(userId, image, skinAnalysisId)));
-    }
-
-    /**
      * 분석만 하고 저장하지 않는다. 결과와 서명 토큰을 돌려주면 앱이 확인 후
      * 그 토큰을 POST /plates/records 로 되돌려 보내 저장을 확정한다.
      * 저장하지 않으므로 200 이다.

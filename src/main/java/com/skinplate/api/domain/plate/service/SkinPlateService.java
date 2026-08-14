@@ -67,23 +67,6 @@ public class SkinPlateService {
     private final AnalysisTokenProvider analysisTokenProvider;
 
     /**
-     * AI 호출을 먼저 끝낸 뒤 저장 구간만 트랜잭션으로 감싼다.
-     * 25초짜리 대기를 트랜잭션 안에 두면 커넥션 하나가 그동안 잠긴다.
-     *
-     * 단, 기준이 될 피부 분석이 있는지는 <b>유료 호출 전에</b> 본다. 인덱스 읽기 한 번이다.
-     * 뒤로 미루면 피부 분석을 한 번도 안 한 사용자가 20초를 기다린 끝에 404 를 보고,
-     * 그 요청마다 gpt-4o 호출이 한 번씩 버려진다. 남의 id·오래된 id 도 마찬가지다.
-     */
-    public SkinPlateResponse create(Long userId, MultipartFile image, Long skinAnalysisId) {
-        Long resolvedId = resolveSkinAnalysisId(userId, skinAnalysisId);
-
-        OpenAiFoodResult aiResult = foodAnalysisService.recognize(image);
-
-        // create() 는 다음 태스크(POST /plates 제거)에서 함께 정리한다.
-        return transactionTemplate.execute(status -> save(userId, aiResult, resolvedId, null));
-    }
-
-    /**
      * 저장하지 않는다. 결과와 서명 토큰만 돌려주고, 저장은 이 토큰을 되받는
      * POST /plates/records(Task 3) 가 한다. 순서는 create() 와 같다 — 피부 분석
      * 확인이 AI 호출보다 먼저다. 이유도 같다: 유료 호출 전에 404 를 걸러야 한다.
@@ -219,7 +202,7 @@ public class SkinPlateService {
 
     // ---- 내부 ----
 
-    /** jti 는 saveRecord() 만 넘긴다(멱등키). create() 는 null — 다음 태스크에서 create() 를 제거할 때 함께 정리한다. */
+    /** jti 는 멱등키다. 저장 경로가 saveRecord() 하나뿐이므로 항상 값이 있다. */
     private SkinPlateResponse save(Long userId, OpenAiFoodResult aiResult, Long skinAnalysisId, String jti) {
         AppUser user = userRepository.findById(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
@@ -246,10 +229,6 @@ public class SkinPlateService {
      * skinAnalysisId 를 생략하면 최신 피부 분석을 쓴다. 한 번도 안 찍었으면 404 다 —
      * 비교할 기준이 없으면 상극 분석이 성립하지 않는다.
      */
-    private Long resolveSkinAnalysisId(Long userId, Long skinAnalysisId) {
-        return resolveSkinAnalysis(userId, skinAnalysisId).getId();
-    }
-
     private SkinAnalysis resolveSkinAnalysis(Long userId, Long skinAnalysisId) {
         if (skinAnalysisId != null) {
             // 타인의 id 면 403 이 아니라 404 다. 존재 여부 자체를 알려주지 않는다.
