@@ -13,6 +13,7 @@ import com.skinplate.api.domain.food.repository.FoodAnalysisRepository;
 import com.skinplate.api.domain.food.service.FoodAnalysisService;
 import com.skinplate.api.domain.plate.dto.FeedbackGroupDto;
 import com.skinplate.api.domain.plate.dto.PlateAnalysisResponse;
+import com.skinplate.api.domain.plate.dto.PlateAnalysisSimulateResponse;
 import com.skinplate.api.domain.plate.dto.PlateSimulateResponse;
 import com.skinplate.api.domain.plate.dto.SkinPlateResponse;
 import com.skinplate.api.domain.plate.engine.PlateContext;
@@ -186,6 +187,34 @@ public class SkinPlateService {
         return PlateSimulateResponse.of(
                 plate.getId(), plate.getPlateScore(), after.score(),
                 actions, removedRules(before, after), buildActionSummary(actions));
+    }
+
+    /**
+     * simulate() 와 하는 일은 같다. 다른 점은 입력을 어디서 얻느냐뿐이다 — 저장된 Plate
+     * 대신 analyze() 가 발급한 토큰이 skin·food 를 나른다. 결과 화면에는 plateId 가 없어서
+     * (저장 전이므로) {@code /{plateId}/simulate} 를 부를 수 없는 것을 이 엔드포인트가 대신한다.
+     *
+     * readOnly = true 인 이유는 simulate() 와 같다 — resolveSkinAnalysis 가 DB 를 읽을 뿐
+     * 저장은 없고, 관리 엔티티를 실수로 만지는 안전망이 필요하다.
+     */
+    @Transactional(readOnly = true)
+    public PlateAnalysisSimulateResponse simulateFromToken(
+            Long userId, String analysisToken, List<PlateActionCode> actions) {
+        AnalysisTokenPayload payload = analysisTokenProvider.parse(analysisToken, userId);
+        SkinMetrics skin = resolveSkinAnalysis(userId, payload.skinAnalysisId()).getMetrics();
+
+        // user = null — detachedCopy() 와 같은 이유로 저장 불가 상태로 만들어
+        // 실수로 persist 되는 것을 막는다. toEntity 를 태우는 이유는 analyze() 와 같다 —
+        // 표준 영양값 덮어쓰기·trim 을 건너뛰면 beforeScore 가 analyze 의 점수와 갈라진다.
+        FoodAnalysis origin = foodAnalysisService.toEntity(null, payload.food());
+        FoodAnalysis simulated = detachedCopy(origin, actions);
+
+        PlateEvaluation before = engine.evaluate(new PlateContext(skin, origin));
+        PlateEvaluation after = engine.evaluate(new PlateContext(skin, simulated));
+
+        return PlateAnalysisSimulateResponse.of(
+                before.score(), after.score(), actions,
+                removedRules(before, after), buildActionSummary(actions));
     }
 
     // ---- 내부 ----

@@ -1,0 +1,86 @@
+{
+  "success": true,
+  "data": {
+    "analysisToken": "eyJhbGciOiJIUzI1NiJ9.PAYLOAD_REDACTED_FOR_COMMIT.SIGNATURE_REDACTED",
+    "skinAnalysisId": 45,
+    "plateScore": 60,
+    "baseScore": 70,
+    "summary": "단백질 충분, 발효식품 포함. 다만 나트륨 과다, 매운맛 자극.",
+    "food": {
+      "foodName": "돼지고기 김치찌개",
+      "foodCategory": "한식/찌개",
+      "cookingMethod": "BOILED",
+      "spicy": true,
+      "ingredients": [
+        {
+          "name": "돼지고기",
+          "tag": "ETC"
+        },
+        {
+          "name": "김치",
+          "tag": "PROBIOTIC"
+        },
+        {
+          "name": "두부",
+          "tag": "ETC"
+        },
+        {
+          "name": "고춧가루",
+          "tag": "CAPSAICIN"
+        }
+      ],
+      "nutrition": {
+        "caloriesKcal": 520,
+        "proteinG": 28.5,
+        "fatG": 24.0,
+        "carbG": 32.0,
+        "sodiumMg": 1850,
+        "sugarG": 6.2
+      }
+    },
+    "feedbacks": {
+      "good": [
+        {
+          "message": "단백질 충분",
+          "scoreDelta": 6,
+          "ruleCode": "R05"
+        },
+        {
+          "message": "발효식품 포함",
+          "scoreDelta": 4,
+          "ruleCode": "R09"
+        }
+      ],
+      "caution": [
+        {
+          "message": "나트륨 과다",
+          "scoreDelta": -8,
+          "ruleCode": "R04"
+        },
+        {
+          "message": "매운맛 자극",
+          "scoreDelta": -12,
+          "ruleCode": "R02"
+        }
+      ],
+      "action": [
+        {
+          "message": "국물을 절반만 남기면 Skin Plate 점수가 상승합니다.",
+          "expectedGain": 8,
+          "ruleCode": "R04"
+        },
+        {
+          "message": "매운 양념을 덜어내고 드셔보세요.",
+          "expectedGain": 6,
+          "ruleCode": "R02"
+        }
+      ]
+    },
+    "appliedRules": [
+      "R04",
+      "R02",
+      "R05",
+      "R09"
+    ]
+  }
+}

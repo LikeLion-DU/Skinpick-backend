@@ -5931,6 +5931,7 @@ if (_consecutiveFailures >= 3) {
 | `POST /plates/analyze` | `PlateAnalysisResponse` | **`analysisToken`** · `skinAnalysisId` · `plateScore` · `baseScore` · `summary` · `food{...}` · `feedbacks{good,caution,action}` · `appliedRules[]` — **`plateId`·`createdAt` 없음(저장 전)** | `PlateAnalysisDto` |
 | `POST /plates/records`<br>`GET /plates/{id}` | `SkinPlateResponse` | `plateId` · **`skinAnalysisId`** · `plateScore` · **`baseScore`** · `summary` · `food{...}` · `feedbacks{good,caution,action}` · `appliedRules[]` · `createdAt` | `SkinPlateDto` |
 | `POST /plates/{id}/simulate` | `PlateSimulateResponse` | `plateId` · `beforeScore` · `afterScore` · `appliedActions[]` · `removedRules[]` · `summary` | `PlateSimulationDto` |
+| `POST /plates/simulate` | `PlateAnalysisSimulateResponse` | `beforeScore` · `afterScore` · `appliedActions[]` · `removedRules[]` · `summary` — **`plateId` 없음(저장 전, analysisToken 이 대상을 지목)** | `PlateAnalysisSimulationDto` |
 | `GET /plates?from=&to=` | `PlateHistoryResponse` | `days[{date, skinScore, plates[{plateId, foodName, plateScore, recordedAt}]}]` | `PlateHistoryDto` |
 | `GET /reports?period=` | `ReportResponse` | `period` · `from` · `to` · `latestSkinScore` · `skinScoreTrend[]` · `recordCount` · `averagePlateScore` · `penalties[]` · `meals[]` | `ReportDto` |
 | `GET /recommendations` | `RecommendationResponse` | `skinAnalysisId` · `recommend[]` · `avoid[]` · `generatedAt` | `RecommendationDto` |
