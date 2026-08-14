@@ -1922,7 +1922,6 @@ public class Recommendation extends BaseTimeEntity {
 | 7 | GET | `/skin/analyses/{id}` | ✅ | 피부 분석 상세 | P1 |
 | 8 | **POST** | **`/plates/analyze`** | ✅ | **음식 분석 + 분석 토큰 발급 (저장 안 함)** | **P0** |
 | 8-b | **POST** | **`/plates/records`** | ✅ | **분석 토큰으로 기록 저장** | **P0** |
-| 8-c | ~~POST~~ | ~~`/plates`~~ | ✅ | ~~음식 분석 + Plate Score 생성~~ · **폐기 예정** — 8·8-b 로 대체됐다. 앱 전환과 호출 0 확인 후 제거한다 | — |
 | 9 | **POST** | **`/plates/{id}/simulate`** | ✅ | **추천 행동 실행 시 점수 재계산 (저장 안 함)** | **P0** |
 | 9-b | **POST** | **`/plates/simulate`** | ✅ | **분석 토큰으로 저장 전 시뮬레이션 (저장 안 함)** | **P0** |
 | 10 | GET | `/plates/{id}` | ✅ | Plate 상세 | P1 |

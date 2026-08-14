@@ -18,7 +18,7 @@
 
 **`plate_simulate.json` 에도 `plateId` 가 없다.** 저장되지 않은 분석을 대상으로 하므로 돌려줄 id 가 없다. 저장된 Plate 용 `POST /plates/{id}/simulate` 응답에는 있다 — 그쪽은 별개 계약이다.
 
-**`plate_record.json` 은 기존 `POST /plates` 응답과 같은 형태다.** 기존 `SkinPlateDto` 를 그대로 쓸 수 있다.
+**`plate_record.json` 은 `GET /plates/{id}` 와 같은 형태다.** 저장이 확정된 기록이라 `plateId`·`createdAt` 이 들어 있다 — `SkinPlateDto` 하나로 두 응답을 받으면 된다.
 
 ## 이 데이터로 확인된 것
 
