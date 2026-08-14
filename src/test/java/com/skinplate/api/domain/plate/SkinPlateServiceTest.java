@@ -219,6 +219,11 @@ class SkinPlateServiceTest {
 
         assertThat(response.plateScore()).isEqualTo(60);
         assertThat(response.baseScore()).isEqualTo(RuleConstants.BASE_SCORE);
+
+        // analyze 와 record(Task 3) 의 점수 동일성이 이 호출 하나에 걸려 있다.
+        // toEntity 를 우회해 aiResult 로 FoodAnalysis 를 직접 만들면 표준 영양값
+        // 덮어쓰기·문자열 trim 이 빠져, 결과 화면과 저장된 기록의 점수가 갈라진다.
+        verify(foodAnalysisService).toEntity(null, aiResult);
     }
 
     // ---- 픽스처 ----
