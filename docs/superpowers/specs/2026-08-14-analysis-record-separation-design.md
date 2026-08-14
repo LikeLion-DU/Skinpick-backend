@@ -96,13 +96,17 @@ multipart/form-data
 >
 > `/plates/records` 는 `/auth/` 가 아니므로 **분석이 만료됐을 뿐인데 로그인 세션이 날아간다.** 그래서 401 을 쓰지 않는다.
 >
-> **422 를 쓴다.** 요청 자체는 정상 인증됐고("이해했지만 처리할 수 없다"), 기존 `FACE_NOT_DETECTED`·`FOOD_NOT_DETECTED` 가 같은 422 에 같은 "다시 촬영해 주세요" 계열 메시지를 쓴다 — 앱의 처리 경로와 문구 톤이 이미 맞는다.
+> **422 를 쓴다.** 요청 자체는 정상 인증됐고("이해했지만 처리할 수 없다"), 기존 `FACE_NOT_DETECTED`·`FOOD_NOT_DETECTED` 가 같은 422 에 같은 "다시 촬영해 주세요" 계열 메시지를 쓴다.
 >
 > ```java
 > ANALYSIS_EXPIRED (HttpStatus.UNPROCESSABLE_ENTITY, "분석 결과가 만료됐어요. 다시 촬영해 주세요."),
 > ```
 >
 > `TOKEN_EXPIRED` 를 재사용하지 않는 이유도 같다 — 그 메시지는 "다시 로그인해 주세요" 다.
+>
+> **단, 앱이 자동으로 재촬영 경로를 타지는 않는다.** `dio_client.dart:54` 의 코드 스위치가 `FACE_NOT_DETECTED`/`FOOD_NOT_DETECTED`/`AI_ANALYSIS_FAILED`/`AI_TIMEOUT` 만 `AnalysisFailure` 로 보내고, 나머지는 `ServerFailure` 로 떨어진다. 메시지 자체는 그대로 노출되지만 `shouldRetakePhoto`(`failure.dart:30`) 가 false 다.
+>
+> → **`ANALYSIS_EXPIRED` 를 두 목록에 추가한다**(§10). 각 한 줄. 빠뜨리면 만료 안내는 뜨는데 재촬영 버튼이 안 뜬다.
 
 ### 3.3 `POST /api/v1/plates` — 제거한다
 
@@ -158,10 +162,12 @@ SkinPlateService.resolveSkinAnalysis(userId, skinAnalysisId)   // findByIdAndUse
 ### 4.4 페이로드 크기 — 실측 근거
 
 ```
-food_analysis.raw_ai_response   min 356 / avg 378 / max 383 bytes   (34/34 채워짐)
+food_analysis.raw_ai_response   min 368 / avg 419 / max 431 bytes   (37/37 채워짐, 2026-08-14 실측)
 ```
 
-분석 원본 383B + `skinAnalysisId` + 표준 클레임 → JSON 약 450B → base64url 약 600자 → 헤더·서명 포함 **토큰 700~900자**. 요청 **본문**에 싣는다. 헤더에 넣지 않는다 — 일부 프록시의 헤더 상한(8KB)에는 여유가 있지만, 본문이 의미상 맞고 로그에 남을 위험도 낮다.
+분석 원본 431B + `skinAnalysisId` + 표준 클레임 → JSON 약 500B → base64url 약 670자 → 헤더·서명 포함 **토큰 800~1000자**. 요청 **본문**에 싣는다. 헤더에 넣지 않는다 — 일부 프록시의 헤더 상한(8KB)에는 여유가 있지만, 본문이 의미상 맞고 로그에 남을 위험도 낮다.
+
+재료가 많은 음식은 이보다 커진다. **상한은 프록시 본문 20MB 이므로 몇 배가 되어도 무관하다.**
 
 **별도 임시 저장소가 필요 없는 근거가 이 숫자다.**
 
@@ -179,31 +185,39 @@ food_analysis.raw_ai_response   min 356 / avg 378 / max 383 bytes   (34/34 채�
   "_meta": { "jti": "..." } }
 ```
 
-중첩(`{"ai": {...}, "_meta": {...}}`) 을 쓰지 않는 이유 — **기존 34행과 형태가 갈린다.** 지금은 읽는 코드가 없어 안 깨지지만, 나중에 읽는 쪽이 생기면 두 형태를 다 처리해야 한다. 형제 키는 옛 행의 구조를 그대로 두고, `raw_ai_response->'_meta'->>'jti'` 가 옛 행에서 `null` 을 준다 — **그게 정확한 답이다. 그 행들엔 jti 가 없었다.**
+중첩(`{"ai": {...}, "_meta": {...}}`) 을 쓰지 않는 이유 — **기존 37행과 형태가 갈린다.** 지금은 읽는 코드가 없어 안 깨지지만, 나중에 읽는 쪽이 생기면 두 형태를 다 처리해야 한다. 형제 키는 옛 행의 구조를 그대로 두고, `raw_ai_response->'_meta'->>'jti'` 가 옛 행에서 `null` 을 준다 — **그게 정확한 답이다. 그 행들엔 jti 가 없었다.**
 
 키 충돌은 불가능하다. `FoodAnalysisPrompt.SCHEMA` 가 `additionalProperties: false` 라 AI 가 `_meta` 를 만들 수 없다.
 
-**컬럼의 의미를 문서에서 고친다** — "AI 원본 응답" → **"AI 분석 원본 + 서버 메타데이터"**. `FoodAnalysis.rawAiResponse` javadoc 과 설계서 양쪽. 컬럼명은 바꾸지 않는다.
+**컬럼의 의미를 문서에 명시한다** — **"AI 분석 원본 + 서버 메타데이터"**. `FoodAnalysis.rawAiResponse` 에는 지금 javadoc 이 없으므로 **새로 단다**(같은 문구가 `SkinAnalysis:35` 에는 이미 있다). 설계서도 같이 고친다. 컬럼명은 바꾸지 않는다.
 
 ## 6. 멱등성
 
 **같은 `analysisToken` 을 몇 번 보내도 기록은 하나다.** `foodName`·점수·시각 같은 추측값을 쓰지 않는다 — 같은 음식을 두 번 먹는 것은 정상이다.
 
-저장 트랜잭션 안에서:
+**락 · jti 조회 · 삽입이 반드시 한 트랜잭션이어야 한다.**
 
 ```
-1. skinAnalysisRepository.findForUpdate(skinAnalysisId)     ← 이미 존재하는 PESSIMISTIC_WRITE
+── transactionTemplate.execute / @Transactional 하나 안에서 ──────────
+1. skinAnalysisRepository.findForUpdate(skinAnalysisId)     ← PESSIMISTIC_WRITE
 2. jti 로 기존 food_analysis 조회
 3. 있으면  → 그 Plate 를 그대로 반환 (새로 만들지 않는다)
 4. 없으면  → 정상 저장
+──────────────────────────────────────────────────────────────────
 ```
 
-**1번이 동시성을 끊는다.** 추천 생성에서 같은 문제를 풀려고 만든 락을 재사용한다 — 새 코드 0.
+**1번이 동시성을 끊는다.** 추천 생성(`RecommendationService:79`)이 같은 문제를 같은 방식으로 이미 푼다 — 락 → 재확인 → 삽입이 한 `@Transactional` 안에 있다. 새 코드 0.
 
 ```
-요청 A  락 획득 → jti 없음 → 저장 → commit
+요청 A  락 획득 → jti 없음 → 저장 → commit(락 해제)
 요청 B  락 대기 → 획득 → jti 발견 → 기존 Plate 반환
 ```
+
+**Postgres 는 `FOR UPDATE` 락을 커밋까지 잡고 있고**, READ COMMITTED 에서 B 의 조회는 락 획득 후 새 스냅샷을 뜨므로 **A 가 커밋한 행을 본다.** 이 두 성질이 성립의 근거다.
+
+> **⚠️ 구현 함정.** 현재 `SkinPlateService.create()` 는 피부 분석 조회를 `transactionTemplate.execute` **바깥**에서 한다(AI 호출을 트랜잭션 밖에 두려고). 그 모양을 그대로 따라 `findForUpdate` 를 트랜잭션 앞에 두면 **직렬화가 깨진다.**
+>
+> 다행히 조용히 깨지지 않는다 — 트랜잭션 없이 `PESSIMISTIC_WRITE` 를 걸면 `TransactionRequiredException` 이 난다. 그래도 **소유권 확인용 조회와 락용 조회를 분리**해서 쓴다: 소유권은 트랜잭션 앞(값싼 검증), 락은 트랜잭션 안.
 
 서로 다른 분석의 동시 저장은 직렬화되지 않아도 된다 — **그건 중복이 아니라 정상 기록 두 건**이다.
 
@@ -220,7 +234,9 @@ Optional<Long> findIdByUserIdAndJti(@Param("userId") Long userId, @Param("jti") 
 
 **인덱스는 만들지 않는다**(마이그레이션). `idx_food_analysis_user_created(user_id, created_at)` 로 사용자 범위가 좁혀지고, 사용자당 행이 수십~수백이라 순차 스캔으로 충분하다. 이 판단의 근거는 규모이므로, **행이 수만 단위가 되면 부분 인덱스를 검토한다.**
 
-그다음 `skinPlateRepository` 에서 그 `food_analysis_id` 를 가진 Plate 를 찾는다. `skin_plate.food_analysis_id` 는 **UNIQUE** 라 하나뿐이다.
+그다음 그 `food_analysis_id` 를 가진 Plate 를 찾는다. `SkinPlateRepository` 에 **`findByFoodAnalysisIdAndUserId` 를 추가한다** — 현재는 `findByIdAndUserId` 와 `findInRange` 뿐이다. `skin_plate.food_analysis_id` 가 **UNIQUE**(V1:76) 라 결과는 최대 하나다.
+
+> 이 UNIQUE 는 **멱등성의 안전망이 아니다.** 저장할 때마다 `food_analysis` 행을 새로 만들므로, 토큰 재전송이 중복 삽입까지 갔다면 서로 다른 `food_analysis_id` 라 제약에 걸리지 않는다. 중복을 막는 것은 **오직 §6 의 락 + jti 조회**다.
 
 ### 6.2 멱등성의 범위 — 정직하게
 
@@ -230,8 +246,13 @@ Optional<Long> findIdByUserIdAndJti(@Param("userId") Long userId, @Param("jti") 
 | 타임아웃 후 같은 토큰 재시도 | ✅ jti 조회 |
 | 같은 분석의 동시 요청 | ✅ `findForUpdate` 직렬화 |
 | **DB 레벨 절대 보장** | ❌ **UNIQUE 제약이 없다 — 마이그레이션 금지 때문** |
+| 30분 경계를 넘긴 재시도 | ❌ 아래 참조 |
 
-락이 걸리지 않는 유일한 경로는 **서로 다른 인스턴스가 같은 행 락을 우회하는 경우인데, 단일 인스턴스 배포(가비아 VM)라 발생하지 않는다.** 다중 인스턴스로 가면 락은 DB 레벨이라 여전히 유효하다.
+락은 DB 레벨이라 인스턴스 수와 무관하게 유효하다 — 단일 인스턴스(가비아 VM)든 나중에 늘리든 같다.
+
+**남는 구멍 하나** — 저장은 성공했는데 응답이 유실되고, 사용자가 **30분이 지난 뒤** 재시도하면 만료(422)가 뜬다. 다시 촬영해 저장하면 **첫 기록이 남아 있는 채로 두 번째가 생긴다.** 만료 검증이 jti 조회보다 먼저 일어나기 때문이다.
+
+의도적으로 남긴다. 발생하려면 "응답 유실 + 30분 방치 + 재촬영"이 겹쳐야 하고, 막으려면 만료된 토큰도 일단 파싱해야 해서 **만료 정책 자체가 무의미해진다.** 사용자는 히스토리에서 중복을 볼 수 있고, 삭제 기능(P2)이 들어오면 자연히 해소된다.
 
 ## 7. Flutter
 
@@ -303,21 +324,28 @@ domain/plate/dto/PlateRecordRequest.java          { analysisToken }  @NotBlank
 **Backend (수정)**
 
 ```
-domain/plate/controller/SkinPlateController.java  analyze · records 추가 → 나중에 create 제거
-domain/plate/service/SkinPlateService.java        analyze() / record() 분리
-domain/food/service/FoodAnalysisService.java      toEntity 에 jti 를 받아 _meta 로 기록
-domain/food/repository/FoodAnalysisRepository.java  jti 네이티브 조회 1개
-global/exception/ErrorCode.java                   ANALYSIS_EXPIRED 추가
-domain/food/entity/FoodAnalysis.java              rawAiResponse javadoc 의미 수정
+domain/plate/controller/SkinPlateController.java     analyze · records 추가 → 나중에 create 제거
+domain/plate/service/SkinPlateService.java           analyze() / record() 분리
+domain/food/service/FoodAnalysisService.java         toEntity 가 jti 를 받아 _meta 로 기록
+domain/food/repository/FoodAnalysisRepository.java   jti 네이티브 조회 1개
+domain/plate/repository/SkinPlateRepository.java     findByFoodAnalysisIdAndUserId 추가
+global/exception/ErrorCode.java                      ANALYSIS_EXPIRED 추가
+domain/food/entity/FoodAnalysis.java                 rawAiResponse 에 javadoc 을 새로 단다 (현재 없다)
 ```
+
+> **`toEntity` 시그니처 전환.** §9 의 6단계 전까지는 기존 `create()` 도 이 메서드를 부른다. 그 구간에서는 **jti 를 받는 오버로드를 추가**하고 옛 경로는 그대로 둔다. `create()` 를 지울 때 오버로드도 같이 정리한다.
 
 **Flutter**
 
 ```
 plate_dtos · plate_remote_datasource · plate_repository(+impl) · plate_notifier
-plate_result_page          저장 CTA · 5개 상태
-로컬 이미지 저장 유틸        path_provider 추가
+plate_result_page             저장 CTA · 5개 상태
+core/network/dio_client.dart  ANALYSIS_EXPIRED → AnalysisFailure  (한 줄)
+core/error/failure.dart       shouldRetakePhoto 에 ANALYSIS_EXPIRED (한 줄)
+로컬 이미지 저장 유틸           path_provider 추가
 ```
+
+**문서** — `SkinPlate_PRD.md` §14 API 명세(엔드포인트 2개 추가 · 1개 제거)와 `SkinPlate_DTO_Domain.md` 계약 대조표. CLAUDE.md 가 "코드가 문서와 어긋나면 그 자리에서 고친다" 를 요구한다.
 
 **변경하지 않는 것** — OpenAI 분석 · `PlateRuleEngine` · 점수 계산 · 피부 분석 · `skin_plate_feedback` · 히스토리/리포트 집계 · DB 스키마 · `JwtTokenProvider` · `JwtAuthenticationFilter`
 
@@ -338,7 +366,7 @@ plate_result_page          저장 CTA · 5개 상태
 
 **Flutter** — `READY` 상태 · 저장 중 disabled · `SAVED` 재저장 불가 · 실패 후 같은 토큰 재시도 · 저장 안 하고 나가면 record 호출 0 · 만료 안내 · 로컬 이미지 성공/실패(기록 유지 + fallback)
 
-**반드시 넣는다: 422 만료 응답이 로그아웃을 일으키지 않는다** — 토큰 저장소가 유지되는지 검증한다. 이 한 줄이 §3.2 의 실수를 다시 못 들어오게 막는다.
+**반드시 넣는다** — 422 `ANALYSIS_EXPIRED` 가 ① **로그아웃을 일으키지 않고**(토큰 저장소 유지) ② **`shouldRetakePhoto` 를 true 로 만든다**. 이 두 줄이 §3.2 의 두 함정을 다시 못 들어오게 막는다.
 
 **E2E**
 
