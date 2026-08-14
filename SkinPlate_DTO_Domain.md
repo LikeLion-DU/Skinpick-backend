@@ -5931,10 +5931,14 @@ if (_consecutiveFailures >= 3) {
 | `POST /plates/analyze` | `PlateAnalysisResponse` | **`analysisToken`** · `skinAnalysisId` · `plateScore` · `baseScore` · `summary` · `food{...}` · `feedbacks{good,caution,action}` · `appliedRules[]` — **`plateId`·`createdAt` 없음(저장 전)** | `PlateAnalysisDto` |
 | `POST /plates/records`<br>`GET /plates/{id}` | `SkinPlateResponse` | `plateId` · **`skinAnalysisId`** · `plateScore` · **`baseScore`** · `summary` · `food{...}` · `feedbacks{good,caution,action}` · `appliedRules[]` · `createdAt` | `SkinPlateDto` |
 | `POST /plates/{id}/simulate` | `PlateSimulateResponse` | `plateId` · `beforeScore` · `afterScore` · `appliedActions[]` · `removedRules[]` · `summary` | `PlateSimulationDto` |
-| `POST /plates/simulate` | `PlateAnalysisSimulateResponse` | `beforeScore` · `afterScore` · `appliedActions[]` · `removedRules[]` · `summary` — **`plateId` 없음(저장 전, analysisToken 이 대상을 지목)** | `PlateAnalysisSimulationDto` |
+| `POST /plates/simulate` | `PlateAnalysisSimulateResponse` | `beforeScore` · `afterScore` · `appliedActions[]` · `removedRules[]` · `summary` — **`plateId` 없음(저장 전, analysisToken 이 대상을 지목)** | `PlateSimulationDto` |
 | `GET /plates?from=&to=` | `PlateHistoryResponse` | `days[{date, skinScore, plates[{plateId, foodName, plateScore, recordedAt}]}]` | `PlateHistoryDto` |
 | `GET /reports?period=` | `ReportResponse` | `period` · `from` · `to` · `latestSkinScore` · `skinScoreTrend[]` · `recordCount` · `averagePlateScore` · `penalties[]` · `meals[]` | `ReportDto` |
 | `GET /recommendations` | `RecommendationResponse` | `skinAnalysisId` · `recommend[]` · `avoid[]` · `generatedAt` | `RecommendationDto` |
+
+> **앱은 두 simulate 응답을 `PlateSimulationDto` 하나로 받는다.** `PlateAnalysisSimulationDto` 를 따로 두지 않는다 — 두 응답의 차이가 `plateId` 하나뿐인데 앱이 그 값을 읽지 않기 때문이다(`{id}` 쪽은 요청할 때 이미 알고 있던 값이다). DTO 에서 `plateId` 필드를 아예 뺐고, 저장된 기록용 응답에 그 키가 있어도 무시하고 파싱된다. 앱 계약 테스트가 두 응답을 같은 DTO 로 읽어 이 전제를 고정한다.
+>
+> 화면이 "저장됐는가"를 알아야 할 때는 이 DTO 가 아니라 `PlateState.recordStatus` 를 본다. 시뮬레이션 결과에 `plateId` 가 있으면 앱이 그것으로 저장 여부를 추측하게 되고, 그 추측이 틀리는 날 사용자는 저장한 줄 알았던 기록을 잃는다.
 
 **어긋나기 쉬운 지점 7개**
 
