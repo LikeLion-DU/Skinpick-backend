@@ -70,11 +70,30 @@ class PlateHistoryServiceTest {
     }
 
     @Test
-    @DisplayName("그날 얼굴을 안 찍었어도 점수가 빈칸이 아니다 — 기록의 채점 기준을 쓴다")
-    void fallsBackToPlateBaseline() {
+    @DisplayName("그날 분석이 있으면 Plate 의 채점 기준이 아니라 그날 최신 분석 점수를 쓴다")
+    void usesLatestSkinAnalysisOfTheDay() {
         given(skinPlateRepository.findInRange(anyLong(), any(), any()))
-                .willReturn(List.of(plate(1L, "떡볶이", 65, LocalDateTime.of(2026, 8, 13, 12, 32))));
+                .willReturn(List.of(plate(1L, "떡볶이", 65, LocalDateTime.of(2026, 8, 13, 12, 32), 55)));
+        // 리포지토리 계약대로 createdAt 내림차순 — 최신(20시, 90점)이 먼저 온다
+        given(skinAnalysisRepository
+                .findByUserIdAndCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDesc(
+                        anyLong(), any(), any()))
+                .willReturn(List.of(
+                        analysis(90, LocalDateTime.of(2026, 8, 13, 20, 0)),
+                        analysis(40, LocalDateTime.of(2026, 8, 13, 9, 0))));
 
+        assertThat(plateHistoryService.get(USER_ID, FROM, TO).days().get(0).skinScore())
+                .isEqualTo(90);
+    }
+
+    @Test
+    @DisplayName("그날 얼굴을 안 찍었어도 점수가 빈칸이 아니다 — 그날 첫 기록의 채점 기준을 쓴다")
+    void fallsBackToPlateBaseline() {
+        given(skinPlateRepository.findInRange(anyLong(), any(), any())).willReturn(List.of(
+                plate(2L, "치킨", 71, LocalDateTime.of(2026, 8, 13, 19, 4), 70),
+                plate(1L, "떡볶이", 65, LocalDateTime.of(2026, 8, 13, 12, 32), 55)));
+
+        // 가장 늦은(19시) Plate 의 70점이 아니라 가장 이른(12시) Plate 의 채점 기준 55점이어야 한다
         assertThat(plateHistoryService.get(USER_ID, FROM, TO).days().get(0).skinScore())
                 .isEqualTo(55);
     }
@@ -97,16 +116,31 @@ class PlateHistoryServiceTest {
     }
 
     private static SkinPlate plate(Long id, String foodName, int score, LocalDateTime createdAt) {
+        return plate(id, foodName, score, createdAt, 55);
+    }
+
+    // skinScore 폴백 검증에는 Plate 마다 다른 채점 기준 점수가 필요해서 오버로드로 뺐다.
+    private static SkinPlate plate(Long id, String foodName, int score, LocalDateTime createdAt,
+                                   int skinAnalysisScore) {
         AppUser user = AppUser.create("test@skinplate.app", "encoded", "테스트유저");
         FoodAnalysis food = FoodAnalysis.create(user, foodName, "한식",
                 Nutrition.of(500, BigDecimal.TEN, BigDecimal.TEN, BigDecimal.TEN, 1800, BigDecimal.ONE),
                 CookingMethod.BOILED, false, "{}");
         SkinAnalysis analysis = SkinAnalysis.create(
-                user, SkinMetrics.of(38, 52, 64, 25, 78), 55, "요약", "{}");
+                user, SkinMetrics.of(38, 52, 64, 25, 78), skinAnalysisScore, "요약", "{}");
 
         SkinPlate plate = SkinPlate.create(user, analysis, food, score, "요약", "[]");
         ReflectionTestUtils.setField(plate, "id", id);
         ReflectionTestUtils.setField(plate, "createdAt", createdAt);
         return plate;
+    }
+
+    // 그날 최신 분석 검증용 — Plate 와 무관하게 그 날짜 구간에 찍힌 SkinAnalysis 하나를 만든다.
+    private static SkinAnalysis analysis(int score, LocalDateTime createdAt) {
+        AppUser user = AppUser.create("test@skinplate.app", "encoded", "테스트유저");
+        SkinAnalysis analysis = SkinAnalysis.create(
+                user, SkinMetrics.of(38, 52, 64, 25, 78), score, "요약", "{}");
+        ReflectionTestUtils.setField(analysis, "createdAt", createdAt);
+        return analysis;
     }
 }

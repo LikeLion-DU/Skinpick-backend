@@ -54,6 +54,7 @@ public class PlateHistoryService {
         // 분석이 반드시 있고(skin_analysis_id NOT NULL), 화면이 "-" 를 띄우면
         // 같은 기록을 상세로 열었을 때 점수가 나오는 모순이 생긴다.
         Integer skinScore = skinScorePerDay.getOrDefault(date,
+                // DESC 정렬의 마지막 = 그날 첫 기록. get(0) 으로 "고치면" 최신 기록이 돼 버린다.
                 sorted.get(sorted.size() - 1).getSkinAnalysis().getSkinScore());
 
         return new PlateHistoryDayDto(date, skinScore, sorted.stream()
