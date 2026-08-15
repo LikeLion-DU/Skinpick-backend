@@ -6122,13 +6122,15 @@ if (_consecutiveFailures >= 3) {
 | `GET /auth/me`<br>`PATCH /auth/me` | `MeResponse` | `userId` · `email` · `nickname` · **`declaredSkinType`**(미선택 시 키 생략) · **`isTestAccount`** · `joinedAt` | `MeResponseDto` |
 | `POST /skin/analyses`<br>`GET /skin/analyses/latest`<br>`GET /skin/analyses/{id}` | `SkinAnalysisResponse` | `skinAnalysisId` · `skinScore` · `metrics{5}` · `summary` · `highlights[{label,status}]` · **`skinTypeGap{declared,observed,matched,message}`**(미선택 시 키 생략) · `analyzedAt` | `SkinAnalysisDto` |
 | `POST /plates/analyze` | `PlateAnalysisResponse` | **`analysisToken`** · `skinAnalysisId` · `plateScore` · `baseScore` · `summary` · `food{...}`(**`foodAnalysisId` 없음**) · `feedbacks{good,caution,action}` · `appliedRules[]` — **`plateId`·`createdAt` 없음(저장 전)** | `PlateAnalysisDto` |
-| `POST /plates/records`<br>`GET /plates/{id}` | `SkinPlateResponse` | `plateId` · **`skinAnalysisId`** · `plateScore` · **`baseScore`** · `summary` · `food{...}` · `feedbacks{good,caution,action}` · `appliedRules[]` · `createdAt` | `SkinPlateDto` |
+| `POST /plates/records`<br>`GET /plates/{id}` | `SkinPlateResponse` | `plateId` · **`skinAnalysisId`** · `plateScore` · **`baseScore`** · `summary` · `food{...}` · `feedbacks{good,caution,action}` · `appliedRules[]` · **`aiTip`**(생성 실패 시 키 생략) · `createdAt` | `SkinPlateDto` |
 | `POST /plates/{id}/simulate` | `PlateSimulateResponse` | `plateId` · `beforeScore` · `afterScore` · `appliedActions[]` · `removedRules[]` · `summary` | `PlateSimulationDto` |
 | `POST /plates/simulate` | `PlateAnalysisSimulateResponse` | `beforeScore` · `afterScore` · `appliedActions[]` · `removedRules[]` · `summary` — **`plateId` 없음(저장 전, analysisToken 이 대상을 지목)** | `PlateSimulationDto` |
-| `GET /plates?from=&to=` | `PlateHistoryResponse` | `days[{date, skinScore, plates[{plateId, foodName, plateScore, recordedAt}]}]` | `PlateHistoryDto` |
+| `GET /plates?from=&to=` | `PlateHistoryResponse` | `days[{date, skinScore, **plateScore**, **targetScore**, **aiComment**(없으면 키 생략), plates[{plateId, foodName, plateScore, **mealType**, recordedAt}]}]` | `PlateHistoryDto` |
 | `GET /reports?period=` | `ReportResponse` | `period` · `from` · `to` · `latestSkinScore` · `skinScoreTrend[]` · `recordCount` · `averagePlateScore` · `penalties[]` · `meals[]` | `ReportDto` |
 | `GET /recommendations` | `RecommendationResponse` | `skinAnalysisId` · `recommend[]` · `avoid[]` · `generatedAt` | `RecommendationDto` |
 
+> **히스토리의 `days[].plateScore` 는 그날 기록들의 평균이고, `mealType` 은 `recordedAt` 에서 파생한다.** 확정 시안의 홈이 "오늘의 피부 식단 점수 / 목표 80점"을, 기록 카드가 "아침 8:20"을 보여주면서 생긴 필드다. 둘 다 새 컬럼 없이 만든다 — 평균은 저장할 값이 아니고(기록이 하나 추가되면 바뀐다), 끼니를 고르는 UI 가 시안에 없어 사용자가 값을 줄 방법이 없다. **앱에서 평균을 내지 않는 이유는 반올림 때문이다.** 76.5 를 서버는 올리고 앱은 내리면 같은 날에 두 숫자가 뜬다. `targetScore` 를 매번 실어 보내는 것도 같은 이유다 — 앱에 80 을 박으면 사용자별 목표를 줄 때 앱 배포가 필요해진다.
+>
 > **앱은 두 simulate 응답을 `PlateSimulationDto` 하나로 받는다.** `PlateAnalysisSimulationDto` 를 따로 두지 않는다 — 두 응답의 차이가 `plateId` 하나뿐인데 앱이 그 값을 읽지 않기 때문이다(`{id}` 쪽은 요청할 때 이미 알고 있던 값이다). DTO 에서 `plateId` 필드를 아예 뺐고, 저장된 기록용 응답에 그 키가 있어도 무시하고 파싱된다. 앱 계약 테스트가 두 응답을 같은 DTO 로 읽어 이 전제를 고정한다.
 >
 > 화면이 "저장됐는가"를 알아야 할 때는 이 DTO 가 아니라 `PlateState.recordStatus` 를 본다. 시뮬레이션 결과에 `plateId` 가 있으면 앱이 그것으로 저장 여부를 추측하게 되고, 그 추측이 틀리는 날 사용자는 저장한 줄 알았던 기록을 잃는다.

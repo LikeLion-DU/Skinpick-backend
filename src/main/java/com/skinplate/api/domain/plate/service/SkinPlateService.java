@@ -20,6 +20,7 @@ import com.skinplate.api.domain.plate.engine.PlateContext;
 import com.skinplate.api.domain.plate.engine.PlateEvaluation;
 import com.skinplate.api.domain.plate.engine.PlateRuleEngine;
 import com.skinplate.api.domain.plate.engine.RuleConstants;
+import com.skinplate.api.domain.plate.entity.MealType;
 import com.skinplate.api.domain.plate.entity.PlateActionCode;
 import com.skinplate.api.domain.plate.entity.SkinPlate;
 import com.skinplate.api.domain.plate.repository.SkinPlateRepository;
@@ -28,18 +29,25 @@ import com.skinplate.api.domain.skin.entity.SkinMetrics;
 import com.skinplate.api.domain.skin.repository.SkinAnalysisRepository;
 import com.skinplate.api.domain.user.entity.AppUser;
 import com.skinplate.api.domain.user.repository.AppUserRepository;
+import com.skinplate.api.global.common.DateRange;
 import com.skinplate.api.global.exception.BusinessException;
 import com.skinplate.api.global.exception.ErrorCode;
 import com.skinplate.api.global.security.AnalysisTokenPayload;
 import com.skinplate.api.global.security.AnalysisTokenProvider;
+import com.skinplate.api.infra.openai.VisionClient;
 import com.skinplate.api.infra.openai.dto.OpenAiFoodResult;
+import com.skinplate.api.infra.openai.dto.PlateComments;
+import com.skinplate.api.infra.openai.prompt.PlateCommentPrompt;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -50,6 +58,7 @@ import java.util.stream.Collectors;
  * 점수를 LLM 에 맡기지 않는 이유가 여기서 드러난다 — AI 는 "무슨 음식인가"까지만
  * 판단하고, 그 결과를 PlateRuleEngine 이 피부 지표와 맞춰 점수를 낸다.
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class SkinPlateService {
@@ -65,6 +74,7 @@ public class SkinPlateService {
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
     private final AnalysisTokenProvider analysisTokenProvider;
+    private final VisionClient visionClient;
 
     /**
      * 저장하지 않는다. 결과와 서명 토큰만 돌려주고, 저장은 이 토큰을 되받는
@@ -121,6 +131,11 @@ public class SkinPlateService {
     public SkinPlateResponse saveRecord(Long userId, String analysisToken) {
         AnalysisTokenPayload payload = analysisTokenProvider.parse(analysisToken, userId);
 
+        // AI 문장은 트랜잭션 밖에서 만든다 — OpenAI 를 트랜잭션 안에서 부르면
+        // 응답을 기다리는 내내 커넥션을 쥐고 있게 된다. 실패하면 문장 없이 저장한다.
+        // 문장은 부가 정보고, 기록이 본체다.
+        PlateComments comments = generateCommentsSafely(userId, payload);
+
         return transactionTemplate.execute(status -> {
             // 소유 확인 — 토큰의 skinAnalysisId 로 조회한다. 최신 분석으로 갈아타지 않는다.
             SkinAnalysis skinAnalysis = resolveSkinAnalysis(userId, payload.skinAnalysisId());
@@ -140,8 +155,53 @@ public class SkinPlateService {
                 return SkinPlateResponse.from(existing, parseAppliedRules(existing.getAppliedRules()));
             }
 
-            return save(userId, payload.food(), skinAnalysis.getId(), payload.jti());
+            return save(userId, payload.food(), skinAnalysis.getId(), payload.jti(), comments);
         });
+    }
+
+    /**
+     * 룰 엔진 결과와 오늘의 기록을 모아 AI 에 문장 두 개를 청탁한다.
+     * <b>여기서 점수는 이미 다 계산돼 있다</b> — AI 입력은 결과지, 재료가 아니다.
+     *
+     * 어떤 예외든 EMPTY 로 삼킨다. 문장 생성이 저장을 막는 순간
+     * "AI 없이도 도는 제품"이라는 전제가 무너진다.
+     */
+    private PlateComments generateCommentsSafely(Long userId, AnalysisTokenPayload payload) {
+        try {
+            SkinAnalysis skinAnalysis = resolveSkinAnalysis(userId, payload.skinAnalysisId());
+            FoodAnalysis food = foodAnalysisService.toEntity(null, payload.food());
+            PlateEvaluation evaluation =
+                    engine.evaluate(new PlateContext(skinAnalysis.getMetrics(), food));
+
+            // 오늘 이미 저장된 기록들. 저장 시각은 KST 로 고정돼 있다(JpaConfig).
+            LocalDateTime todayStart = LocalDate.now(DateRange.KST).atStartOfDay();
+            List<String> todaysRecords = skinPlateRepository
+                    .findInRange(userId, todayStart, todayStart.plusDays(1))
+                    .stream()
+                    .map(plate -> mealLabel(plate.getCreatedAt()) + " "
+                            + plate.getFoodAnalysis().getFoodName() + " "
+                            + plate.getPlateScore() + "점")
+                    .collect(Collectors.toList());
+
+            return visionClient.generateComments(PlateCommentPrompt.user(
+                    skinAnalysis.getMetrics(),
+                    food.getFoodName(),
+                    evaluation.score(),
+                    evaluation.toFeedbacks(),
+                    todaysRecords));
+        } catch (Exception e) {
+            log.warn("AI 코멘트 생성 실패 — 문장 없이 저장한다", e);
+            return PlateComments.EMPTY;
+        }
+    }
+
+    /** AI 컨텍스트용 한국어 끼니 라벨. 화면 표기는 앱이 따로 한다. */
+    private static String mealLabel(LocalDateTime recordedAt) {
+        return switch (MealType.from(recordedAt)) {
+            case BREAKFAST -> "아침";
+            case LUNCH -> "점심";
+            case DINNER -> "저녁";
+        };
     }
 
     @Transactional(readOnly = true)
@@ -209,7 +269,8 @@ public class SkinPlateService {
     // ---- 내부 ----
 
     /** jti 는 멱등키다. 저장 경로가 saveRecord() 하나뿐이므로 항상 값이 있다. */
-    private SkinPlateResponse save(Long userId, OpenAiFoodResult aiResult, Long skinAnalysisId, String jti) {
+    private SkinPlateResponse save(Long userId, OpenAiFoodResult aiResult, Long skinAnalysisId,
+                                   String jti, PlateComments comments) {
         AppUser user = userRepository.findById(userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
 
@@ -225,6 +286,7 @@ public class SkinPlateService {
                 evaluation.score(), evaluation.summary(),
                 toJson(evaluation.appliedRuleCodes()));
         plate.addFeedbacks(evaluation.toFeedbacks());
+        plate.attachAiComments(comments.aiTip(), comments.dailyComment());
 
         skinPlateRepository.save(plate);
 

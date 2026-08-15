@@ -47,6 +47,14 @@ public class SkinPlate extends BaseTimeEntity {
     @Column(columnDefinition = "jsonb")
     private String appliedRules;
 
+    /** "AI 맞춤 TIP". 문장 생성만 AI 가 한다 — 점수·판정은 여기 없다. NULL 이면 앱이 카드를 숨긴다. */
+    @Column(length = 300)
+    private String aiTip;
+
+    /** "오늘의 AI 코멘트". 그날의 최신 기록이 그날의 문장을 쥔다(V4 주석 참조). */
+    @Column(length = 300)
+    private String aiDailyComment;
+
     @OneToMany(mappedBy = "skinPlate", cascade = CascadeType.ALL, orphanRemoval = true)
     @OrderBy("displayOrder ASC")
     private List<SkinPlateFeedback> feedbacks = new ArrayList<>();
@@ -65,6 +73,15 @@ public class SkinPlate extends BaseTimeEntity {
         plate.summary = summary;
         plate.appliedRules = appliedRulesJson;
         return plate;
+    }
+
+    /**
+     * AI 문장을 붙인다. 저장 전에 한 번만 불린다.
+     * 생성 실패 시 null 이 들어와도 된다 — 문장이 없다고 기록을 잃을 수는 없다.
+     */
+    public void attachAiComments(String tip, String dailyComment) {
+        this.aiTip = tip;
+        this.aiDailyComment = dailyComment;
     }
 
     public void addFeedback(SkinPlateFeedback feedback) {

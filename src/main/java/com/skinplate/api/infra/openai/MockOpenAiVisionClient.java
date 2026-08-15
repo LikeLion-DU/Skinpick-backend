@@ -3,6 +3,7 @@ package com.skinplate.api.infra.openai;
 import com.skinplate.api.infra.openai.dto.FacePhoto;
 import com.skinplate.api.infra.openai.dto.OpenAiFoodResult;
 import com.skinplate.api.infra.openai.dto.OpenAiSkinResult;
+import com.skinplate.api.infra.openai.dto.PlateComments;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
@@ -45,5 +46,13 @@ public class MockOpenAiVisionClient implements VisionClient {
                         new OpenAiFoodResult.Ingredient("고춧가루", "CAPSAICIN")),
                 new OpenAiFoodResult.Nutrition(520, new BigDecimal("28.5"), new BigDecimal("24.0"),
                         new BigDecimal("32.0"), 1850, new BigDecimal("6.2")));
+    }
+
+    /** 60점 김치찌개 시나리오에 맞는 고정 문장. 무대에서 읽어도 어색하지 않아야 한다. */
+    @Override
+    public PlateComments generateComments(String userContext) {
+        return new PlateComments(
+                "나트륨이 조금 높았어요. 다음 식사에는 국물을 줄이고 채소를 곁들여 보세요!",
+                "발효식품과 단백질을 잘 챙긴 하루였어요. 내일은 나트륨을 조금만 줄여볼까요?");
     }
 }
