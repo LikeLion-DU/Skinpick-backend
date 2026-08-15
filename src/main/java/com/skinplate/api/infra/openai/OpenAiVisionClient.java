@@ -6,8 +6,10 @@ import com.skinplate.api.global.exception.ErrorCode;
 import com.skinplate.api.infra.openai.dto.FacePhoto;
 import com.skinplate.api.infra.openai.dto.OpenAiFoodResult;
 import com.skinplate.api.infra.openai.dto.OpenAiSkinResult;
+import com.skinplate.api.infra.openai.dto.PlateComments;
 import com.skinplate.api.infra.openai.exception.OpenAiClientException;
 import com.skinplate.api.infra.openai.prompt.FoodAnalysisPrompt;
+import com.skinplate.api.infra.openai.prompt.PlateCommentPrompt;
 import com.skinplate.api.infra.openai.prompt.SkinAnalysisPrompt;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -77,6 +79,13 @@ public class OpenAiVisionClient implements VisionClient {
         return call(FoodAnalysisPrompt.SYSTEM, FoodAnalysisPrompt.SCHEMA, "food_analysis",
                 List.of(text(FoodAnalysisPrompt.USER), image(base64Image, mediaType, FOOD_DETAIL)),
                 OpenAiFoodResult.class);
+    }
+
+    /** 텍스트 전용이라 이미지 파트가 없다. 같은 call() 을 타므로 타임아웃·429 정책도 같다. */
+    @Override
+    public PlateComments generateComments(String userContext) {
+        return call(PlateCommentPrompt.SYSTEM, PlateCommentPrompt.SCHEMA, "plate_comments",
+                List.of(text(userContext)), PlateComments.class);
     }
 
     private static Map<String, Object> text(String value) {

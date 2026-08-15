@@ -30,6 +30,7 @@ import com.skinplate.api.global.exception.ErrorCode;
 import com.skinplate.api.global.security.AnalysisTokenPayload;
 import com.skinplate.api.global.security.AnalysisTokenProvider;
 import com.skinplate.api.infra.openai.VisionClient;
+import com.skinplate.api.infra.openai.dto.PlateComments;
 import com.skinplate.api.infra.openai.dto.OpenAiFoodResult;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -77,6 +78,7 @@ class SkinPlateServiceTest {
     private SkinPlateRepository skinPlateRepository;
     private FoodAnalysisService foodAnalysisService;
     private AnalysisTokenProvider analysisTokenProvider;
+    private VisionClient visionClient;
     private TransactionTemplate transactionTemplate;
     private PlateRuleEngine engine;
     private SkinPlateService skinPlateService;
@@ -99,10 +101,16 @@ class SkinPlateServiceTest {
                 new FriedOilRule(), new HydrationFoodRule(), new Omega3BarrierRule(),
                 new ProteinRule(), new VitaminRule(), new ProbioticRule()));
 
+        // 문장 생성은 이 테스트의 관심사가 아니다 — 실패해도 저장이 도는 게 계약이라
+        // EMPTY 를 돌려주는 mock 으로 통과시킨다.
+        visionClient = mock(VisionClient.class);
+        given(visionClient.generateComments(any())).willReturn(PlateComments.EMPTY);
+
         skinPlateService = new SkinPlateService(
                 userRepository, skinAnalysisRepository, foodAnalysisRepository,
                 skinPlateRepository, foodAnalysisService, engine,
-                new ObjectMapper(), transactionTemplate, analysisTokenProvider);
+                new ObjectMapper(), transactionTemplate, analysisTokenProvider,
+                visionClient);
     }
 
     @Test
@@ -284,7 +292,8 @@ class SkinPlateServiceTest {
         SkinPlateService serviceWithRealFoodAnalysis = new SkinPlateService(
                 userRepository, skinAnalysisRepository, foodAnalysisRepository,
                 skinPlateRepository, realFoodAnalysisService, engine,
-                realMapper, transactionTemplate, analysisTokenProvider);
+                realMapper, transactionTemplate, analysisTokenProvider,
+                visionClient);
 
         serviceWithRealFoodAnalysis.saveRecord(USER_ID, "token");
 

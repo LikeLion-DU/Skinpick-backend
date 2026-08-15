@@ -3,6 +3,7 @@ package com.skinplate.api.infra.openai;
 import com.skinplate.api.infra.openai.dto.FacePhoto;
 import com.skinplate.api.infra.openai.dto.OpenAiFoodResult;
 import com.skinplate.api.infra.openai.dto.OpenAiSkinResult;
+import com.skinplate.api.infra.openai.dto.PlateComments;
 
 import java.util.List;
 
@@ -25,4 +26,11 @@ public interface VisionClient {
      *                  data URI 에 선언하는 값이라 내용과 어긋나면 OpenAI 가 요청을 거절한다.
      */
     OpenAiFoodResult analyzeFood(String base64Image, String mediaType);
+
+    /**
+     * 룰 엔진의 결과를 사람이 읽을 문장으로 옮긴다. <b>판단은 이미 끝나 있다</b> —
+     * userContext 에 실린 평가만 문장이 되고, 점수·등급은 여기서 만들지 않는다.
+     * (PRD §18.9 — 음식 선정은 규칙, 문장 생성만 AI)
+     */
+    PlateComments generateComments(String userContext);
 }

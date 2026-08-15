@@ -65,6 +65,7 @@ public class PlateHistoryService {
                 sorted.get(sorted.size() - 1).getSkinAnalysis().getSkinScore());
 
         return new PlateHistoryDayDto(date, skinScore, averagePlateScore(sorted), TARGET_SCORE,
+                dailyComment(sorted),
                 sorted.stream()
                         .map(plate -> new PlateHistoryItemDto(plate.getId(),
                                 plate.getFoodAnalysis().getFoodName(),
@@ -72,6 +73,19 @@ public class PlateHistoryService {
                                 MealType.from(plate.getCreatedAt()),
                                 plate.getCreatedAt()))
                         .toList());
+    }
+
+    /**
+     * 그날의 문장. 최신 기록부터 훑어 처음 만나는 문장을 쓴다 —
+     * 최신 기록의 AI 생성이 실패한 날에도 이전 문장이 있으면 카드가 비지 않는다.
+     * (입력은 시각 내림차순 정렬이라 첫 non-null 이 곧 최신 문장이다)
+     */
+    private String dailyComment(List<SkinPlate> sorted) {
+        return sorted.stream()
+                .map(SkinPlate::getAiDailyComment)
+                .filter(comment -> comment != null && !comment.isBlank())
+                .findFirst()
+                .orElse(null);
     }
 
     /**

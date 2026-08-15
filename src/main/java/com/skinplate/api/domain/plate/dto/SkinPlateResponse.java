@@ -25,6 +25,12 @@ public record SkinPlateResponse(
         FoodAnalysisDto food,
         FeedbackGroupDto feedbacks,
         List<String> appliedRules,
+
+        /*
+         * "AI 맞춤 TIP". 저장 시 1회 생성된 문장이고, 실패했으면 null 이라
+         * non_null 직렬화로 키가 아예 빠진다 — 앱은 키가 없으면 카드를 숨긴다.
+         */
+        String aiTip,
         LocalDateTime createdAt
 ) {
     /**
@@ -42,6 +48,7 @@ public record SkinPlateResponse(
                 FoodAnalysisDto.from(entity.getFoodAnalysis()),
                 FeedbackGroupDto.from(entity.getFeedbacks()),
                 appliedRules,
+                entity.getAiTip(),
                 entity.getCreatedAt());
     }
 }
