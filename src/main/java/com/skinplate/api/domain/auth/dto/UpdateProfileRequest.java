@@ -5,6 +5,7 @@ import com.skinplate.api.domain.user.entity.SkinConcern;
 import com.skinplate.api.domain.user.entity.SkinType;
 import com.skinplate.api.domain.user.entity.SleepPattern;
 import com.skinplate.api.domain.user.entity.StressLevel;
+import com.skinplate.api.domain.user.entity.WaterIntake;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
@@ -18,7 +19,7 @@ import java.util.List;
  *
  * skinConcerns 만은 빈 배열이 "전부 해제"다 — null(생략)과 [] 를 구분한다.
  * hasNickname 의 isBlank 패턴을 복붙하면 해제가 조용히 무시되므로 null 검사만 한다.
- * 습관 3종은 UI 에 해제 개념이 없어 null = 변경 없음으로 충분하다.
+ * 습관 4종은 UI 에 해제 개념이 없어 null = 변경 없음으로 충분하다.
  */
 public record UpdateProfileRequest(
 
@@ -33,7 +34,9 @@ public record UpdateProfileRequest(
 
         StressLevel stressLevel,
 
-        ExerciseHabit exerciseHabit
+        ExerciseHabit exerciseHabit,
+
+        WaterIntake waterIntake
 ) {
     public boolean hasSkinType()      { return declaredSkinType != null; }
     public boolean hasNickname()      { return nickname != null && !nickname.isBlank(); }
@@ -41,4 +44,5 @@ public record UpdateProfileRequest(
     public boolean hasSleepPattern()  { return sleepPattern != null; }
     public boolean hasStressLevel()   { return stressLevel != null; }
     public boolean hasExerciseHabit() { return exerciseHabit != null; }
+    public boolean hasWaterIntake()   { return waterIntake != null; }
 }

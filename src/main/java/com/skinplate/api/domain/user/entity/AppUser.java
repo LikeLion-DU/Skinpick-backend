@@ -65,7 +65,7 @@ public class AppUser extends BaseTimeEntity {
     @Enumerated(EnumType.STRING)
     private Set<SkinConcern> skinConcerns = new HashSet<>();
 
-    /** 생활 습관 3종. NULL = 미선택 — declaredSkinType 과 같은 의미론이다. */
+    /** 생활 습관 4종. NULL = 미선택 — declaredSkinType 과 같은 의미론이다. */
     @Enumerated(EnumType.STRING)
     @Column(length = 20)
     private SleepPattern sleepPattern;
@@ -77,6 +77,10 @@ public class AppUser extends BaseTimeEntity {
     @Enumerated(EnumType.STRING)
     @Column(length = 20)
     private ExerciseHabit exerciseHabit;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private WaterIntake waterIntake;
 
     private LocalDateTime lastLoginAt;
 
@@ -123,6 +127,8 @@ public class AppUser extends BaseTimeEntity {
     public void changeStressLevel(StressLevel stressLevel)       { this.stressLevel = stressLevel; }
 
     public void changeExerciseHabit(ExerciseHabit exerciseHabit) { this.exerciseHabit = exerciseHabit; }
+
+    public void changeWaterIntake(WaterIntake waterIntake)       { this.waterIntake = waterIntake; }
 
     /**
      * 가입 시점에 소문자로 정규화한다.

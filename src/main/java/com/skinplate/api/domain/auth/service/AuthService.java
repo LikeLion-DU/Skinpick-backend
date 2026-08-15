@@ -108,6 +108,7 @@ public class AuthService {
         if (request.hasSleepPattern())  user.changeSleepPattern(request.sleepPattern());
         if (request.hasStressLevel())   user.changeStressLevel(request.stressLevel());
         if (request.hasExerciseHabit()) user.changeExerciseHabit(request.exerciseHabit());
+        if (request.hasWaterIntake())   user.changeWaterIntake(request.waterIntake());
 
         return MeResponse.from(user);
     }

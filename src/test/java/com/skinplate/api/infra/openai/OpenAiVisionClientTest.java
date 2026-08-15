@@ -102,6 +102,33 @@ class OpenAiVisionClientTest {
         assertThat(requests.get()).isEqualTo(1);
     }
 
+    @Test
+    @DisplayName("인사이트만 출력 상한이 넓다 — 800 에서 잘리면 재시도해도 같은 자리에서 또 잘린다")
+    void insightAsksForMoreTokensThanTheRest() {
+        String insightEnvelope = """
+                {"choices":[{"message":{"content":%s}}]}"""
+                .formatted(new ObjectMapper().valueToTree(
+                        "{\"summary\":\"요약\",\"topics\":[{\"category\":\"DRY\",\"description\":\"설명\"}]}")
+                        .toString());
+
+        StringBuilder insight = new StringBuilder();
+        clientOf(request -> {
+            insight.append(bodyOf(request));
+            return Mono.just(json(HttpStatus.OK, insightEnvelope));
+        }, 5).generateSkinInsight("무시된다");
+
+        StringBuilder skin = new StringBuilder();
+        clientOf(request -> {
+            skin.append(bodyOf(request));
+            return Mono.just(json(HttpStatus.OK, ENVELOPE));
+        }, 5).analyzeSkin(PHOTOS);
+
+        // 한국어 문장 넷(summary + description ×3)이 800 토큰 상한에 닿는다.
+        assertThat(insight.toString()).contains("\"max_tokens\":1200");
+        // 나머지 호출은 그대로 800 — 상한을 다 같이 올리면 출력 폭주 방어가 함께 헐거워진다.
+        assertThat(skin.toString()).contains("\"max_tokens\":800");
+    }
+
     /** WebClient 는 본문을 BodyInserter 로 들고 있다. 실제로 써 봐야 내용이 보인다. */
     private static String bodyOf(ClientRequest request) {
         MockClientHttpRequest http = new MockClientHttpRequest(HttpMethod.POST, URI.create("/"));
