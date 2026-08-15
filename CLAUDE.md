@@ -87,7 +87,7 @@ docker exec -i skinplate-db psql -U skinplate -d skinplate -tAc \
 - 커밋 메시지: Conventional Commits + 한국어 — `{type}({scope}): 작업 내용`
   - 예: `feat(skin): 피부 분석 API 구현`, `fix(plate): 나트륨 룰 임계값 누락 수정`
   - type: `feat fix refactor docs test chore ci perf`
-  - scope: `auth user skin food plate recommendation report infra global deploy spec ci` — 여러 파트에 걸치면 생략 (`refactor: …`)
+  - scope: `auth user skin food plate recommendation insight report infra global deploy spec ci` — 여러 파트에 걸치면 생략 (`refactor: …`)
 - `[#이슈번호] 작업 내용` 형식은 쓰지 않는다
 - PR 제목도 커밋과 같은 형식으로 쓴다 — `develop` 은 squash 머지라 PR 제목이 그대로 `develop` 커밋 메시지가 된다
 - PR 본문: 🚀 작업 내용 / 🤔 고민했던 내용 / 💬 리뷰 중점사항 — 파일·클래스명 나열 금지, 자연스러운 문장으로
