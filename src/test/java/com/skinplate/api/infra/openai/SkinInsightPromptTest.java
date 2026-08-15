@@ -97,6 +97,18 @@ class SkinInsightPromptTest {
         assertThat(SkinInsightPrompt.SYSTEM).contains("의학적 진단");
     }
 
+    /**
+     * 실제 OpenAI 호출로 드러난 드리프트다 — 규칙 3·6 이 전역으로만 적혀 있으니
+     * 모델이 요약만 다른 문체로 다뤘다("영향을 주고 있어요" · "~입니다").
+     * 요약에 다시 걸어주는 이 두 줄이 지워져도 나머지 테스트는 초록으로 남는다.
+     */
+    @Test
+    @DisplayName("요약 규칙이 인과·문체 규칙을 다시 걸어준다 — 실호출에서 요약만 어긋났다")
+    void systemRebindsToneRulesToSummary() {
+        assertThat(SkinInsightPrompt.SYSTEM).contains("\"영향을 주고 있어요\"도 단정이다");
+        assertThat(SkinInsightPrompt.SYSTEM).contains("summary 에도 3번과 6번이");
+    }
+
     @Test
     @DisplayName("스키마의 category enum 은 13종 전부를 담는다 — 빠진 주제는 AI 가 답할 수 없다")
     void schemaEnumCoversEveryCategory() {
