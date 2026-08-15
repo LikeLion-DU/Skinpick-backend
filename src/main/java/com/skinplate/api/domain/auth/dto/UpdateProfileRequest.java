@@ -5,6 +5,7 @@ import com.skinplate.api.domain.user.entity.SkinConcern;
 import com.skinplate.api.domain.user.entity.SkinType;
 import com.skinplate.api.domain.user.entity.SleepPattern;
 import com.skinplate.api.domain.user.entity.StressLevel;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 import java.util.List;
@@ -26,7 +27,7 @@ public record UpdateProfileRequest(
         @Size(min = 2, max = 10, message = "닉네임은 2자 이상 10자 이하로 입력해 주세요.")
         String nickname,
 
-        List<SkinConcern> skinConcerns,
+        List<@NotNull(message = "피부 고민 항목에 빈 값이 올 수 없습니다.") SkinConcern> skinConcerns,
 
         SleepPattern sleepPattern,
 

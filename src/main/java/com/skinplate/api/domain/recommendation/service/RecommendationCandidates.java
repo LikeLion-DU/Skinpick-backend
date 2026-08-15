@@ -1,6 +1,7 @@
 package com.skinplate.api.domain.recommendation.service;
 
 import com.skinplate.api.domain.skin.entity.SkinMetrics;
+import com.skinplate.api.domain.user.entity.SkinConcern;
 
 import java.util.Comparator;
 import java.util.List;
@@ -16,24 +17,63 @@ public final class RecommendationCandidates {
 
     private RecommendationCandidates() {}
 
-    public enum Concern { DRY, REDNESS, TROUBLE, OILY, BARRIER_WEAK }
+    /** 추천 축. 앞 5개는 측정(SkinMetrics), 뒤 7개는 자가 신고 고민·습관에서만 진입한다. */
+    public enum Concern {
+        DRY, REDNESS, TROUBLE, OILY, BARRIER_WEAK,
+        DARK_CIRCLE, PIGMENTATION, ELASTICITY, PUFFINESS,
+        SLEEP_LACK, STRESS_HIGH, EXERCISE_NONE
+    }
 
     public record Candidates(List<String> recommend, List<String> avoid) {}
 
-    private static final Map<Concern, Candidates> TABLE = Map.of(
-            Concern.DRY,          new Candidates(List.of("연어", "아보카도", "오이", "견과류"),
-                                                 List.of("커피", "술")),
-            Concern.REDNESS,      new Candidates(List.of("브로콜리", "녹차", "토마토"),
-                                                 List.of("매운 음식", "술")),
-            Concern.TROUBLE,      new Candidates(List.of("키위", "고구마", "견과류"),
-                                                 List.of("탄산음료", "초콜릿", "튀김")),
-            Concern.OILY,         new Candidates(List.of("채소", "두부", "흰살생선"),
-                                                 List.of("튀김", "라면", "패스트푸드")),
-            Concern.BARRIER_WEAK, new Candidates(List.of("연어", "달걀", "아몬드"),
-                                                 List.of("인스턴트", "가공육")));
+    private static final Map<Concern, Candidates> TABLE = Map.ofEntries(
+            Map.entry(Concern.DRY,          new Candidates(List.of("연어", "아보카도", "오이", "견과류"),
+                                                           List.of("커피", "술"))),
+            Map.entry(Concern.REDNESS,      new Candidates(List.of("브로콜리", "녹차", "토마토"),
+                                                           List.of("매운 음식", "술"))),
+            Map.entry(Concern.TROUBLE,      new Candidates(List.of("키위", "고구마", "견과류"),
+                                                           List.of("탄산음료", "초콜릿", "튀김"))),
+            Map.entry(Concern.OILY,         new Candidates(List.of("채소", "두부", "흰살생선"),
+                                                           List.of("튀김", "라면", "패스트푸드"))),
+            Map.entry(Concern.BARRIER_WEAK, new Candidates(List.of("연어", "달걀", "아몬드"),
+                                                           List.of("인스턴트", "가공육"))),
+            // 자가 신고 전용 축 — 측정 지표로는 볼 수 없는 고민이다
+            Map.entry(Concern.DARK_CIRCLE,  new Candidates(List.of("시금치", "달걀"),
+                                                           List.of("술"))),
+            Map.entry(Concern.PIGMENTATION, new Candidates(List.of("토마토", "키위", "파프리카"),
+                                                           List.of("술"))),
+            Map.entry(Concern.ELASTICITY,   new Candidates(List.of("닭가슴살", "달걀", "베리류"),
+                                                           List.of("탄산음료"))),
+            Map.entry(Concern.PUFFINESS,    new Candidates(List.of("오이", "바나나"),
+                                                           List.of("라면", "가공육"))),
+            // 습관 축 — 나쁜 값일 때만 트리거된다
+            Map.entry(Concern.SLEEP_LACK,   new Candidates(List.of("바나나", "우유"),
+                                                           List.of("커피", "술"))),
+            Map.entry(Concern.STRESS_HIGH,  new Candidates(List.of("견과류", "녹차", "연어"),
+                                                           List.of("커피"))),
+            Map.entry(Concern.EXERCISE_NONE, new Candidates(List.of("두부", "달걀", "닭가슴살"),
+                                                            List.of("패스트푸드"))));
 
     public static Candidates of(Concern concern) {
         return TABLE.get(concern);
+    }
+
+    /**
+     * 자가 신고 고민 → 추천 축. (설계서 2026-08-15 §3)
+     * switch 가 전사라서 SkinConcern 에 값을 추가하고 여기를 빠뜨리면 컴파일이 깨진다.
+     */
+    public static Concern mapDeclared(SkinConcern concern) {
+        return switch (concern) {
+            case ACNE         -> Concern.TROUBLE;
+            case REDNESS      -> Concern.REDNESS;
+            case DRYNESS      -> Concern.DRY;
+            case OILINESS     -> Concern.OILY;
+            case TEXTURE      -> Concern.BARRIER_WEAK;
+            case DARK_CIRCLE  -> Concern.DARK_CIRCLE;
+            case PIGMENTATION -> Concern.PIGMENTATION;
+            case ELASTICITY   -> Concern.ELASTICITY;
+            case PUFFINESS    -> Concern.PUFFINESS;
+        };
     }
 
     /**
@@ -84,7 +124,6 @@ public final class RecommendationCandidates {
             // 추천
             Map.entry("연어",      "오메가3와 단백질이 들어 있어 피부 장벽을 채우는 데 좋습니다."),
             Map.entry("아보카도",  "불포화지방과 비타민E가 수분이 빠져나가는 것을 붙잡아 줍니다."),
-            Map.entry("오이",      "수분이 대부분이라 부담 없이 물기를 채울 수 있습니다."),
             Map.entry("견과류",    "비타민E와 좋은 지방이 들어 있어 조금씩 자주 먹기 좋습니다."),
             Map.entry("브로콜리",  "항산화 성분이 풍부한 채소라 자극받은 피부에 부담이 적습니다."),
             Map.entry("녹차",      "폴리페놀이 들어 있고 카페인이 커피보다 적습니다."),
@@ -97,16 +136,25 @@ public final class RecommendationCandidates {
             Map.entry("달걀",      "단백질과 아미노산이 고루 들어 있습니다."),
             Map.entry("아몬드",    "비타민E가 많아 장벽이 약할 때 곁들이기 좋습니다."),
             // 주의
-            Map.entry("커피",      "카페인이 이뇨 작용을 해 수분이 더 빠질 수 있습니다."),
             Map.entry("술",        "탈수를 부르고 혈관을 확장시켜 붉은기를 키울 수 있습니다."),
             Map.entry("매운 음식",  "캡사이신이 혈관을 확장시켜 홍조를 더 붉게 만들 수 있습니다."),
-            Map.entry("탄산음료",  "당류가 많아 트러블을 악화시킬 수 있습니다."),
             Map.entry("초콜릿",    "당과 지방이 함께 많아 트러블이 있을 때 부담이 됩니다."),
             Map.entry("튀김",      "튀김 기름이 유분과 트러블 양쪽을 자극할 수 있습니다."),
-            Map.entry("라면",      "나트륨이 높아 수분을 빼앗아 갑니다."),
             Map.entry("패스트푸드", "기름기와 나트륨이 함께 높습니다."),
             Map.entry("인스턴트",  "가공도가 높아 장벽 회복에 도움이 되지 않습니다."),
-            Map.entry("가공육",    "나트륨과 첨가물이 많아 장벽이 약할 때 부담이 됩니다."));
+            // 교체 (기존 문구가 새 맥락에서 어색해지는 것들)
+            Map.entry("오이",      "수분이 대부분이라 물기를 채우고 붓기를 가라앉히는 데 좋습니다."),
+            Map.entry("커피",      "카페인이 수분을 빼앗고 잠들기도 어렵게 만듭니다."),
+            Map.entry("탄산음료",  "당류가 많아 트러블과 탄력 저하를 함께 부추길 수 있습니다."),
+            Map.entry("라면",      "나트륨이 높아 붓기를 부르고 수분을 빼앗아 갑니다."),
+            Map.entry("가공육",    "나트륨과 첨가물이 많아 붓기와 장벽 회복 모두에 부담이 됩니다."),
+            // 신규
+            Map.entry("시금치",    "철분과 루테인이 들어 있어 눈가 그늘 관리에 곁들이기 좋습니다."),
+            Map.entry("파프리카",  "비타민C가 풍부해 칙칙해진 톤을 관리하는 데 도움이 됩니다."),
+            Map.entry("닭가슴살",  "단백질이 풍부해 피부 탄력의 재료를 채워 줍니다."),
+            Map.entry("베리류",    "안토시아닌 같은 항산화 성분이 탄력 저하를 늦추는 데 좋습니다."),
+            Map.entry("바나나",    "칼륨이 나트륨 배출을 도와 붓기를 가라앉히고 저녁 간식으로도 부담이 없습니다."),
+            Map.entry("우유",      "트립토판이 들어 있어 잠들기 어려운 날 저녁에 알맞습니다."));
 
     /** 표에 없는 음식이면 이름만 남긴다 — 문구가 없다고 추천이 사라지면 안 된다. */
     public static String reasonOf(String foodName) {

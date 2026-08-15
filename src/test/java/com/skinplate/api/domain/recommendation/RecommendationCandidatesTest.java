@@ -3,6 +3,7 @@ package com.skinplate.api.domain.recommendation;
 import com.skinplate.api.domain.recommendation.service.RecommendationCandidates;
 import com.skinplate.api.domain.recommendation.service.RecommendationCandidates.Concern;
 import com.skinplate.api.domain.skin.entity.SkinMetrics;
+import com.skinplate.api.domain.user.entity.SkinConcern;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -115,5 +116,25 @@ class RecommendationCandidatesTest {
                 .map(RecommendationCandidates::reasonOf)
                 .collect(java.util.stream.Collectors.toSet());
         assertThat(distinct).hasSameSizeAs(foods);
+    }
+
+    @Test
+    @DisplayName("H. 12개 축 전부 후보 표가 있다 — enum 만 늘리고 표를 빠뜨리면 NPE 로 무대에서 죽는다")
+    void everyConcernHasCandidates() {
+        for (Concern concern : Concern.values()) {
+            assertThat(RecommendationCandidates.of(concern))
+                    .as("%s 의 후보", concern).isNotNull();
+        }
+        assertThat(Concern.values()).hasSize(12);
+    }
+
+    @Test
+    @DisplayName("G. 신고 9종은 전부 추천 축으로 매핑되고, 그 축은 후보 표에 있다")
+    void everyDeclaredConcernMapsToACandidateTable() {
+        for (SkinConcern declared : SkinConcern.values()) {
+            Concern mapped = RecommendationCandidates.mapDeclared(declared);
+            assertThat(RecommendationCandidates.of(mapped))
+                    .as("%s → %s 의 후보", declared, mapped).isNotNull();
+        }
     }
 }

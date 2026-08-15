@@ -8,6 +8,10 @@ import com.skinplate.api.domain.recommendation.service.RecommendationCandidates.
 import com.skinplate.api.domain.recommendation.service.RecommendationCandidates.Concern;
 import com.skinplate.api.domain.skin.entity.SkinAnalysis;
 import com.skinplate.api.domain.skin.repository.SkinAnalysisRepository;
+import com.skinplate.api.domain.user.entity.AppUser;
+import com.skinplate.api.domain.user.entity.ExerciseHabit;
+import com.skinplate.api.domain.user.entity.SleepPattern;
+import com.skinplate.api.domain.user.entity.StressLevel;
 import com.skinplate.api.global.exception.BusinessException;
 import com.skinplate.api.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -17,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -62,9 +67,10 @@ public class RecommendationService {
      * 클라이언트가 재시도하면 행이 두 벌 생기고, 이후 조회마다 같은 음식이 두 번씩
      * 뜬다. 지우기 전까지 회복되지 않는다.
      *
-     * (V3 마이그레이션 주석은 이 숫자를 "7건이 14건"으로 적고 있다. 실제로는 시연
-     *  지표에서 10건이지만 적용된 마이그레이션은 고치지 않는다 — 파일이 바뀌면
-     *  Flyway 체크섬이 어긋나 이미 적용한 DB 가 기동에서 멈춘다.)
+     * (V3 마이그레이션 주석은 이 숫자를 "7건이 14건"으로 적고 있다. 추천 축이 5종이던
+     *  시절의 예시로, 슬롯이 측정 2 + 신고 1 + 습관 1 로 늘어난 지금은 시연 조합에서
+     *  한 벌이 이미 14건(추천 11 · 주의 3)이다. 그래도 적용된 마이그레이션은 고치지
+     *  않는다 — 파일이 바뀌면 Flyway 체크섬이 어긋나 이미 적용한 DB 가 기동에서 멈춘다.)
      *
      * 락으로 줄을 세우고, 마지막 방어선으로 V3 의 UNIQUE 제약이 뒤를 받친다.
      */
@@ -73,7 +79,8 @@ public class RecommendationService {
 
         // 취약 항목이 없으면 잠글 것도 저장할 것도 없다. 피부가 멀쩡한 사용자의
         // 조회마다 쓰기 락을 잡고 빈 저장을 하게 두면 락만 값을 치른다.
-        // 이 경우 exists 는 계속 false 지만, build 는 지표에서 바로 나오는 순수 계산이다.
+        // 이 경우 exists 는 계속 false 지만, build 는 지표·프로필에서 바로 나오는 계산이라
+        // 다음 조회에서 프로필이 생겼다면 그때 만들어진다 — "최초 생성 시점 고정"의 실제 의미다.
         if (built.isEmpty()) return;
 
         skinAnalysisRepository.findForUpdate(analysis.getId());
@@ -90,8 +97,7 @@ public class RecommendationService {
      * 데모마다 결과가 달라져 설명할 수 없다. (PRD §18.9)
      */
     private List<Recommendation> build(SkinAnalysis analysis) {
-        List<Concern> concerns =
-                RecommendationCandidates.topConcerns(analysis.getMetrics(), TOP_CONCERN_COUNT);
+        List<Concern> concerns = slotConcerns(analysis);
 
         List<Recommendation> recommendations = new ArrayList<>();
         int order = 0;
@@ -128,5 +134,35 @@ public class RecommendationService {
         }
 
         return recommendations;
+    }
+
+    /**
+     * 추천 슬롯: 측정 최대 2 + 자가 신고 최대 1 + 습관 최대 1. (설계서 2026-08-15 §0)
+     * 해당 원천의 데이터가 없으면 그 슬롯은 비워둔다.
+     * 프로필은 최초 추천 생성 시점 값으로 고정된다 — 이후 바꿔도 이 분석의 추천은 안 변한다.
+     */
+    private List<Concern> slotConcerns(SkinAnalysis analysis) {
+        List<Concern> concerns = new ArrayList<>(
+                RecommendationCandidates.topConcerns(analysis.getMetrics(), TOP_CONCERN_COUNT));
+
+        AppUser user = analysis.getUser();
+
+        user.getSkinConcerns().stream()
+                .sorted()                                    // Set 이라 입력 순서가 없다 — 선언 순으로 고정
+                .map(RecommendationCandidates::mapDeclared)
+                .filter(mapped -> !concerns.contains(mapped))   // 측정이 이미 본 축이면 신고 슬롯을 안 쓴다
+                .findFirst()
+                .ifPresent(concerns::add);
+
+        habitConcern(user).ifPresent(concerns::add);
+        return concerns;
+    }
+
+    /** 나쁜 값만 트리거. 우선순위는 수면 > 스트레스 > 운동 — 하나만 뽑는다. */
+    private static Optional<Concern> habitConcern(AppUser user) {
+        if (user.getSleepPattern() == SleepPattern.LACKING) return Optional.of(Concern.SLEEP_LACK);
+        if (user.getStressLevel() == StressLevel.HIGH)      return Optional.of(Concern.STRESS_HIGH);
+        if (user.getExerciseHabit() == ExerciseHabit.NONE)  return Optional.of(Concern.EXERCISE_NONE);
+        return Optional.empty();
     }
 }
