@@ -1299,6 +1299,95 @@ public enum SkinType {
 
 > **판정 순서가 곧 우선순위다.** 홍조가 매우 높으면(>70) 다른 조건보다 먼저 `SENSITIVE`로 잡는다. 자극이 심한 상태에서 "지성이시네요"라고 말하는 건 사용자에게 도움이 안 된다.
 
+**`domain/user/entity/SkinConcern.java`**
+
+```java
+package com.skinplate.api.domain.user.entity;
+
+/**
+ * 자가 신고 피부 고민 (목업 "피부설정" 복수 선택 9종).
+ * 표시·추천 보완 전용 — 점수 계산(PlateContext)에는 넣지 않는다.
+ */
+public enum SkinConcern {
+
+    ACNE        ("여드름"),
+    REDNESS     ("민감/홍조"),
+    DARK_CIRCLE ("다크서클"),
+    DRYNESS     ("건조/각질"),
+    OILINESS    ("피지/유분"),
+    TEXTURE     ("피부결"),
+    PIGMENTATION("색조침착"),
+    ELASTICITY  ("탄력 저하"),
+    PUFFINESS   ("부기");
+
+    private final String label;
+
+    SkinConcern(String label) { this.label = label; }
+
+    public String getLabel() { return label; }
+}
+```
+
+**`domain/user/entity/SleepPattern.java`**
+
+```java
+package com.skinplate.api.domain.user.entity;
+
+/** 수면 패턴 (자가 신고). NULL = 미선택 — declaredSkinType 과 같은 의미론이다. */
+public enum SleepPattern {
+
+    LACKING("부족해요"),
+    NORMAL ("보통이에요"),
+    ENOUGH ("충분해요");
+
+    private final String label;
+
+    SleepPattern(String label) { this.label = label; }
+
+    public String getLabel() { return label; }
+}
+```
+
+**`domain/user/entity/StressLevel.java`**
+
+```java
+package com.skinplate.api.domain.user.entity;
+
+/** 스트레스 정도 (자가 신고). NULL = 미선택. */
+public enum StressLevel {
+
+    LOW   ("낮음"),
+    NORMAL("보통"),
+    HIGH  ("높음");
+
+    private final String label;
+
+    StressLevel(String label) { this.label = label; }
+
+    public String getLabel() { return label; }
+}
+```
+
+**`domain/user/entity/ExerciseHabit.java`**
+
+```java
+package com.skinplate.api.domain.user.entity;
+
+/** 운동 습관 (자가 신고). NULL = 미선택. */
+public enum ExerciseHabit {
+
+    NONE   ("거의 안 함"),
+    LIGHT  ("주 1-2회"),
+    REGULAR("주 3회 이상");
+
+    private final String label;
+
+    ExerciseHabit(String label) { this.label = label; }
+
+    public String getLabel() { return label; }
+}
+```
+
 **`domain/user/entity/AppUser.java`**
 
 ```java

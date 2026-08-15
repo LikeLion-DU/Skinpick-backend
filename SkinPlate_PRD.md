@@ -1937,7 +1937,7 @@ public class Recommendation extends BaseTimeEntity {
 | 2 | POST | `/auth/login` | — | 로그인 (JWT 발급) | P0 |
 | 3 | POST | `/auth/test-login` | — | **테스트 계정 원탭 로그인** | P0 |
 | 4 | GET | `/auth/me` | ✅ | 내 정보 조회 (토큰 유효성 확인 겸용) | P0 |
-| 4-b | **PATCH** | **`/auth/me`** | ✅ | **피부 타입·닉네임 수정** | **P0** |
+| 4-b | **PATCH** | **`/auth/me`** | ✅ | **피부 타입·닉네임·프로필(고민·습관) 수정** | **P0** |
 | 5 | POST | `/skin/analyses` | ✅ | 피부 사진 분석 | P0 |
 | 6 | GET | `/skin/analyses/latest` | ✅ | 최신 피부 분석 조회 | P0 |
 | 7 | GET | `/skin/analyses/{id}` | ✅ | 피부 분석 상세 | P1 |
