@@ -25,6 +25,7 @@ import com.skinplate.api.domain.skin.entity.SkinMetrics;
 import com.skinplate.api.domain.skin.repository.SkinAnalysisRepository;
 import com.skinplate.api.domain.user.entity.AppUser;
 import com.skinplate.api.domain.user.repository.AppUserRepository;
+import com.skinplate.api.global.common.DateRange;
 import com.skinplate.api.global.exception.BusinessException;
 import com.skinplate.api.global.exception.ErrorCode;
 import com.skinplate.api.global.security.AnalysisTokenPayload;
@@ -44,6 +45,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -370,6 +373,41 @@ class SkinPlateServiceTest {
     }
 
     /**
+     * findInRange 는 최신순이다. 그대로 실으면 프롬프트의 [오늘의 기록 전체]가
+     * 저녁→점심→아침으로 뒤집혀 나가고, "하루의 흐름을 한 문장으로" 요구받은 모델이
+     * 흐름을 거꾸로 서술한다.
+     */
+    @Test
+    @DisplayName("오늘의 기록은 시간순으로 프롬프트에 실린다 — 아침이 점심보다 앞이다")
+    void saveRecord_putsTodaysRecordsInChronologicalOrder() {
+        givenSkinAnalysis();
+        givenUser();
+        OpenAiFoodResult aiResult = givenAiResult();
+        AnalysisTokenPayload payload = new AnalysisTokenPayload(USER_ID, "jti-order", ANALYSIS_ID, aiResult);
+        given(analysisTokenProvider.parse("token", USER_ID)).willReturn(payload);
+        given(foodAnalysisRepository.findIdByUserIdAndJti(USER_ID, "jti-order")).willReturn(Optional.empty());
+        given(foodAnalysisService.toEntity(null, aiResult)).willReturn(givenFood());
+        given(foodAnalysisService.toEntity(any(AppUser.class), eq(aiResult), eq("jti-order")))
+                .willReturn(givenFood());
+        given(foodAnalysisRepository.save(any())).willAnswer(invocation -> invocation.getArgument(0));
+
+        // 쿼리가 돌려주는 순서 그대로 — 점심(12:30)이 먼저, 아침(08:20)이 뒤다.
+        LocalDate today = LocalDate.now(DateRange.KST);
+        given(skinPlateRepository.findInRange(eq(USER_ID), any(), any())).willReturn(List.of(
+                givenRecordedPlate(today.atTime(12, 30), "비빔밥"),
+                givenRecordedPlate(today.atTime(8, 20), "그릭요거트")));
+
+        skinPlateService.saveRecord(USER_ID, "token");
+
+        ArgumentCaptor<String> promptCaptor = ArgumentCaptor.forClass(String.class);
+        verify(visionClient).generateComments(promptCaptor.capture());
+        String captured = promptCaptor.getValue();
+
+        // 순서만 보면 "아침" 줄이 통째로 사라져도 -1 이 앞선다며 통과한다. 내용까지 붙여 고정한다.
+        assertThat(captured).contains("아침 그릭요거트 78점\n점심 비빔밥 78점");
+    }
+
+    /**
      * 프롬프트의 "80자 이내"는 요청일 뿐 Structured Outputs 가 강제하지 않는다.
      * 길이 방어가 없으면 긴 문장 하나가 varchar(300) INSERT 를 깨서 기록까지 잃는다.
      */
@@ -650,6 +688,28 @@ class SkinPlateServiceTest {
 
         given(skinPlateRepository.findByIdAndUserId(PLATE_ID, USER_ID))
                 .willReturn(Optional.of(plate));
+        return plate;
+    }
+
+    /**
+     * "오늘의 기록" 한 줄이 될 이미 저장된 기록. 끼니 라벨은 createdAt 에서 파생하는데
+     * BaseTimeEntity 가 채우는 값이라 생성자로는 줄 수 없어 리플렉션으로 심는다.
+     */
+    private SkinPlate givenRecordedPlate(LocalDateTime recordedAt, String foodName) {
+        AppUser user = AppUser.create("test@skinplate.app", "encoded", "테스트유저");
+        ReflectionTestUtils.setField(user, "id", USER_ID);
+
+        SkinAnalysis analysis = SkinAnalysis.create(
+                user, SkinMetrics.of(38, 52, 64, 25, 78), 55, "요약", "{}");
+        ReflectionTestUtils.setField(analysis, "id", ANALYSIS_ID);
+
+        FoodAnalysis food = FoodAnalysis.create(user, foodName, "한식",
+                Nutrition.of(400, new BigDecimal("20.0"), new BigDecimal("10.0"),
+                        new BigDecimal("50.0"), 600, new BigDecimal("5.0")),
+                CookingMethod.BOILED, false, "{}");
+
+        SkinPlate plate = SkinPlate.create(user, analysis, food, 78, "요약", "[]");
+        ReflectionTestUtils.setField(plate, "createdAt", recordedAt);
         return plate;
     }
 

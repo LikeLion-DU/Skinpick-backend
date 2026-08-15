@@ -48,6 +48,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -183,14 +184,17 @@ public class SkinPlateService {
                     engine.evaluate(new PlateContext(skinAnalysis.getMetrics(), food));
 
             // 오늘 이미 저장된 기록들. 저장 시각은 KST 로 고정돼 있다(JpaConfig).
+            // 쿼리 정렬에 기대지 않고 여기서 시간순을 보장한다 — 프롬프트는 하루의 흐름을
+            // 시간순으로 읽어야 한다.
             LocalDateTime todayStart = LocalDate.now(DateRange.KST).atStartOfDay();
             List<String> todaysRecords = skinPlateRepository
                     .findInRange(userId, todayStart, todayStart.plusDays(1))
                     .stream()
+                    .sorted(Comparator.comparing(SkinPlate::getCreatedAt))
                     .map(plate -> mealLabel(plate.getCreatedAt()) + " "
                             + plate.getFoodAnalysis().getFoodName() + " "
                             + plate.getPlateScore() + "점")
-                    .collect(Collectors.toList());
+                    .toList();
 
             return visionClient.generateComments(PlateCommentPrompt.user(
                     skinAnalysis.getMetrics(),
