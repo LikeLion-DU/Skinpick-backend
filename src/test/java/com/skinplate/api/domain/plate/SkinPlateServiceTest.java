@@ -314,6 +314,100 @@ class SkinPlateServiceTest {
                 "spicy", "ingredients", "nutrition", "_meta");
     }
 
+    /**
+     * "AI 가 죽어도 기록은 산다"가 이 경로의 계약이다. 그동안 mock 이 늘 EMPTY 를
+     * 돌려줬던 탓에 catch 갈래는 한 번도 실검증된 적이 없었다.
+     */
+    @Test
+    @DisplayName("AI 문장 생성이 터져도 저장은 끝난다 — 응답의 aiTip 만 비어 있다")
+    void saveRecord_whenAiThrows_stillSavesWithoutComments() {
+        givenSkinAnalysis();
+        givenUser();
+        OpenAiFoodResult aiResult = givenAiResult();
+        AnalysisTokenPayload payload = new AnalysisTokenPayload(USER_ID, "jti-ai-down", ANALYSIS_ID, aiResult);
+        given(analysisTokenProvider.parse("token", USER_ID)).willReturn(payload);
+        given(foodAnalysisRepository.findIdByUserIdAndJti(USER_ID, "jti-ai-down")).willReturn(Optional.empty());
+        given(foodAnalysisService.toEntity(null, aiResult)).willReturn(givenFood());
+        given(foodAnalysisService.toEntity(any(AppUser.class), eq(aiResult), eq("jti-ai-down")))
+                .willReturn(givenFood());
+        given(foodAnalysisRepository.save(any())).willAnswer(invocation -> invocation.getArgument(0));
+        given(visionClient.generateComments(any())).willThrow(new RuntimeException("AI down"));
+
+        SkinPlateResponse response = skinPlateService.saveRecord(USER_ID, "token");
+
+        assertThat(response.plateScore()).isEqualTo(60);
+        assertThat(response.aiTip()).isNull();
+        verify(skinPlateRepository).save(any());
+    }
+
+    /**
+     * 배선 검증이 없으면 attachAiComments 호출 줄을 통째로 지워도 전 테스트가 통과한다 —
+     * 나머지 테스트의 mock 이 전부 EMPTY 를 돌려주기 때문이다.
+     */
+    @Test
+    @DisplayName("생성된 문장이 저장된 기록에 실린다 — attachAiComments 배선 검증")
+    void saveRecord_attachesGeneratedComments() {
+        givenSkinAnalysis();
+        givenUser();
+        OpenAiFoodResult aiResult = givenAiResult();
+        AnalysisTokenPayload payload = new AnalysisTokenPayload(USER_ID, "jti-comment", ANALYSIS_ID, aiResult);
+        given(analysisTokenProvider.parse("token", USER_ID)).willReturn(payload);
+        given(foodAnalysisRepository.findIdByUserIdAndJti(USER_ID, "jti-comment")).willReturn(Optional.empty());
+        given(foodAnalysisService.toEntity(null, aiResult)).willReturn(givenFood());
+        given(foodAnalysisService.toEntity(any(AppUser.class), eq(aiResult), eq("jti-comment")))
+                .willReturn(givenFood());
+        given(foodAnalysisRepository.save(any())).willAnswer(invocation -> invocation.getArgument(0));
+        given(visionClient.generateComments(any()))
+                .willReturn(new PlateComments("팁 문장", "코멘트 문장"));
+
+        SkinPlateResponse response = skinPlateService.saveRecord(USER_ID, "token");
+
+        assertThat(response.aiTip()).isEqualTo("팁 문장");
+
+        ArgumentCaptor<SkinPlate> plateCaptor = ArgumentCaptor.forClass(SkinPlate.class);
+        verify(skinPlateRepository).save(plateCaptor.capture());
+        assertThat(plateCaptor.getValue().getAiDailyComment()).isEqualTo("코멘트 문장");
+    }
+
+    /**
+     * 프롬프트의 "80자 이내"는 요청일 뿐 Structured Outputs 가 강제하지 않는다.
+     * 길이 방어가 없으면 긴 문장 하나가 varchar(300) INSERT 를 깨서 기록까지 잃는다.
+     */
+    @Test
+    @DisplayName("300자를 넘는 AI 문장은 잘려서 담긴다 — null 은 그대로 통과한다")
+    void attachAiComments_clampsOverlongSentences() {
+        SkinPlate plate = givenPlate();
+
+        plate.attachAiComments("가".repeat(350), "나".repeat(350));
+
+        assertThat(plate.getAiTip()).hasSize(300);
+        assertThat(plate.getAiDailyComment()).hasSize(300);
+
+        plate.attachAiComments(null, null);
+        assertThat(plate.getAiTip()).isNull();
+        assertThat(plate.getAiDailyComment()).isNull();
+    }
+
+    /**
+     * 경계가 이모지 한가운데면 반쪽짜리 문자가 남고, Postgres 가 UTF-8 에서 거절한다 —
+     * 막으려던 그 500 이 그대로 난다. 그래서 한 글자 덜 자른다.
+     */
+    @Test
+    @DisplayName("경계가 이모지 한가운데면 한 글자 덜 자른다 — 반쪽 문자를 남기지 않는다")
+    void attachAiComments_neverSplitsSurrogatePair() {
+        SkinPlate plate = givenPlate();
+
+        // 앞 299자 뒤에 🙂(2 char) — 300번째 char(index 299)가 high surrogate 다.
+        String withEmojiOnBoundary = "가".repeat(299) + "🙂" + "나".repeat(10);
+        assertThat(Character.isHighSurrogate(withEmojiOnBoundary.charAt(299))).isTrue();
+
+        plate.attachAiComments(withEmojiOnBoundary, withEmojiOnBoundary);
+
+        assertThat(plate.getAiTip()).hasSize(299);
+        assertThat(Character.isHighSurrogate(
+                plate.getAiTip().charAt(plate.getAiTip().length() - 1))).isFalse();
+    }
+
     @Test
     @DisplayName("멱등 — jti 조회가 기존 id 를 반환하면 새로 저장하지 않고 기존 Plate 를 돌려준다")
     void saveRecord_idempotent_returnsExistingPlateWithoutSaving() {
@@ -335,6 +429,30 @@ class SkinPlateServiceTest {
         // 누른 요청 중 하나가 바로 이 갈래로 떨어진다. 여기서 락을 건너뛰면 둘 다 jti
         // 조회를 먼저 통과해버려 멱등성이 무력화된다.
         verify(skinAnalysisRepository).findForUpdate(ANALYSIS_ID);
+    }
+
+    /**
+     * 멱등키의 존재 이유가 재시도인데, 재시도마다 25초짜리 유료 호출을 하고 버리면
+     * 그 이유가 반쯤 사라진다. 저장 정확성은 트랜잭션 안의 재확인이 이미 맡고 있다.
+     */
+    @Test
+    @DisplayName("멱등 — 같은 토큰의 재시도는 AI 문장 생성을 아예 건너뛴다")
+    void saveRecord_idempotent_skipsAiCommentGeneration() {
+        givenSkinAnalysis();
+        SkinPlate existingPlate = givenPlate();
+        OpenAiFoodResult aiResult = givenAiResult();
+        AnalysisTokenPayload payload = new AnalysisTokenPayload(USER_ID, "jti-dup", ANALYSIS_ID, aiResult);
+        given(analysisTokenProvider.parse("token", USER_ID)).willReturn(payload);
+        given(foodAnalysisRepository.findIdByUserIdAndJti(USER_ID, "jti-dup")).willReturn(Optional.of(555L));
+        given(skinPlateRepository.findByFoodAnalysisIdAndUserId(555L, USER_ID))
+                .willReturn(Optional.of(existingPlate));
+        // 문장 생성 경로가 끝까지 도달할 수 있게 해둔다 — 중간에서 예외로 삼켜지면
+        // 호출을 건너뛴 것과 구분되지 않아 이 테스트가 엉뚱한 이유로 통과한다.
+        given(foodAnalysisService.toEntity(null, aiResult)).willReturn(givenFood());
+
+        skinPlateService.saveRecord(USER_ID, "token");
+
+        verify(visionClient, never()).generateComments(any());
     }
 
     @Test

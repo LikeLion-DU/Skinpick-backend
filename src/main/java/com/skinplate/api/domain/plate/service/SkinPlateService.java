@@ -131,10 +131,19 @@ public class SkinPlateService {
     public SkinPlateResponse saveRecord(Long userId, String analysisToken) {
         AnalysisTokenPayload payload = analysisTokenProvider.parse(analysisToken, userId);
 
+        // 같은 토큰의 재시도면 유료 AI 호출 전에 알아챈다 — analyze() 의
+        // "유료 호출 전 인덱스 읽기 한 번"과 같은 원칙이다. 락 없는 선조회라
+        // 동시 요청 경쟁은 못 막지만 그건 아래 트랜잭션 안의 재확인이 맡는다.
+        // 여기서 아끼는 것은 정확성이 아니라 25초와 과금이다.
+        boolean alreadySaved =
+                foodAnalysisRepository.findIdByUserIdAndJti(userId, payload.jti()).isPresent();
+
         // AI 문장은 트랜잭션 밖에서 만든다 — OpenAI 를 트랜잭션 안에서 부르면
         // 응답을 기다리는 내내 커넥션을 쥐고 있게 된다. 실패하면 문장 없이 저장한다.
         // 문장은 부가 정보고, 기록이 본체다.
-        PlateComments comments = generateCommentsSafely(userId, payload);
+        PlateComments comments = alreadySaved
+                ? PlateComments.EMPTY
+                : generateCommentsSafely(userId, payload);
 
         return transactionTemplate.execute(status -> {
             // 소유 확인 — 토큰의 skinAnalysisId 로 조회한다. 최신 분석으로 갈아타지 않는다.
