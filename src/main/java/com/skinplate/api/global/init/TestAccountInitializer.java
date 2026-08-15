@@ -1,7 +1,9 @@
 package com.skinplate.api.global.init;
 
 import com.skinplate.api.domain.user.entity.AppUser;
+import com.skinplate.api.domain.user.entity.SkinConcern;
 import com.skinplate.api.domain.user.entity.SkinType;
+import com.skinplate.api.domain.user.entity.SleepPattern;
 import com.skinplate.api.domain.user.repository.AppUserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -14,6 +16,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Set;
 
 /**
  * 서버 기동 시 시연·테스트용 고정 계정을 생성한다. (PRD §16.5)
@@ -82,6 +85,7 @@ public class TestAccountInitializer implements ApplicationRunner {
             create(account.email(), encodedPassword, account.nickname(), account.skinType(),
                     false, "개발 계정");
         }
+        seedDemoProfile();
     }
 
     private void create(String email, String encodedPassword, String nickname,
@@ -97,6 +101,20 @@ public class TestAccountInitializer implements ApplicationRunner {
 
         userRepository.save(user);
         log.info("계정 생성: {} ({})", email, label);
+    }
+
+    /**
+     * 슬롯 1 시연 프로필. 시연 지표(38/52/64/25/78)의 측정 2(홍조·건조)와 합쳐
+     * 추천 슬롯 네 원천(측정 2 + 신고 1 + 습관 1)이 전부 화면에 나오게 한다.
+     * 프로필이 비어 있을 때만 심는다 — 시연 중 바꾼 값은 재기동해도 유지된다.
+     */
+    private void seedDemoProfile() {
+        userRepository.findByEmail(SLOT_ACCOUNTS.get(0).email()).ifPresent(user -> {
+            if (user.getSkinConcerns().isEmpty() && user.getSleepPattern() == null) {
+                user.updateSkinConcerns(Set.of(SkinConcern.DARK_CIRCLE));
+                user.changeSleepPattern(SleepPattern.LACKING);
+            }
+        });
     }
 
     /**
