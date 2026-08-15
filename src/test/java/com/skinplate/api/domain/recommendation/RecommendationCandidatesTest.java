@@ -6,6 +6,8 @@ import com.skinplate.api.domain.skin.entity.SkinMetrics;
 import com.skinplate.api.domain.user.entity.SkinConcern;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.util.List;
 import java.util.Set;
@@ -136,5 +138,26 @@ class RecommendationCandidatesTest {
             assertThat(RecommendationCandidates.of(mapped))
                     .as("%s → %s 의 후보", declared, mapped).isNotNull();
         }
+    }
+
+    /**
+     * 위 G 는 "빠짐없이 매핑된다"만 본다 — 두 축이 서로 자리를 바꿔도 통과한다.
+     * 그러면 유분 고민을 신고한 사용자에게 장벽 음식이 나가고, 아무도 못 알아챈다.
+     */
+    @ParameterizedTest
+    @DisplayName("G-b. 신고 고민 9종은 지정된 축으로만 간다 — 축이 서로 바뀌면 여기서 깨진다")
+    @CsvSource({
+            "ACNE, TROUBLE",
+            "REDNESS, REDNESS",
+            "DARK_CIRCLE, DARK_CIRCLE",
+            "DRYNESS, DRY",
+            "OILINESS, OILY",
+            "TEXTURE, BARRIER_WEAK",
+            "PIGMENTATION, PIGMENTATION",
+            "ELASTICITY, ELASTICITY",
+            "PUFFINESS, PUFFINESS"
+    })
+    void mapDeclared_pinsEachConcernToItsAxis(SkinConcern declared, Concern expected) {
+        assertThat(RecommendationCandidates.mapDeclared(declared)).isEqualTo(expected);
     }
 }
