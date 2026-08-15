@@ -1,6 +1,7 @@
 package com.skinplate.api.domain.recommendation.service;
 
 import com.skinplate.api.domain.skin.entity.SkinMetrics;
+import com.skinplate.api.domain.user.entity.SkinConcern;
 
 import java.util.Comparator;
 import java.util.List;
@@ -55,6 +56,24 @@ public final class RecommendationCandidates {
 
     public static Candidates of(Concern concern) {
         return TABLE.get(concern);
+    }
+
+    /**
+     * 자가 신고 고민 → 추천 축. (설계서 2026-08-15 §3)
+     * switch 가 전사라서 SkinConcern 에 값을 추가하고 여기를 빠뜨리면 컴파일이 깨진다.
+     */
+    public static Concern mapDeclared(SkinConcern concern) {
+        return switch (concern) {
+            case ACNE         -> Concern.TROUBLE;
+            case REDNESS      -> Concern.REDNESS;
+            case DRYNESS      -> Concern.DRY;
+            case OILINESS     -> Concern.OILY;
+            case TEXTURE      -> Concern.BARRIER_WEAK;
+            case DARK_CIRCLE  -> Concern.DARK_CIRCLE;
+            case PIGMENTATION -> Concern.PIGMENTATION;
+            case ELASTICITY   -> Concern.ELASTICITY;
+            case PUFFINESS    -> Concern.PUFFINESS;
+        };
     }
 
     /**
