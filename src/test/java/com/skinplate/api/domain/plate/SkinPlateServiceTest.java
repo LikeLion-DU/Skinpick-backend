@@ -431,6 +431,30 @@ class SkinPlateServiceTest {
         verify(skinAnalysisRepository).findForUpdate(ANALYSIS_ID);
     }
 
+    /**
+     * 멱등키의 존재 이유가 재시도인데, 재시도마다 25초짜리 유료 호출을 하고 버리면
+     * 그 이유가 반쯤 사라진다. 저장 정확성은 트랜잭션 안의 재확인이 이미 맡고 있다.
+     */
+    @Test
+    @DisplayName("멱등 — 같은 토큰의 재시도는 AI 문장 생성을 아예 건너뛴다")
+    void saveRecord_idempotent_skipsAiCommentGeneration() {
+        givenSkinAnalysis();
+        SkinPlate existingPlate = givenPlate();
+        OpenAiFoodResult aiResult = givenAiResult();
+        AnalysisTokenPayload payload = new AnalysisTokenPayload(USER_ID, "jti-dup", ANALYSIS_ID, aiResult);
+        given(analysisTokenProvider.parse("token", USER_ID)).willReturn(payload);
+        given(foodAnalysisRepository.findIdByUserIdAndJti(USER_ID, "jti-dup")).willReturn(Optional.of(555L));
+        given(skinPlateRepository.findByFoodAnalysisIdAndUserId(555L, USER_ID))
+                .willReturn(Optional.of(existingPlate));
+        // 문장 생성 경로가 끝까지 도달할 수 있게 해둔다 — 중간에서 예외로 삼켜지면
+        // 호출을 건너뛴 것과 구분되지 않아 이 테스트가 엉뚱한 이유로 통과한다.
+        given(foodAnalysisService.toEntity(null, aiResult)).willReturn(givenFood());
+
+        skinPlateService.saveRecord(USER_ID, "token");
+
+        verify(visionClient, never()).generateComments(any());
+    }
+
     @Test
     @DisplayName("락을 잡는다 — findForUpdate → jti 조회 → save 순서로 호출된다")
     void saveRecord_locksSkinAnalysisRowForUpdate() {
