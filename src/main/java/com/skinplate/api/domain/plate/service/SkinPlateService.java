@@ -183,6 +183,7 @@ public class SkinPlateService {
                     engine.evaluate(new PlateContext(skinAnalysis.getMetrics(), food));
 
             // 오늘 이미 저장된 기록들. 저장 시각은 KST 로 고정돼 있다(JpaConfig).
+            // findInRange 는 최신순이다. 프롬프트는 하루의 흐름을 시간순으로 읽어야 한다.
             LocalDateTime todayStart = LocalDate.now(DateRange.KST).atStartOfDay();
             List<String> todaysRecords = skinPlateRepository
                     .findInRange(userId, todayStart, todayStart.plusDays(1))
@@ -190,7 +191,8 @@ public class SkinPlateService {
                     .map(plate -> mealLabel(plate.getCreatedAt()) + " "
                             + plate.getFoodAnalysis().getFoodName() + " "
                             + plate.getPlateScore() + "점")
-                    .collect(Collectors.toList());
+                    .toList()
+                    .reversed();
 
             return visionClient.generateComments(PlateCommentPrompt.user(
                     skinAnalysis.getMetrics(),
