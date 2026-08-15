@@ -8,6 +8,10 @@ import com.skinplate.api.domain.recommendation.service.RecommendationCandidates.
 import com.skinplate.api.domain.recommendation.service.RecommendationCandidates.Concern;
 import com.skinplate.api.domain.skin.entity.SkinAnalysis;
 import com.skinplate.api.domain.skin.repository.SkinAnalysisRepository;
+import com.skinplate.api.domain.user.entity.AppUser;
+import com.skinplate.api.domain.user.entity.ExerciseHabit;
+import com.skinplate.api.domain.user.entity.SleepPattern;
+import com.skinplate.api.domain.user.entity.StressLevel;
 import com.skinplate.api.global.exception.BusinessException;
 import com.skinplate.api.global.exception.ErrorCode;
 import lombok.RequiredArgsConstructor;
@@ -17,6 +21,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -73,7 +78,8 @@ public class RecommendationService {
 
         // 취약 항목이 없으면 잠글 것도 저장할 것도 없다. 피부가 멀쩡한 사용자의
         // 조회마다 쓰기 락을 잡고 빈 저장을 하게 두면 락만 값을 치른다.
-        // 이 경우 exists 는 계속 false 지만, build 는 지표에서 바로 나오는 순수 계산이다.
+        // 이 경우 exists 는 계속 false 지만, build 는 지표·프로필에서 바로 나오는 계산이라
+        // 다음 조회에서 프로필이 생겼다면 그때 만들어진다 — "최초 생성 시점 고정"의 실제 의미다.
         if (built.isEmpty()) return;
 
         skinAnalysisRepository.findForUpdate(analysis.getId());
@@ -90,8 +96,7 @@ public class RecommendationService {
      * 데모마다 결과가 달라져 설명할 수 없다. (PRD §18.9)
      */
     private List<Recommendation> build(SkinAnalysis analysis) {
-        List<Concern> concerns =
-                RecommendationCandidates.topConcerns(analysis.getMetrics(), TOP_CONCERN_COUNT);
+        List<Concern> concerns = slotConcerns(analysis);
 
         List<Recommendation> recommendations = new ArrayList<>();
         int order = 0;
@@ -128,5 +133,35 @@ public class RecommendationService {
         }
 
         return recommendations;
+    }
+
+    /**
+     * 추천 슬롯: 측정 최대 2 + 자가 신고 최대 1 + 습관 최대 1. (설계서 2026-08-15 §0)
+     * 해당 원천의 데이터가 없으면 그 슬롯은 비워둔다.
+     * 프로필은 최초 추천 생성 시점 값으로 고정된다 — 이후 바꿔도 이 분석의 추천은 안 변한다.
+     */
+    private List<Concern> slotConcerns(SkinAnalysis analysis) {
+        List<Concern> concerns = new ArrayList<>(
+                RecommendationCandidates.topConcerns(analysis.getMetrics(), TOP_CONCERN_COUNT));
+
+        AppUser user = analysis.getUser();
+
+        user.getSkinConcerns().stream()
+                .sorted()                                    // Set 이라 입력 순서가 없다 — 선언 순으로 고정
+                .map(RecommendationCandidates::mapDeclared)
+                .filter(mapped -> !concerns.contains(mapped))   // 측정이 이미 본 축이면 신고 슬롯을 안 쓴다
+                .findFirst()
+                .ifPresent(concerns::add);
+
+        habitConcern(user).ifPresent(concerns::add);
+        return concerns;
+    }
+
+    /** 나쁜 값만 트리거. 우선순위는 수면 > 스트레스 > 운동 — 하나만 뽑는다. */
+    private static Optional<Concern> habitConcern(AppUser user) {
+        if (user.getSleepPattern() == SleepPattern.LACKING) return Optional.of(Concern.SLEEP_LACK);
+        if (user.getStressLevel() == StressLevel.HIGH)      return Optional.of(Concern.STRESS_HIGH);
+        if (user.getExerciseHabit() == ExerciseHabit.NONE)  return Optional.of(Concern.EXERCISE_NONE);
+        return Optional.empty();
     }
 }
