@@ -394,6 +394,25 @@ CREATE INDEX idx_recommendation_skin ON recommendation (skin_analysis_id);
 >
 > `food_analysis_id`가 `UNIQUE`인 것도 의도적이다. 음식 사진 1장 = Plate 1건이라는 관계(PRD ERD의 `||--||`)를 DB가 보증한다.
 
+**`src/main/resources/db/migration/V5__skin_profile.sql`**
+
+```sql
+-- 피부 프로필 (목업 "피부설정") — 자가 신고 고민·생활 습관.
+-- 습관 3종은 NULL = 미선택 (declared_skin_type 과 같은 의미론).
+-- 고민은 복수 선택이라 별도 테이블. PK(user_id, concern) 가 중복 선택을 DB 에서 막는다.
+ALTER TABLE app_user ADD COLUMN sleep_pattern  VARCHAR(20);
+ALTER TABLE app_user ADD COLUMN stress_level   VARCHAR(20);
+ALTER TABLE app_user ADD COLUMN exercise_habit VARCHAR(20);
+
+CREATE TABLE user_skin_concern (
+    user_id BIGINT NOT NULL REFERENCES app_user(id) ON DELETE CASCADE,
+    concern VARCHAR(20) NOT NULL,
+    PRIMARY KEY (user_id, concern)
+);
+```
+
+> V4 는 PR #28 이 선점해 V5 로 번호를 밀었다. 스키마 자체는 목업 "피부설정" 화면의 나머지 두 블록(고민·생활 습관) 저장용이다.
+
 ---
 
 ## 1.5 애플리케이션 진입점
@@ -1292,7 +1311,10 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.HashSet;
 import java.util.Locale;
+import java.util.Set;
 
 @Entity
 @Getter
@@ -1334,6 +1356,32 @@ public class AppUser extends BaseTimeEntity {
     @Column(length = 20)
     private SkinType declaredSkinType;
 
+    /**
+     * 자가 신고 피부 고민 (복수 선택). 표시·추천 보완 전용 — 점수 계산에는 넣지 않는다.
+     *
+     * @Column(name) 을 빠뜨리면 기본 이름이 skin_concerns 가 되어
+     * ddl-auto: validate 가 V5 의 concern 컬럼과 어긋나 기동에서 죽는다.
+     * 필드 초기화를 빠뜨리면 순수 객체 픽스처(AppUser.create)에서 NPE 다.
+     */
+    @ElementCollection(fetch = FetchType.LAZY)
+    @CollectionTable(name = "user_skin_concern", joinColumns = @JoinColumn(name = "user_id"))
+    @Column(name = "concern", nullable = false, length = 20)
+    @Enumerated(EnumType.STRING)
+    private Set<SkinConcern> skinConcerns = new HashSet<>();
+
+    /** 생활 습관 3종. NULL = 미선택 — declaredSkinType 과 같은 의미론이다. */
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private SleepPattern sleepPattern;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private StressLevel stressLevel;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private ExerciseHabit exerciseHabit;
+
     private LocalDateTime lastLoginAt;
 
     // ---- 팩토리 ----
@@ -1367,6 +1415,18 @@ public class AppUser extends BaseTimeEntity {
     public void declareSkinType(SkinType skinType) {
         this.declaredSkinType = skinType;
     }
+
+    public void updateSkinConcerns(Collection<SkinConcern> concerns) {
+        // 컬렉션 참조 교체가 아니라 내용 교체 — Hibernate 가 delete+insert 로 처리한다
+        this.skinConcerns.clear();
+        this.skinConcerns.addAll(concerns);
+    }
+
+    public void changeSleepPattern(SleepPattern sleepPattern)    { this.sleepPattern = sleepPattern; }
+
+    public void changeStressLevel(StressLevel stressLevel)       { this.stressLevel = stressLevel; }
+
+    public void changeExerciseHabit(ExerciseHabit exerciseHabit) { this.exerciseHabit = exerciseHabit; }
 
     /**
      * 가입 시점에 소문자로 정규화한다.
@@ -2477,24 +2537,46 @@ public record TestLoginRequest(
 ```java
 package com.skinplate.api.domain.auth.dto;
 
+import com.skinplate.api.domain.user.entity.ExerciseHabit;
+import com.skinplate.api.domain.user.entity.SkinConcern;
 import com.skinplate.api.domain.user.entity.SkinType;
+import com.skinplate.api.domain.user.entity.SleepPattern;
+import com.skinplate.api.domain.user.entity.StressLevel;
 import jakarta.validation.constraints.Size;
+
+import java.util.List;
 
 /**
  * PATCH /auth/me — 보낸 필드만 바꾼다.
  *
  * "건너뛰기"는 이 API 를 호출하지 않는 것이다.
  * UNKNOWN 을 대신 넣으면 "잘 모르겠다고 답한 사용자"와 구분이 사라진다.
+ *
+ * skinConcerns 만은 빈 배열이 "전부 해제"다 — null(생략)과 [] 를 구분한다.
+ * hasNickname 의 isBlank 패턴을 복붙하면 해제가 조용히 무시되므로 null 검사만 한다.
+ * 습관 3종은 UI 에 해제 개념이 없어 null = 변경 없음으로 충분하다.
  */
 public record UpdateProfileRequest(
 
         SkinType declaredSkinType,
 
         @Size(min = 2, max = 10, message = "닉네임은 2자 이상 10자 이하로 입력해 주세요.")
-        String nickname
+        String nickname,
+
+        List<SkinConcern> skinConcerns,
+
+        SleepPattern sleepPattern,
+
+        StressLevel stressLevel,
+
+        ExerciseHabit exerciseHabit
 ) {
-    public boolean hasSkinType() { return declaredSkinType != null; }
-    public boolean hasNickname() { return nickname != null && !nickname.isBlank(); }
+    public boolean hasSkinType()      { return declaredSkinType != null; }
+    public boolean hasNickname()      { return nickname != null && !nickname.isBlank(); }
+    public boolean hasSkinConcerns()  { return skinConcerns != null; }   // [] = 전부 해제
+    public boolean hasSleepPattern()  { return sleepPattern != null; }
+    public boolean hasStressLevel()   { return stressLevel != null; }
+    public boolean hasExerciseHabit() { return exerciseHabit != null; }
 }
 ```
 
@@ -2534,9 +2616,14 @@ package com.skinplate.api.domain.auth.dto;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.skinplate.api.domain.user.entity.AppUser;
+import com.skinplate.api.domain.user.entity.ExerciseHabit;
+import com.skinplate.api.domain.user.entity.SkinConcern;
 import com.skinplate.api.domain.user.entity.SkinType;
+import com.skinplate.api.domain.user.entity.SleepPattern;
+import com.skinplate.api.domain.user.entity.StressLevel;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 public record MeResponse(
         Long userId,
@@ -2546,6 +2633,14 @@ public record MeResponse(
         /* null 이면 non_null 직렬화로 키 자체가 생략된다.
            앱은 키가 없으면 "아직 안 정함"으로 보고 인라인 선택 칩을 띄운다. */
         SkinType declaredSkinType,
+
+        /* 항상 배열로 나간다. 빈 배열 = 미설정 — non_null 은 컬렉션에 통하지 않는다
+           (빈 Set 은 null 이 아니다). 습관 3종만 키 생략 규칙을 따른다. */
+        List<SkinConcern> skinConcerns,
+
+        SleepPattern sleepPattern,
+        StressLevel stressLevel,
+        ExerciseHabit exerciseHabit,
 
         /* boolean 접근자의 JSON 키는 Jackson 버전과 네이밍 전략에 따라
            isTestAccount / testAccount 로 갈릴 여지가 있다.
@@ -2560,6 +2655,13 @@ public record MeResponse(
                 user.getEmail(),
                 user.getNickname(),
                 user.getDeclaredSkinType(),
+                /* 트랜잭션 안에서 LAZY 컬렉션을 초기화하며 enum 선언 순으로 고정한다.
+                   Set 을 그대로 담으면 직렬화(트랜잭션 밖)에서 LazyInitializationException 이다.
+                   EnumSet.copyOf 는 빈 컬렉션에서 터지므로 쓰지 않는다. */
+                user.getSkinConcerns().stream().sorted().toList(),
+                user.getSleepPattern(),
+                user.getStressLevel(),
+                user.getExerciseHabit(),
                 user.isTestAccount(),
                 user.getCreatedAt());
     }
