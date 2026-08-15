@@ -1,9 +1,9 @@
 package com.skinplate.api.infra.openai;
 
+import com.skinplate.api.domain.insight.entity.InsightCategory;
 import com.skinplate.api.infra.openai.dto.FacePhoto;
 import com.skinplate.api.infra.openai.dto.OpenAiFoodResult;
 import com.skinplate.api.infra.openai.dto.OpenAiSkinResult;
-import com.skinplate.api.domain.insight.entity.InsightCategory;
 import com.skinplate.api.infra.openai.dto.PlateComments;
 import com.skinplate.api.infra.openai.dto.SkinInsightSentences;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;

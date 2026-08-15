@@ -5,6 +5,7 @@ import com.skinplate.api.domain.insight.entity.SkinInsight;
 import com.skinplate.api.domain.insight.entity.SkinInsightItem;
 import com.skinplate.api.domain.skin.entity.SkinAnalysis;
 import com.skinplate.api.domain.skin.entity.SkinMetrics;
+import com.skinplate.api.global.common.DateRange;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -56,6 +57,28 @@ public record SkinInsightResponse(
                         .map(item -> new TodayAction(item.getCategory(), item.getActionTitle()))
                         .toList(),
                 insight.getCreatedAt());
+    }
+
+    /**
+     * 다룰 주제가 하나도 없을 때. <b>저장된 인사이트가 없는 응답이다.</b>
+     *
+     * 저장하지 않는 것이 요점이다 — 1회 고정이라 빈 인사이트를 한 번 저장하면 그 뒤에
+     * 고민·습관을 채워도 그 분석은 영영 빈 화면이다(RecommendationService.createOnce 가
+     * "취약 항목이 없으면 저장하지 않는다"로 푸는 것과 같은 문제).
+     *
+     * 그래서 generatedAt 은 저장 시각이 아니라 이 조회 시각이다. 저장 시각과 같은
+     * 기준(KST)을 쓴다 — 환경마다 다른 뜻이 되면 안 된다. (JpaConfig.kstDateTimeProvider)
+     */
+    public static SkinInsightResponse healthy(SkinAnalysis analysis,
+                                              SkinAnalysis previous,
+                                              String summary) {
+        return new SkinInsightResponse(
+                analysis.getId(),
+                summary,
+                changesOf(analysis, previous),
+                List.of(),
+                List.of(),
+                LocalDateTime.now(DateRange.KST));
     }
 
     private static Changes changesOf(SkinAnalysis analysis, SkinAnalysis previous) {

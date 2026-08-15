@@ -12,7 +12,10 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class SkinInsightItem extends BaseTimeEntity {
 
-    /** V6 의 description 길이와 묶인다. 둘이 갈라지면 클램프가 INSERT 를 못 막는다. */
+    /**
+     * V6 의 description 길이와 묶인다. 둘이 갈라지면 클램프가 INSERT 를 못 막는다.
+     * 자르는 일 자체는 애그리거트 루트의 {@link SkinInsight#clamp} 가 한다.
+     */
     private static final int DESCRIPTION_MAX_LENGTH = 300;
 
     @Id
@@ -46,25 +49,10 @@ public class SkinInsightItem extends BaseTimeEntity {
         SkinInsightItem item = new SkinInsightItem();
         item.category = category;
         item.title = category.getTitle();
-        item.description = clamp(description);
+        item.description = SkinInsight.clamp(description, DESCRIPTION_MAX_LENGTH);
         item.actionTitle = category.getActionTitle();
         item.displayOrder = displayOrder;
         return item;
-    }
-
-    /**
-     * Structured Outputs 는 프롬프트의 글자 수 요청을 지켜주지 않는다.
-     * 넘치는 문장 하나가 INSERT 를 깨서 인사이트 전체를 잃게 둘 수는 없다.
-     * 경계가 이모지 한가운데면 반쪽 문자가 남아 Postgres 가 거절한다 — SkinPlate.clamp 와 같은 방식.
-     */
-    private static String clamp(String sentence) {
-        if (sentence == null || sentence.length() <= DESCRIPTION_MAX_LENGTH) return sentence;
-
-        int end = Character.isHighSurrogate(sentence.charAt(DESCRIPTION_MAX_LENGTH - 1))
-                ? DESCRIPTION_MAX_LENGTH - 1
-                : DESCRIPTION_MAX_LENGTH;
-
-        return sentence.substring(0, end);
     }
 
     void assignTo(SkinInsight skinInsight) {

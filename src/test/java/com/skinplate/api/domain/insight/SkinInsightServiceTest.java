@@ -10,6 +10,7 @@ import com.skinplate.api.domain.skin.entity.SkinAnalysis;
 import com.skinplate.api.domain.skin.entity.SkinMetrics;
 import com.skinplate.api.domain.skin.repository.SkinAnalysisRepository;
 import com.skinplate.api.domain.user.entity.AppUser;
+import com.skinplate.api.domain.user.entity.SkinConcern;
 import com.skinplate.api.domain.user.entity.SleepPattern;
 import com.skinplate.api.global.exception.BusinessException;
 import com.skinplate.api.global.exception.ErrorCode;
@@ -19,12 +20,14 @@ import com.skinplate.api.infra.openai.exception.OpenAiClientException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -102,6 +105,7 @@ class SkinInsightServiceTest {
     void existingInsight_skipsAiCall() {
         SkinAnalysis analysis = givenAnalysis(DEMO, user -> {});
         SkinInsight existing = SkinInsight.create(analysis.getUser(), analysis, "이미 만든 요약",
+                SkinInsight.ProfileSnapshot.of(analysis.getUser()),
                 List.of(SkinInsightItem.of(InsightCategory.DRY, "이미 만든 문장", 0)));
         given(skinInsightRepository.findBySkinAnalysisIdAndUserId(ANALYSIS_ID, USER_ID))
                 .willReturn(Optional.of(existing));
@@ -114,16 +118,39 @@ class SkinInsightServiceTest {
     }
 
     @Test
-    @DisplayName("다룰 주제가 없으면 AI 없이 정적 요약만 저장한다 — 없는 걱정을 사 오지 않는다")
-    void noTopic_savesStaticSummaryWithoutAi() {
-        givenAnalysis(HEALTHY, user -> {});
+    @DisplayName("다룰 주제가 없으면 AI 도 저장도 없다 — 빈 인사이트를 저장하면 1회 고정이 족쇄가 된다")
+    void noTopic_returnsWithoutAiAndWithoutSaving() {
+        SkinAnalysis analysis = givenAnalysis(HEALTHY, user -> {});
 
         SkinInsightResponse response = skinInsightService.getOrCreate(USER_ID, ANALYSIS_ID);
 
+        assertThat(response.skinAnalysisId()).isEqualTo(analysis.getId());
         assertThat(response.insights()).isEmpty();
         assertThat(response.todayActions()).isEmpty();
         assertThat(response.summary()).isNotBlank();
+        assertThat(response.generatedAt()).isNotNull();   // 저장 시각이 없으니 조회 시각이다
+
         verify(visionClient, never()).generateSkinInsight(anyString());
+        verify(skinInsightRepository, never()).save(any());
+        verify(skinAnalysisRepository, never()).findForUpdate(anyLong());
+    }
+
+    @Test
+    @DisplayName("주제 없이 한 번 열어봤어도, 프로필을 채우고 다시 열면 그때 만들어진다")
+    void noTopicThenProfileFilled_createsInsightOnNextCall() {
+        AppUser user = givenAnalysis(HEALTHY, profile -> {}).getUser();
+
+        assertThat(skinInsightService.getOrCreate(USER_ID, ANALYSIS_ID).insights()).isEmpty();
+
+        // 사용자가 이제야 습관을 입력했다. 앞선 조회가 빈 인사이트를 저장해 뒀다면
+        // 이 시점부터 무엇을 입력해도 화면이 영원히 그대로다.
+        user.changeSleepPattern(SleepPattern.LACKING);
+        givenSentences(InsightCategory.SLEEP);
+
+        SkinInsightResponse response = skinInsightService.getOrCreate(USER_ID, ANALYSIS_ID);
+
+        assertThat(response.insights()).extracting(SkinInsightResponse.Insight::category)
+                .containsExactly(InsightCategory.SLEEP);
         verify(skinInsightRepository).save(any());
     }
 
@@ -180,6 +207,29 @@ class SkinInsightServiceTest {
     }
 
     @Test
+    @DisplayName("AI 를 기다리는 사이 프로필이 바뀌어도 스냅샷은 선정 시점 값이다")
+    void snapshotIsTakenWhenTopicsAreChosen_notWhenSaved() {
+        AppUser user = givenAnalysis(DEMO, profile -> profile.changeSleepPattern(SleepPattern.LACKING))
+                .getUser();
+
+        // AI 호출은 최대 25초다. 그 사이에 사용자가 PATCH /auth/me 로 수면을 바꾼다.
+        // 저장 시점의 user 에서 스냅샷을 뽑으면 "수면이 부족하다"는 문장 옆에 ENOUGH 가 남는다.
+        given(visionClient.generateSkinInsight(anyString())).willAnswer(invocation -> {
+            user.changeSleepPattern(SleepPattern.ENOUGH);
+            user.updateSkinConcerns(Set.of(SkinConcern.PUFFINESS));
+            return sentencesOf(InsightCategory.REDNESS, InsightCategory.DRY, InsightCategory.SLEEP);
+        });
+
+        skinInsightService.getOrCreate(USER_ID, ANALYSIS_ID);
+
+        ArgumentCaptor<SkinInsight> saved = ArgumentCaptor.forClass(SkinInsight.class);
+        verify(skinInsightRepository).save(saved.capture());
+
+        assertThat(saved.getValue().getSnapshotSleepPattern()).isEqualTo(SleepPattern.LACKING);
+        assertThat(saved.getValue().getSnapshotConcerns()).isEmpty();
+    }
+
+    @Test
     @DisplayName("첫 분석이면 changes 가 없다 — 0 으로 채우면 '변화 없음'과 구분이 사라진다")
     void firstAnalysis_hasNoChanges() {
         givenAnalysis(HEALTHY, user -> {});
@@ -221,14 +271,17 @@ class SkinInsightServiceTest {
         return analysis;
     }
 
-    /** 주어진 카테고리에만 문장이 있는 AI 응답. 나머지는 응답에 아예 없다. */
     private void givenSentences(InsightCategory... categories) {
+        given(visionClient.generateSkinInsight(anyString())).willReturn(sentencesOf(categories));
+    }
+
+    /** 주어진 카테고리에만 문장이 있는 AI 응답. 나머지는 응답에 아예 없다. */
+    private static SkinInsightSentences sentencesOf(InsightCategory... categories) {
         List<SkinInsightSentences.Topic> topics = java.util.Arrays.stream(categories)
                 .map(category -> new SkinInsightSentences.Topic(
                         category.name(), category.getTitle() + " 설명 문장이에요."))
                 .toList();
 
-        given(visionClient.generateSkinInsight(anyString()))
-                .willReturn(new SkinInsightSentences("오늘의 요약이에요.", topics));
+        return new SkinInsightSentences("오늘의 요약이에요.", topics);
     }
 }

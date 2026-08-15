@@ -3,6 +3,7 @@ package com.skinplate.api.domain.insight.service;
 import com.skinplate.api.domain.insight.dto.SkinInsightResponse;
 import com.skinplate.api.domain.insight.entity.InsightCategory;
 import com.skinplate.api.domain.insight.entity.SkinInsight;
+import com.skinplate.api.domain.insight.entity.SkinInsight.ProfileSnapshot;
 import com.skinplate.api.domain.insight.entity.SkinInsightItem;
 import com.skinplate.api.domain.insight.repository.SkinInsightRepository;
 import com.skinplate.api.domain.insight.service.InsightTopics.Topic;
@@ -27,6 +28,9 @@ import java.util.Optional;
  *
  * 분석 1건당 <b>한 번만</b> 만든다. 프로필을 나중에 바꿔도 이미 만들어진 인사이트는
  * 다시 계산되지 않는다 — 화면에 남은 문장과 그 근거가 어긋나지 않게 하려는 것이다.
+ * 단, <b>다룰 주제가 없으면 저장 자체를 하지 않는다</b> — 빈 인사이트를 저장하면 1회 고정이
+ * 족쇄가 되어, 그 뒤에 고민·습관을 채워도 그 분석은 영영 빈 화면이다.
+ * (RecommendationService.createOnce 의 {@code if (built.isEmpty()) return;} 과 같은 판단)
  *
  * 주제 선정은 {@link InsightTopics}, 문장은 AI. RecommendationService 와 같은 분리다.
  * 다른 점은 <b>AI 실패를 삼키지 않는다</b>는 것 하나다 — 1회 고정 정책이라 정적 폴백을
@@ -37,7 +41,10 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class SkinInsightService {
 
-    /** 다룰 주제가 하나도 없을 때. AI 를 부르지 않는다 — 할 말이 없는데 문장을 사 오지 않는다. */
+    /**
+     * 다룰 주제가 하나도 없을 때. AI 를 부르지도, 저장하지도 않는다 —
+     * 할 말이 없는데 문장을 사 오지 않고, 할 말이 없다는 사실을 영구히 굳히지도 않는다.
+     */
     private static final String HEALTHY_SUMMARY =
             "지금은 주요 지표가 모두 안정적이에요. 지금의 관리 습관을 그대로 이어가 보세요.";
 
@@ -60,29 +67,27 @@ public class SkinInsightService {
     public SkinInsightResponse getOrCreate(Long userId, Long skinAnalysisId) {
         Draft draft = transactionTemplate.execute(status -> load(userId, skinAnalysisId));
 
+        // 이미 있거나, 다룰 주제가 없어 만들 것이 없는 경우다. 둘 다 AI 호출도 저장도 없다.
         if (draft.response() != null) return draft.response();
 
-        // 주제가 비면 AI 를 부르지 않는다. 지표가 전부 양호하고 신고 고민도 나쁜 습관도
-        // 없는 경우다 — 심사위원이 본인 얼굴로 찍어 보는 경로가 정확히 이것이다.
-        boolean nothingToSay = draft.topics().isEmpty();
-
-        SkinInsightSentences sentences = nothingToSay
-                ? null
-                : visionClient.generateSkinInsight(draft.userContext());
+        SkinInsightSentences sentences = visionClient.generateSkinInsight(draft.userContext());
 
         // 매핑 실패는 저장 트랜잭션에 들어가기 전에 끝낸다 — 롤백할 것을 만들자고
         // 분석 행에 쓰기 락을 잡을 이유가 없다.
-        String summary = nothingToSay ? HEALTHY_SUMMARY : requireSentence(sentences.summary());
-        List<SkinInsightItem> items = nothingToSay ? List.of() : toItems(draft.topics(), sentences);
+        String summary = requireSentence(sentences.summary());
+        List<SkinInsightItem> items = toItems(draft.topics(), sentences);
 
-        return transactionTemplate.execute(status -> save(userId, skinAnalysisId, summary, items));
+        return transactionTemplate.execute(status ->
+                save(userId, skinAnalysisId, summary, draft.snapshot(), items));
     }
 
     /**
-     * 읽기 구간. 이미 있으면 응답을 완성해 돌려주고, 없으면 AI 에 보낼 재료만 챙긴다.
+     * 읽기 구간. 이미 있거나 만들 것이 없으면 응답을 완성해 돌려주고,
+     * 만들 것이 있으면 AI 에 보낼 재료만 챙긴다.
      *
-     * 프롬프트 문자열을 여기서 다 만들어 나가는 것이 핵심이다 — user·metrics 를 들고
-     * 나가면 트랜잭션 밖에서 LAZY 를 건드리게 된다.
+     * 프롬프트 문자열과 프로필 스냅샷을 여기서 다 만들어 나가는 것이 핵심이다 —
+     * user·metrics 를 들고 나가면 트랜잭션 밖에서 LAZY 를 건드리게 되고, 스냅샷을
+     * 저장 구간에서 다시 뽑으면 그 사이 25초 동안의 프로필 변경이 끼어든다.
      */
     private Draft load(Long userId, Long skinAnalysisId) {
         // 타인의 id 면 403 이 아니라 404 다. 존재 여부 자체를 알려주지 않는다.
@@ -94,14 +99,23 @@ public class SkinInsightService {
         Optional<SkinInsight> existing =
                 skinInsightRepository.findBySkinAnalysisIdAndUserId(skinAnalysisId, userId);
         if (existing.isPresent()) {
-            return new Draft(SkinInsightResponse.from(analysis, existing.get(), previous), List.of(), null);
+            return new Draft(
+                    SkinInsightResponse.from(analysis, existing.get(), previous), List.of(), null, null);
         }
 
         AppUser user = analysis.getUser();
         List<Topic> topics = InsightTopics.select(analysis.getMetrics(), user);
 
+        // 지표가 전부 양호하고 신고 고민도 나쁜 습관도 없다 — 심사위원이 본인 얼굴로 찍어
+        // 보는 경로가 정확히 이것이다. 그때그때 만들어 돌려주고 저장은 하지 않는다.
+        if (topics.isEmpty()) {
+            return new Draft(
+                    SkinInsightResponse.healthy(analysis, previous, HEALTHY_SUMMARY), List.of(), null, null);
+        }
+
         return new Draft(null, topics,
-                topics.isEmpty() ? null : SkinInsightPrompt.user(analysis, previous, user, topics));
+                SkinInsightPrompt.user(analysis, previous, user, topics),
+                ProfileSnapshot.of(user));
     }
 
     /**
@@ -112,8 +126,8 @@ public class SkinInsightService {
      * 클라이언트가 재시도하면 그렇게 된다. 락으로 줄을 세우고, 마지막 방어선으로
      * V6 의 skin_analysis_id UNIQUE 가 뒤를 받친다.
      */
-    private SkinInsightResponse save(Long userId, Long skinAnalysisId,
-                                     String summary, List<SkinInsightItem> items) {
+    private SkinInsightResponse save(Long userId, Long skinAnalysisId, String summary,
+                                     ProfileSnapshot snapshot, List<SkinInsightItem> items) {
         SkinAnalysis analysis = skinAnalysisRepository.findByIdAndUserId(skinAnalysisId, userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.SKIN_ANALYSIS_NOT_FOUND));
 
@@ -129,8 +143,10 @@ public class SkinInsightService {
             return SkinInsightResponse.from(analysis, existing.get(), previous);
         }
 
+        // 스냅샷은 여기서 다시 뽑지 않는다 — 인자로 받은 것이 주제를 고르고 문장을 만든
+        // 그 시점의 프로필이다. user 는 연관관계용으로만 쓴다.
         SkinInsight insight = skinInsightRepository.save(
-                SkinInsight.create(analysis.getUser(), analysis, summary, items));
+                SkinInsight.create(analysis.getUser(), analysis, summary, snapshot, items));
 
         return SkinInsightResponse.from(analysis, insight, previous);
     }
@@ -182,7 +198,11 @@ public class SkinInsightService {
 
     /**
      * 읽기 구간이 넘겨주는 것. 둘 중 하나만 채워진다 —
-     * response 가 있으면 이미 만들어진 인사이트고, 없으면 만들 재료다.
+     * response 가 있으면 더 만들 것이 없고(이미 있거나 다룰 주제가 없다),
+     * 없으면 나머지 셋이 AI 호출과 저장의 재료다.
      */
-    private record Draft(SkinInsightResponse response, List<Topic> topics, String userContext) {}
+    private record Draft(SkinInsightResponse response,
+                         List<Topic> topics,
+                         String userContext,
+                         ProfileSnapshot snapshot) {}
 }

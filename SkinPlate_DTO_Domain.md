@@ -2727,7 +2727,7 @@ public interface RecommendationRepository extends JpaRepository<Recommendation, 
 §1.15 를 그대로 미러링한다. 다른 점 셋만 적어 둔다.
 
 1. **주제 선정이 결정적이다** — `InsightTopics` 가 슬롯·순서·상한을 다 정하고, AI 는 주제별 문장 하나씩만 채운다 (PRD §18.10).
-2. **분석당 1회 고정** — `skin_analysis_id` UNIQUE. 프로필을 바꿔도 다시 만들지 않는다.
+2. **분석당 1회 고정** — `skin_analysis_id` UNIQUE. 프로필을 바꿔도 다시 만들지 않는다. **단, 다룰 주제가 없으면 저장 자체를 하지 않는다** — 빈 인사이트를 저장하면 1회 고정이 족쇄가 되어, 그 뒤에 고민·습관을 채워도 그 분석은 영영 빈 화면이다(`RecommendationService.createOnce` 의 `if (built.isEmpty()) return;` 과 같은 판단).
 3. **AI 실패를 삼키지 않는다** — 추천과 다른 유일한 지점이다. 1회 고정이라 정적 폴백을 한 번 저장하면 그 분석은 영원히 폴백 화면을 갖는다.
 
 **`domain/insight/entity/InsightCategory.java`**
@@ -2793,13 +2793,33 @@ public class SkinInsight extends BaseTimeEntity {
     @OrderBy("displayOrder ASC")
     private List<SkinInsightItem> items = new ArrayList<>();
 
-    /** 스냅샷을 인자로 받지 않고 user 에서 뽑는다 — 호출부가 다른 값을 실을 여지를 없앤다 */
-    public static SkinInsight create(AppUser user, SkinAnalysis skinAnalysis,
-                                     String summary, List<SkinInsightItem> items) { ... }
+    /**
+     * 주제를 고르고 문장을 만든 시점의 프로필. 저장 시점의 user 에서 다시 뽑으면,
+     * 그 사이 25초짜리 AI 호출 동안의 PATCH /auth/me 가 끼어들어 "수면이 부족하다"는
+     * 문장 옆에 ENOUGH 가 저장된다. 1회 고정이라 영구히 그 상태다.
+     */
+    public record ProfileSnapshot(SleepPattern sleepPattern, StressLevel stressLevel,
+                                  ExerciseHabit exerciseHabit, WaterIntake waterIntake,
+                                  String concerns) {
+
+        /** AppUser 하나에서만 만든다 — 호출부가 임의 값을 실을 여지를 없앤다 */
+        public static ProfileSnapshot of(AppUser user) { ... }
+    }
+
+    /**
+     * 스냅샷은 주제를 고른 트랜잭션에서 만들어 인자로 받는다 — 저장 트랜잭션에서 다시
+     * 뽑으면 AI 호출 25초 사이의 프로필 변경이 끼어든다. user 연관관계만 저장 트랜잭션의
+     * 것을 쓰고, snapshot_* 에 들어가는 값은 전부 인자에서 온다.
+     */
+    public static SkinInsight create(AppUser user, SkinAnalysis skinAnalysis, String summary,
+                                     ProfileSnapshot snapshot, List<SkinInsightItem> items) { ... }
+
+    /** 서로게이트 경계까지 보는 클램프. SkinInsightItem 도 이것을 쓴다(상한만 다르다) */
+    static String clamp(String sentence, int maxLength) { ... }
 }
 ```
 
-**`domain/insight/entity/SkinInsightItem.java`** — `category` · `title` · `description`(300자 클램프) · `actionTitle` · `displayOrder`. 부모는 LAZY, 정적 팩토리 `of(category, description, displayOrder)` 가 `title`·`actionTitle` 을 카테고리에서 복사한다.
+**`domain/insight/entity/SkinInsightItem.java`** — `category` · `title` · `description`(300자 클램프 — `SkinInsight.clamp` 를 호출한다) · `actionTitle` · `displayOrder`. 부모는 LAZY, 정적 팩토리 `of(category, description, displayOrder)` 가 `title`·`actionTitle` 을 카테고리에서 복사한다.
 
 **`domain/insight/repository/SkinInsightRepository.java`**
 
@@ -2858,8 +2878,10 @@ public record SkinInsightSentences(String summary, List<Topic> topics) {
 
 ```
 [읽기 tx]  소유 확인(findByIdAndUserId · 404) → 기존 인사이트 있으면 응답 완성 후 반환
-           → 없으면 주제 선정 + 프롬프트 문자열 조립까지 여기서 끝낸다
-              (user·metrics 를 들고 나가면 트랜잭션 밖에서 LAZY 가 터진다)
+           → 주제가 비면 정적 응답을 만들어 반환하고 여기서 끝낸다 (저장 없음)
+           → 있으면 프롬프트 문자열 + ProfileSnapshot 까지 여기서 만들어 나간다
+              (user·metrics 를 들고 나가면 트랜잭션 밖에서 LAZY 가 터지고,
+               스냅샷을 쓰기 tx 에서 다시 뽑으면 25초 사이의 프로필 변경이 끼어든다)
                     ↓
 [tx 밖]    visionClient.generateSkinInsight(...)  ← 25초를 커넥션 쥐고 기다리지 않는다
            AI 문장 → 주제 매핑도 여기서. 실패하면 저장 트랜잭션에 들어가지도 않는다
@@ -6652,6 +6674,8 @@ npx wrangler pages deploy build/web --project-name=skinplate
 | **`SkinInsightPrompt` [신설]** | **인과 확정 금지**가 이 프롬프트에만 있는 규칙이다 — "수면이 부족해서 건조하다"는 이 앱이 증명할 수 없는 문장이고, 그 선을 넘으면 자가 신고 한 줄로 진단을 내리는 앱이 된다. 미입력 습관은 줄 자체를 빼고, 이름·이메일은 넣지 않는다 |
 | **`MockOpenAiVisionClient` [추가]** | **13종 전부**의 문장을 들고 있는다. 하나라도 빠지면 그 주제 조합에서만 실패하는데, 하필 무대에서 처음 밟는 조합이 그것일 수 있다 |
 | **AI 실패 처리 [추천과 다름]** | 인사이트는 **저장하지 않고 예외를 그대로 던진다.** 분석당 1회 고정이라 정적 폴백을 한 번 저장하면 그 분석은 영원히 폴백 화면을 갖는다. 저장하지 않으면 다음 조회가 재시도가 된다 |
+| **주제 0건 [저장 안 함]** | 지표가 전부 양호하고 프로필도 비면 정적 응답을 그 자리에서 만들어 돌려주고 **행을 남기지 않는다.** 저장하면 1회 고정이 족쇄가 되어, 그 뒤에 고민·습관을 채워도 그 분석은 영영 빈 화면이다 — `RecommendationService.createOnce` 와 같은 규칙으로 맞췄다. 형제 기능 둘이 반대로 동작하면 "프로필 입력이 추천에는 반영되는데 인사이트에만 안 되는" 화면이 된다 |
+| **`ProfileSnapshot` [선정 시점]** | 스냅샷은 **주제를 고르고 문장을 만든 시점**의 프로필이다. 저장 시점에 다시 읽으면 그 사이 25초짜리 AI 호출 동안의 `PATCH /auth/me` 가 끼어들어, "수면이 부족하다"는 문장 옆에 `ENOUGH` 가 저장된다 |
 | **변화량(`changes`) [저장 안 함]** | 직전 분석이 불변이라 조회할 때마다 계산해도 같은 값이다. 직전 분석은 `created_at` 이 아니라 **`id`** 로 고른다 — 같은 초에 두 건이 들어오면 시각 정렬은 순서가 흔들리고, 그러면 같은 분석의 변화량이 조회마다 달라진다 |
 
 ---
