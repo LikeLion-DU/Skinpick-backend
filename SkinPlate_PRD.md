@@ -306,6 +306,8 @@ hydration < 40                  → DRY
 
 > AI에게 "이 사람 피부 타입이 뭐야"를 묻지 않는다. **5개 지표에서 규칙으로 도출한다.** 같은 지표면 항상 같은 타입이 나와야 갭 코멘트도 재현 가능하다.
 
+> 자가 신고값(피부 타입·고민·생활 습관)을 점수 계산에 넣지 않는 원칙은 **점수 계산 한정**이다 — 추천 보완(§18.9)에는 쓴다.
+
 ---
 
 #### 4.4.2 테스트 계정
@@ -1405,6 +1407,7 @@ erDiagram
     APP_USER ||--o{ SKIN_ANALYSIS : "촬영"
     APP_USER ||--o{ FOOD_ANALYSIS : "촬영"
     APP_USER ||--o{ SKIN_PLATE : "생성"
+    APP_USER ||--o{ USER_SKIN_CONCERN : "고민"
     SKIN_ANALYSIS ||--o{ SKIN_PLATE : "기준"
     FOOD_ANALYSIS ||--|| SKIN_PLATE : "대상"
     FOOD_ANALYSIS ||--o{ FOOD_INGREDIENT : "포함"
@@ -1418,9 +1421,17 @@ erDiagram
         varchar nickname
         varchar role "USER / ADMIN"
         varchar declared_skin_type "자가 신고. NULL 허용"
+        varchar sleep_pattern "자가 신고. NULL 허용"
+        varchar stress_level "자가 신고. NULL 허용"
+        varchar exercise_habit "자가 신고. NULL 허용"
         boolean is_test_account "테스트 계정 여부"
         timestamp last_login_at
         timestamp created_at
+    }
+
+    USER_SKIN_CONCERN {
+        bigint user_id PK, FK
+        varchar concern PK "자가 신고 피부 고민. 복수 선택 9종"
     }
 
     SKIN_ANALYSIS {
@@ -1926,7 +1937,7 @@ public class Recommendation extends BaseTimeEntity {
 | 2 | POST | `/auth/login` | — | 로그인 (JWT 발급) | P0 |
 | 3 | POST | `/auth/test-login` | — | **테스트 계정 원탭 로그인** | P0 |
 | 4 | GET | `/auth/me` | ✅ | 내 정보 조회 (토큰 유효성 확인 겸용) | P0 |
-| 4-b | **PATCH** | **`/auth/me`** | ✅ | **피부 타입·닉네임 수정** | **P0** |
+| 4-b | **PATCH** | **`/auth/me`** | ✅ | **피부 타입·닉네임·프로필(고민·습관) 수정** | **P0** |
 | 5 | POST | `/skin/analyses` | ✅ | 피부 사진 분석 | P0 |
 | 6 | GET | `/skin/analyses/latest` | ✅ | 최신 피부 분석 조회 | P0 |
 | 7 | GET | `/skin/analyses/{id}` | ✅ | 피부 분석 상세 | P1 |
@@ -2068,6 +2079,10 @@ public class Recommendation extends BaseTimeEntity {
     "email": "duing@example.com",
     "nickname": "두잉",
     "declaredSkinType": "OILY",
+    "skinConcerns": ["DARK_CIRCLE", "DRYNESS"],
+    "sleepPattern": "LACKING",
+    "stressLevel": "HIGH",
+    "exerciseHabit": "NONE",
     "isTestAccount": false,
     "joinedAt": "2026-08-01T09:00:00"
   },
@@ -2076,6 +2091,8 @@ public class Recommendation extends BaseTimeEntity {
 ```
 
 > `declaredSkinType`은 **미선택이면 키 자체가 생략된다**(`non_null` 직렬화). 앱은 이 값이 없으면 S05에서 갭 카드 대신 인라인 선택 칩을 띄운다.
+>
+> `skinConcerns`는 항상 배열로 내려간다 — 빈 배열이 "미설정"이다(`non_null` 직렬화는 컬렉션에는 통하지 않는다). `sleepPattern`·`stressLevel`·`exerciseHabit`은 `declaredSkinType`과 같은 규칙으로, 미선택이면 키 자체가 생략된다.
 
 **Response 401** — `UNAUTHORIZED` 또는 `TOKEN_EXPIRED` → 클라이언트는 토큰을 지우고 S01로 이동
 
@@ -2083,7 +2100,7 @@ public class Recommendation extends BaseTimeEntity {
 
 #### ④-b PATCH `/api/v1/auth/me`
 
-피부 타입을 선택·변경한다. S01c(가입 직후)와 S05(인라인 선택) 두 곳에서 호출한다.
+피부 타입·피부 고민·생활 습관을 선택·변경한다. S01c(가입 직후)와 S05(인라인 선택) 두 곳, 그리고 목업 "피부설정" 화면에서 호출한다.
 
 **Request** — 보낸 필드만 바뀐다
 
@@ -2095,10 +2112,16 @@ public class Recommendation extends BaseTimeEntity {
 |---|---|---|
 | `declaredSkinType` | ❌ | `DRY` · `OILY` · `COMBINATION` · `SENSITIVE` · `UNKNOWN` |
 | `nickname` | ❌ | 2~10자 |
+| `skinConcerns` | ❌ | `SkinConcern` 배열(복수 선택, 9종) — `[]`=전부 해제, 생략=변경 없음 |
+| `sleepPattern` | ❌ | `LACKING` · `NORMAL` · `ENOUGH` |
+| `stressLevel` | ❌ | `LOW` · `NORMAL` · `HIGH` |
+| `exerciseHabit` | ❌ | `NONE` · `LIGHT` · `REGULAR` |
 
 **Response 200** — ④와 동일 구조
 
 > **건너뛰기는 API를 호출하지 않는다.** 아무것도 보내지 않고 다음 화면으로 넘어가면 `declared_skin_type`이 `NULL`로 남고, 그게 "아직 안 정함"의 정확한 표현이다. `UNKNOWN`을 대신 넣으면 "잘 모르겠다고 답한 사용자"와 구분이 사라져 나중에 다시 물어볼지 판단할 수 없다.
+>
+> **`skinConcerns`만 빈 배열이 "전부 해제"다.** `null`(필드 생략)과 `[]`을 구분해야 한다 — 생략하면 기존 값을 유지하고, `[]`을 보내면 전부 해제된다. `sleepPattern`·`stressLevel`·`exerciseHabit`은 해제 개념이 없어 `null`(생략) = 변경 없음으로 충분하다.
 
 ---
 

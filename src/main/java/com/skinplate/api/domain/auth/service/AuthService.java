@@ -16,6 +16,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.HashSet;
 import java.util.Locale;
 
 @Service
@@ -103,6 +104,10 @@ public class AuthService {
 
         if (request.hasSkinType()) user.declareSkinType(request.declaredSkinType());
         if (request.hasNickname()) user.changeNickname(request.nickname());
+        if (request.hasSkinConcerns()) user.updateSkinConcerns(new HashSet<>(request.skinConcerns()));
+        if (request.hasSleepPattern())  user.changeSleepPattern(request.sleepPattern());
+        if (request.hasStressLevel())   user.changeStressLevel(request.stressLevel());
+        if (request.hasExerciseHabit()) user.changeExerciseHabit(request.exerciseHabit());
 
         return MeResponse.from(user);
     }

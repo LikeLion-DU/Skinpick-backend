@@ -2,9 +2,13 @@ package com.skinplate.api.domain.auth;
 
 import com.skinplate.api.domain.auth.dto.AuthResponse;
 import com.skinplate.api.domain.auth.dto.LoginRequest;
+import com.skinplate.api.domain.auth.dto.MeResponse;
 import com.skinplate.api.domain.auth.dto.SignupRequest;
+import com.skinplate.api.domain.auth.dto.UpdateProfileRequest;
 import com.skinplate.api.domain.auth.service.AuthService;
 import com.skinplate.api.domain.user.entity.AppUser;
+import com.skinplate.api.domain.user.entity.SkinConcern;
+import com.skinplate.api.domain.user.entity.SleepPattern;
 import com.skinplate.api.domain.user.repository.AppUserRepository;
 import com.skinplate.api.global.exception.BusinessException;
 import com.skinplate.api.global.exception.ErrorCode;
@@ -16,6 +20,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -137,5 +142,41 @@ class AuthServiceTest {
         AuthResponse response = authService.testLogin(1);
 
         assertThat(response.user().email()).isEqualTo("test@skinplate.app");
+    }
+
+    @Test
+    @DisplayName("프로필(고민·습관)은 보낸 필드만 갱신된다 — 응답은 enum 선언 순으로 고정")
+    void updateProfilePartially() {
+        AppUser user = savedUser("duing@example.com");
+        given(userRepository.findById(1L)).willReturn(Optional.of(user));
+
+        MeResponse afterConcerns = authService.updateProfile(1L, new UpdateProfileRequest(
+                null, null, List.of(SkinConcern.REDNESS, SkinConcern.ACNE), null, null, null));
+
+        assertThat(afterConcerns.skinConcerns())
+                .containsExactly(SkinConcern.ACNE, SkinConcern.REDNESS);   // 선언 순
+        assertThat(afterConcerns.sleepPattern()).isNull();
+
+        MeResponse afterSleep = authService.updateProfile(1L, new UpdateProfileRequest(
+                null, null, null, SleepPattern.LACKING, null, null));
+
+        // skinConcerns 를 안 보냈으니(null) 그대로다
+        assertThat(afterSleep.skinConcerns())
+                .containsExactly(SkinConcern.ACNE, SkinConcern.REDNESS);
+        assertThat(afterSleep.sleepPattern()).isEqualTo(SleepPattern.LACKING);
+    }
+
+    @Test
+    @DisplayName("skinConcerns 빈 배열은 전부 해제다 — 변경 없음으로 무시되면 안 된다")
+    void emptyConcernsClearsAll() {
+        AppUser user = savedUser("duing@example.com");
+        given(userRepository.findById(1L)).willReturn(Optional.of(user));
+        authService.updateProfile(1L, new UpdateProfileRequest(
+                null, null, List.of(SkinConcern.ACNE), null, null, null));
+
+        MeResponse cleared = authService.updateProfile(1L, new UpdateProfileRequest(
+                null, null, List.of(), null, null, null));
+
+        assertThat(cleared.skinConcerns()).isEmpty();
     }
 }
