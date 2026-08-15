@@ -2405,7 +2405,12 @@ import java.util.List;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class SkinPlate extends BaseTimeEntity {
 
-    /** DDL 의 varchar 길이와 클램프 기준을 한 값으로 묶는다. 둘이 갈라지면 방어가 무의미해진다. */
+    /**
+     * @Column(length) 과 클램프 기준을 한 값으로 묶는다. 둘이 갈라지면 방어가 무의미해진다.
+     *
+     * DDL 은 V4 에 300 으로 동결돼 있다. 이 값을 바꾸려면 새 V{n} 마이그레이션이 먼저다 —
+     * 상수가 실제로 묶는 것은 @Column(length) 와 클램프 둘뿐이고, validate 는 varchar 길이를 보지 않는다.
+     */
     private static final int AI_COMMENT_MAX_LENGTH = 300;
 
     @Id
@@ -2494,8 +2499,8 @@ public class SkinPlate extends BaseTimeEntity {
         feedback.assignTo(this);
     }
 
-    public void addFeedbacks(List<SkinPlateFeedback> list) {
-        list.forEach(this::addFeedback);
+    public void addFeedbacks(List<SkinPlateFeedback> feedbackList) {
+        feedbackList.forEach(this::addFeedback);
     }
 }
 ```
