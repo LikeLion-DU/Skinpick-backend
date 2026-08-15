@@ -33,7 +33,10 @@
 git checkout develop
 git add SkinPlate_DTO_Domain.md
 git commit -m "docs(plate): analyze 응답에 foodAnalysisId 가 없음을 명시"
+git push origin develop   # push 없이는 PR ① diff(origin/develop 기준)에 이 커밋이 그대로 섞인다
 ```
+
+push 가 브랜치 보호로 거부되면: 이 커밋과 기존 spec/plan 문서 커밋이 PR ① 에 함께 실린다는 사실을 PR 본문에 한 줄 밝히고 진행한다.
 
 - [ ] **Step 2: PR ① 브랜치 생성**
 
@@ -239,7 +242,9 @@ Expected: BUILD SUCCESSFUL, 실패 0
 ```bash
 docker compose up -d postgres
 set -a && source .env && set +a
-./gradlew bootRun   # "계정 생성: test@skinplate.app" 로그가 뜨면 성공 → Ctrl-C 로 종료
+timeout 90 ./gradlew bootRun > /tmp/skinplate-bootrun.log 2>&1 || true   # 90초 후 자동 종료
+grep "계정 생성" /tmp/skinplate-bootrun.log        # 나오면 Flyway V4 + validate 통과
+grep -A3 "APPLICATION FAILED" /tmp/skinplate-bootrun.log && echo "기동 실패 — 로그 확인" || true
 ```
 
 이후 스키마 불변식 확인 (user_skin_concern 의 PK 가 실제로 생겼는지):
@@ -576,6 +581,8 @@ EOF
 )"
 ```
 
+- [ ] **Step 4: 여기서 중단하고 PR ① 머지를 기다린다** — Task 6 이후는 머지된 develop 에서 분기해야 한다. 서브에이전트는 머지할 수 없으므로 사람 확인 지점이다.
+
 ---
 
 ### Task 6: (PR ②) 추천 축 7종 + 후보·문구 확장 (TDD)
@@ -773,7 +780,7 @@ git commit -m "feat(recommendation): 신고 고민 9종 → 추천 축 매핑"
 - Consumes: Task 2 AppUser 프로필 접근자 · Task 6 `Concern`/후보 · Task 7 `mapDeclared`
 - Produces: 확정 문장 ② 의 슬롯 동작 (외부 API 변화 없음)
 
-- [ ] **Step 1: 픽스처 확장** — `givenAnalysis` 를 프로필 주입 가능하게 오버로드
+- [ ] **Step 1: 픽스처 확장** — **기존 `givenAnalysis(SkinMetrics)` 메서드(103-113행)를 아래 두 메서드로 교체**한다 (그냥 추가하면 시그니처 중복으로 컴파일 에러)
 
 import 추가: `com.skinplate.api.domain.user.entity.ExerciseHabit`, `com.skinplate.api.domain.user.entity.SkinConcern`, `com.skinplate.api.domain.user.entity.SleepPattern`, `com.skinplate.api.domain.user.entity.StressLevel`, `java.util.Set`, `java.util.function.Consumer`
 
@@ -911,7 +918,7 @@ Expected: 신규 4개 FAIL (기존 3개는 통과 — 프로필 없는 픽스처
 
 import 추가: `com.skinplate.api.domain.user.entity.AppUser`, `com.skinplate.api.domain.user.entity.ExerciseHabit`, `com.skinplate.api.domain.user.entity.SleepPattern`, `com.skinplate.api.domain.user.entity.StressLevel`, `java.util.Optional`
 
-`createOnce` 위 74-76행 주석 수정 — "build 는 지표에서 바로 나오는 순수 계산이다" 문장을 다음으로 교체:
+`createOnce` **내부** 74-76행 주석(built.isEmpty() 가드 위) 수정 — "build 는 지표에서 바로 나오는 순수 계산이다" 문장을 다음으로 교체:
 
 ```java
         // 이 경우 exists 는 계속 false 지만, build 는 지표·프로필에서 바로 나오는 계산이라
@@ -948,6 +955,8 @@ git commit -m "feat(recommendation): 추천 슬롯 측정 2 + 신고 1 + 습관 
    - "추천은 최초 추천 생성 시점의 프로필을 기준으로 생성하며, 생성 후 결과는 고정한다."
    - "추천 슬롯은 측정 최대 2 + 자가 신고 최대 1 + 습관 최대 1이며, 해당 원천의 데이터가 없으면 해당 슬롯은 비워둔다."
 3. 시연 대본 주의: 프로필 입력 → 피부 분석 → 추천 화면 순서 고정 (먼저 열면 프로필 없는 추천으로 굳는다)
+4. "자가 신고값 반영은 추천 한정 — 점수 계산 제외 원칙은 §4.4.1 참조" 한 줄 (확정 결정 ① 을 §18.9 에서도 찾을 수 있게)
+5. 프론트 확인 필요 사항 기록: 시연 seed 조합에서 추천 11장 + 주의 3장 — S09 이전에 S08(Flutter) 레이아웃이 이 분량을 감당하는지 프론트 저장소에서 확인
 
 - [ ] **Step 2: 설계서 RecommendationCandidates 블록을 Task 7 완료본으로 교체**
 
