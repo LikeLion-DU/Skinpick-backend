@@ -2200,7 +2200,7 @@ public class Recommendation extends BaseTimeEntity {
 | `skinConcerns` | ❌ | `SkinConcern` 배열(복수 선택, 9종) — `[]`=전부 해제, 생략=변경 없음 |
 | `sleepPattern` | ❌ | `LACKING` · `NORMAL` · `ENOUGH` |
 | `stressLevel` | ❌ | `LOW` · `NORMAL` · `HIGH` |
-| `exerciseHabit` | ❌ | `NONE` · `LIGHT` · `REGULAR` |
+| `exerciseHabit` | ❌ | `NONE` · `LIGHT` · `REGULAR` · `FREQUENT` |
 | `waterIntake` | ❌ | `LACKING` · `NORMAL` · `ENOUGH` |
 
 **Response 200** — ④와 동일 구조

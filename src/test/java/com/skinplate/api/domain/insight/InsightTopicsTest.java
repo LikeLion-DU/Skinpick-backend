@@ -86,6 +86,14 @@ class InsightTopicsTest {
     }
 
     @Test
+    @DisplayName("운동을 자주 하는 사람도 습관 슬롯을 쓰지 않는다 — REGULAR 위에 FREQUENT 가 있다")
+    void frequentExercise_leavesSlotEmpty() {
+        AppUser frequent = user(profile -> profile.changeExerciseHabit(ExerciseHabit.FREQUENT));
+
+        assertThat(InsightTopics.select(HEALTHY, frequent)).isEmpty();
+    }
+
+    @Test
     @DisplayName("신고 고민이 측정과 겹치면 건너뛰고 다음 고민이 슬롯을 쓴다")
     void declaredOverlappingMeasured_skipsToNext() {
         // 측정이 이미 붉어짐을 잡았다 — REDNESS 신고는 스킵되고 다크서클이 들어온다

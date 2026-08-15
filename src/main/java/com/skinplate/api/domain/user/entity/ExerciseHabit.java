@@ -3,9 +3,10 @@ package com.skinplate.api.domain.user.entity;
 /** 운동 습관 (자가 신고). NULL = 미선택. */
 public enum ExerciseHabit {
 
-    NONE   ("거의 안 함"),
-    LIGHT  ("주 1-2회"),
-    REGULAR("주 3회 이상");
+    NONE    ("거의 안 함"),
+    LIGHT   ("주 1-2회"),
+    REGULAR ("주 3-4회"),
+    FREQUENT("주 5회 이상");
 
     private final String label;
 
