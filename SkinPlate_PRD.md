@@ -2167,8 +2167,8 @@ public class Recommendation extends BaseTimeEntity {
 | 필드 | 타입 | 필수 | 설명 |
 |---|---|---|---|
 | `front` | file | ✅ | 정면 얼굴 사진 (JPEG/PNG, ≤5MB) |
-| `left` | file | ✅ | 왼쪽 얼굴 사진 (JPEG/PNG, ≤5MB) |
-| `right` | file | ✅ | 오른쪽 얼굴 사진 (JPEG/PNG, ≤5MB) |
+| `left` | file | ✅ | 고개를 왼쪽으로 돌린 사진 — 오른쪽 뺨이 보임 (JPEG/PNG, ≤5MB) |
+| `right` | file | ✅ | 고개를 오른쪽으로 돌린 사진 — 왼쪽 뺨이 보임 (JPEG/PNG, ≤5MB) |
 
 **Header**: `Authorization: Bearer {accessToken}`
 

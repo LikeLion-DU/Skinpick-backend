@@ -126,7 +126,9 @@ public class SkinAnalysisService {
      * 올바르지 않습니다" 만 뜨면 사용자는 셋 다 다시 찍는다.
      */
     private FacePhoto encode(FacePhotoType type, MultipartFile image) {
-        EncodedImage encoded = ImageEncoder.encode(image, type.getLabel());
+        // 프롬프트용 label 이 아니라 subject 다 — label 은 뺨 설명까지 붙은 긴 문구라
+        // 오류 메시지의 주어로 쓰면 문장이 깨진다.
+        EncodedImage encoded = ImageEncoder.encode(image, type.getSubject());
         return new FacePhoto(type, encoded.base64(), encoded.mediaType());
     }
 

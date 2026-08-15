@@ -90,7 +90,10 @@ class OpenAiVisionClientTest {
         String body = captured.toString();
 
         // 사진마다 방향 라벨이 바로 앞에 붙는다. 순서로만 구분하면 한 장이 밀려도 드러나지 않는다.
-        assertThat(body).contains("[정면]", "[왼쪽 얼굴]", "[오른쪽 얼굴]");
+        // left = 고개를 왼쪽으로 돌린 사진(오른쪽 뺨) — FacePhotoType 주석의 결정.
+        assertThat(body).contains("[정면]",
+                                  "[고개를 왼쪽으로 돌린 측면 — 오른쪽 뺨이 보임]",
+                                  "[고개를 오른쪽으로 돌린 측면 — 왼쪽 뺨이 보임]");
         assertThat(body).contains("data:image/jpeg;base64,RlJPTlQ=",
                                   "data:image/png;base64,TEVGVA==",
                                   "data:image/jpeg;base64,UklHSFQ=");

@@ -6405,7 +6405,7 @@ npx wrangler pages deploy build/web --project-name=skinplate
 | 항목 | 변경 |
 |---|---|
 | **`VisionClient.analyzeSkin` [수정]** | `(String base64, String mediaType)` → **`(List<FacePhoto> photos)`**. 세 장이 한 요청에 실린다. 음식은 그대로 한 장 |
-| **`FacePhoto` · `FacePhotoType` [신설]** | `infra/openai/dto/`. 방향(`FRONT`·`LEFT`·`RIGHT`) + Base64 + 판별된 mediaType. `label` 이 프롬프트에서 사진 앞에 붙는 `[정면]` `[왼쪽 얼굴]` `[오른쪽 얼굴]` 이다 |
+| **`FacePhoto` · `FacePhotoType` [신설]** | `infra/openai/dto/`. 방향(`FRONT`·`LEFT`·`RIGHT`) + Base64 + 판별된 mediaType. `label` 이 프롬프트에서 사진 앞에 붙는다. **`LEFT` = 고개를 본인 왼쪽으로 돌린 사진(오른쪽 뺨이 보임)** — 앱 지시문 기준(2026-08-15 결정). 라벨 문구 원본은 enum 이 소유한다 |
 | **`SkinAnalysisService.analyze` [수정]** | 파라미터 3개(`front`·`left`·`right`). 방향이 **파라미터 자리에서 정해지므로** 클라이언트가 보낸 순서를 신뢰할 일이 없다. 형식 판별 실패 시 **어느 방향인지 메시지에 담는다** — 아니면 사용자가 셋 다 다시 찍는다 |
 | **`SkinAnalysisPrompt.USER` [수정]** | 3방향 설명으로 확장. **`SYSTEM` 과 `SCHEMA` 는 손대지 않았다** — 잣대가 바뀌면 과거 분석과 비교가 안 된다 |
 | **`SkinRepository.analyze` [수정]** | `analyze(File image)` → **`analyze({required front, required left, required right})`**. 세 장이 모이기 전에는 호출하지 않는다. 단계마다 부르면 분석이 세 건 생기고 그중 무엇이 오늘의 점수인지 알 수 없다 |

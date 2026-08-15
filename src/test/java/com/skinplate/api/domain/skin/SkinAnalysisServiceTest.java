@@ -163,7 +163,7 @@ class SkinAnalysisServiceTest {
 
         assertThatThrownBy(() -> skinAnalysisService.analyze(USER_ID, jpegImage(), jpegImage(), empty))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("오른쪽 얼굴");
+                .hasMessageContaining("오른쪽으로 돌린");
 
         verify(visionClient, never()).analyzeSkin(anyList());
     }
