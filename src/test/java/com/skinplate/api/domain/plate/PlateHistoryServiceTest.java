@@ -5,6 +5,7 @@ import com.skinplate.api.domain.food.entity.FoodAnalysis;
 import com.skinplate.api.domain.food.entity.Nutrition;
 import com.skinplate.api.domain.plate.dto.PlateHistoryDayDto;
 import com.skinplate.api.domain.plate.dto.PlateHistoryItemDto;
+import com.skinplate.api.domain.plate.entity.MealType;
 import com.skinplate.api.domain.plate.entity.SkinPlate;
 import com.skinplate.api.domain.plate.repository.SkinPlateRepository;
 import com.skinplate.api.domain.plate.service.PlateHistoryService;
@@ -67,6 +68,28 @@ class PlateHistoryServiceTest {
                 .containsExactly(LocalDate.of(2026, 8, 14), LocalDate.of(2026, 8, 13));
         assertThat(days.get(0).plates()).extracting(PlateHistoryItemDto::foodName)
                 .containsExactly("샐러드", "치킨");
+    }
+
+    @Test
+    @DisplayName("그날 식단 점수는 기록들의 평균이고, 목표와 끼니를 함께 보낸다")
+    void summarisesDay() {
+        given(skinPlateRepository.findInRange(anyLong(), any(), any())).willReturn(List.of(
+                plate(3L, "샐러드", 82, LocalDateTime.of(2026, 8, 14, 19, 4)),
+                plate(2L, "치킨", 71, LocalDateTime.of(2026, 8, 14, 15, 21)),
+                plate(1L, "떡볶이", 65, LocalDateTime.of(2026, 8, 13, 12, 32))));
+
+        List<PlateHistoryDayDto> days = plateHistoryService.get(USER_ID, FROM, TO).days();
+
+        // (82 + 71) / 2 = 76.5 → 반올림 77. 내림으로 바꾸면 홈의 큰 숫자가 1점 낮아진다
+        assertThat(days.get(0).plateScore()).isEqualTo(77);
+        assertThat(days.get(1).plateScore()).isEqualTo(65);
+
+        // 목표를 앱에 하드코딩하지 않기 위해 매 응답에 실어 보낸다
+        assertThat(days.get(0).targetScore()).isEqualTo(80);
+
+        // 저장 시각에서 파생한다. 앱이 시각을 보고 다시 계산하지 않는다
+        assertThat(days.get(0).plates()).extracting(PlateHistoryItemDto::mealType)
+                .containsExactly(MealType.DINNER, MealType.LUNCH);
     }
 
     @Test

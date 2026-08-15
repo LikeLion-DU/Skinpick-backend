@@ -3,6 +3,7 @@ package com.skinplate.api.domain.plate.service;
 import com.skinplate.api.domain.plate.dto.PlateHistoryDayDto;
 import com.skinplate.api.domain.plate.dto.PlateHistoryItemDto;
 import com.skinplate.api.domain.plate.dto.PlateHistoryResponse;
+import com.skinplate.api.domain.plate.entity.MealType;
 import com.skinplate.api.domain.plate.entity.SkinPlate;
 import com.skinplate.api.domain.plate.repository.SkinPlateRepository;
 import com.skinplate.api.domain.skin.entity.SkinAnalysis;
@@ -23,6 +24,12 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class PlateHistoryService {
+
+    /**
+     * 시안의 "목표 80점". 아직 모두에게 같다.
+     * 사용자별 목표가 생기면 이 상수 대신 사용자 설정을 읽는 자리다.
+     */
+    private static final int TARGET_SCORE = 80;
 
     private final SkinPlateRepository skinPlateRepository;
     private final SkinAnalysisRepository skinAnalysisRepository;
@@ -57,11 +64,30 @@ public class PlateHistoryService {
                 // DESC 정렬의 마지막 = 그날 첫 기록. get(0) 으로 "고치면" 최신 기록이 돼 버린다.
                 sorted.get(sorted.size() - 1).getSkinAnalysis().getSkinScore());
 
-        return new PlateHistoryDayDto(date, skinScore, sorted.stream()
-                .map(plate -> new PlateHistoryItemDto(plate.getId(),
-                        plate.getFoodAnalysis().getFoodName(),
-                        plate.getPlateScore(), plate.getCreatedAt()))
-                .toList());
+        return new PlateHistoryDayDto(date, skinScore, averagePlateScore(sorted), TARGET_SCORE,
+                sorted.stream()
+                        .map(plate -> new PlateHistoryItemDto(plate.getId(),
+                                plate.getFoodAnalysis().getFoodName(),
+                                plate.getPlateScore(),
+                                MealType.from(plate.getCreatedAt()),
+                                plate.getCreatedAt()))
+                        .toList());
+    }
+
+    /**
+     * 그날의 대표 점수. 반올림해서 정수로 낸다 — 시안의 홈이 소수점 없이 "72점"을 쓴다.
+     *
+     * <p>가중치를 두지 않는다. 끼니마다 양이 다르니 저녁을 더 크게 쳐야 한다는 말이
+     * 나올 수 있는데, 그러려면 섭취량을 알아야 하고 사진만으로는 알 수 없다.
+     * 근거 없는 가중치는 "왜 이 점수인가"를 설명 못 하게 만든다.
+     */
+    private int averagePlateScore(List<SkinPlate> plates) {
+        return (int) Math.round(plates.stream()
+                .mapToInt(SkinPlate::getPlateScore)
+                .average()
+                // 이 메서드는 기록이 있는 날에만 불린다(그룹핑 결과라 빈 리스트가 없다).
+                // 그래도 0 을 두는 것은 나중에 호출부가 바뀌어도 터지지 않게 하기 위함이다.
+                .orElse(0));
     }
 
     /** 그날 찍은 분석 중 가장 늦은 것. 입력이 내림차순이라 첫 등장이 최신이다. */
