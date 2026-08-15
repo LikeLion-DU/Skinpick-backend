@@ -40,6 +40,8 @@ skinplate-api/
 │   ├── application-local.yml
 │   ├── application-prod.yml
 │   └── db/migration/  V1__init.sql · V2__drop_image_url.sql
+│                      V3__recommendation_unique.sql · V4__plate_ai_comments.sql
+│                      V5__skin_profile.sql
 └── src/main/java/com/skinplate/api/
     ├── SkinPlateApplication.java
     ├── global/
@@ -393,6 +395,59 @@ CREATE INDEX idx_recommendation_skin ON recommendation (skin_analysis_id);
 > **CHECK 제약을 넣은 이유** — 0~100 범위는 애플리케이션에서도 검증하지만, AI가 이상한 값을 뱉었을 때 **DB에서 한 번 더 막힌다**. 잘못된 데이터가 저장되고 나면 원인 추적에 반나절이 든다. 저장 자체를 실패시키면 스택트레이스가 바로 나온다.
 >
 > `food_analysis_id`가 `UNIQUE`인 것도 의도적이다. 음식 사진 1장 = Plate 1건이라는 관계(PRD ERD의 `||--||`)를 DB가 보증한다.
+
+**`src/main/resources/db/migration/V3__recommendation_unique.sql`**
+
+```sql
+-- 추천은 피부 분석 1건당 한 벌만 존재해야 한다.
+--
+-- RecommendationService.getOrCreate 가 "있나 보고 없으면 넣는다" 로 되어 있는데,
+-- READ COMMITTED 에서 동시 요청 둘이 모두 "없다" 를 보고 둘 다 넣을 수 있다.
+-- S08 을 두 번 누르거나 느린 첫 응답에 클라이언트가 재시도하면 7건이 14건이 되고,
+-- 이후 조회마다 같은 음식이 영구히 두 번씩 뜬다. 지우기 전까지 회복되지 않는다.
+--
+-- 애플리케이션 쪽 검사만으로는 막을 수 없다. 경합을 실제로 끊는 것은 이 제약이다.
+
+-- 제약을 걸기 전에 이미 들어간 중복을 정리한다. 개발 중 만들어졌을 수 있고,
+-- 남아 있으면 ADD CONSTRAINT 가 실패해 기동이 통째로 멈춘다(ddl-auto: validate).
+DELETE FROM recommendation r
+ USING recommendation keep
+ WHERE r.skin_analysis_id = keep.skin_analysis_id
+   AND r.type             = keep.type
+   AND r.food_name        = keep.food_name
+   AND r.id > keep.id;
+
+ALTER TABLE recommendation
+    ADD CONSTRAINT uq_recommendation_analysis_type_food
+    UNIQUE (skin_analysis_id, type, food_name);
+```
+
+> **UNIQUE 가 (분석, 타입, 음식)인 것이 코드의 중복 제거 방식을 정한다.** 같은 이름이 추천과 주의 양쪽에 있는 것을 DB 는 허용하므로, `RecommendationService.build` 도 추천·주의를 **따로** 센다. 하나의 집합으로 합쳐 세면 한쪽에 이미 나온 이름이 다른 쪽에서 조용히 사라져, 코드만 DB 보다 좁게 막는 상태가 된다.
+>
+> 주석의 "7건이 14건"은 추천 축이 5종이던 시절의 예시다. 슬롯이 2+1+1 로 늘어 지금 시연 지표에서 만들어지는 행은 한 벌에 14건(추천 11 · 주의 3)이지만, **적용된 마이그레이션은 고치지 않는다** — 파일이 바뀌면 Flyway 체크섬이 어긋나 이미 적용한 DB 가 기동에서 멈춘다.
+
+**`src/main/resources/db/migration/V4__plate_ai_comments.sql`**
+
+```sql
+-- 확정 시안이 요구하는 AI 문장 두 개.
+--
+--   ai_tip           결과 화면의 "AI 맞춤 TIP" — 이 기록 하나에 대한 다음 식사 제안
+--   ai_daily_comment "오늘의 AI 코멘트" — 저장 시점 기준 그날 전체 기록에 대한 한 줄
+--
+-- 저장 시 1회 생성한다(A안). 조회 때마다 만들면 홈을 열 때마다 과금과 지연이
+-- 생기고, 같은 날을 두 번 열면 다른 문장이 나온다.
+--
+-- daily comment 를 별도 테이블이 아니라 기록 행에 두는 이유: 그날 기록이 하나
+-- 늘 때마다 문장이 달라져야 하는데, 최신 기록에 함께 저장하면 "그날의 최신
+-- 문장 = 그날 마지막 기록의 문장"이라는 규칙 하나로 끝난다.
+--
+-- 둘 다 NULL 허용 — AI 가 실패해도 저장은 되어야 한다. 문장이 없으면 앱이
+-- 카드를 그리지 않는다.
+alter table skin_plate add column ai_tip varchar(300);
+alter table skin_plate add column ai_daily_comment varchar(300);
+```
+
+> **두 컬럼이 NULL 허용인 것은 응답 계약으로 이어진다.** 문장이 없으면 `SkinPlateResponse.aiTip` 과 히스토리의 `days[].aiComment` 는 **키 자체가 생략된다**(§14.3). 빈 문자열을 대신 넣으면 앱이 빈 카드를 그린다.
 
 **`src/main/resources/db/migration/V5__skin_profile.sql`**
 
@@ -2631,6 +2686,7 @@ import com.skinplate.api.domain.user.entity.SkinConcern;
 import com.skinplate.api.domain.user.entity.SkinType;
 import com.skinplate.api.domain.user.entity.SleepPattern;
 import com.skinplate.api.domain.user.entity.StressLevel;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 import java.util.List;
@@ -2652,7 +2708,7 @@ public record UpdateProfileRequest(
         @Size(min = 2, max = 10, message = "닉네임은 2자 이상 10자 이하로 입력해 주세요.")
         String nickname,
 
-        List<SkinConcern> skinConcerns,
+        List<@NotNull(message = "피부 고민 항목에 빈 값이 올 수 없습니다.") SkinConcern> skinConcerns,
 
         SleepPattern sleepPattern,
 
@@ -4174,6 +4230,7 @@ Nutrition nutrition = StandardNutrition.find(ai.foodName())
 package com.skinplate.api.domain.recommendation.service;
 
 import com.skinplate.api.domain.skin.entity.SkinMetrics;
+import com.skinplate.api.domain.user.entity.SkinConcern;
 
 import java.util.Comparator;
 import java.util.List;
@@ -4189,61 +4246,144 @@ public final class RecommendationCandidates {
 
     private RecommendationCandidates() {}
 
-    public enum Concern { DRY, REDNESS, TROUBLE, OILY, BARRIER_WEAK }
+    /** 추천 축. 앞 5개는 측정(SkinMetrics), 뒤 7개는 자가 신고 고민·습관에서만 진입한다. */
+    public enum Concern {
+        DRY, REDNESS, TROUBLE, OILY, BARRIER_WEAK,
+        DARK_CIRCLE, PIGMENTATION, ELASTICITY, PUFFINESS,
+        SLEEP_LACK, STRESS_HIGH, EXERCISE_NONE
+    }
 
     public record Candidates(List<String> recommend, List<String> avoid) {}
 
-    private static final Map<Concern, Candidates> TABLE = Map.of(
-            Concern.DRY,          new Candidates(List.of("연어", "아보카도", "오이", "견과류"),
-                                                 List.of("커피", "술")),
-            Concern.REDNESS,      new Candidates(List.of("브로콜리", "녹차", "토마토"),
-                                                 List.of("매운 음식", "술")),
-            Concern.TROUBLE,      new Candidates(List.of("키위", "고구마", "견과류"),
-                                                 List.of("탄산음료", "초콜릿", "튀김")),
-            Concern.OILY,         new Candidates(List.of("채소", "두부", "흰살생선"),
-                                                 List.of("튀김", "라면", "패스트푸드")),
-            Concern.BARRIER_WEAK, new Candidates(List.of("연어", "달걀", "아몬드"),
-                                                 List.of("인스턴트", "가공육")));
+    private static final Map<Concern, Candidates> TABLE = Map.ofEntries(
+            Map.entry(Concern.DRY,          new Candidates(List.of("연어", "아보카도", "오이", "견과류"),
+                                                           List.of("커피", "술"))),
+            Map.entry(Concern.REDNESS,      new Candidates(List.of("브로콜리", "녹차", "토마토"),
+                                                           List.of("매운 음식", "술"))),
+            Map.entry(Concern.TROUBLE,      new Candidates(List.of("키위", "고구마", "견과류"),
+                                                           List.of("탄산음료", "초콜릿", "튀김"))),
+            Map.entry(Concern.OILY,         new Candidates(List.of("채소", "두부", "흰살생선"),
+                                                           List.of("튀김", "라면", "패스트푸드"))),
+            Map.entry(Concern.BARRIER_WEAK, new Candidates(List.of("연어", "달걀", "아몬드"),
+                                                           List.of("인스턴트", "가공육"))),
+            // 자가 신고 전용 축 — 측정 지표로는 볼 수 없는 고민이다
+            Map.entry(Concern.DARK_CIRCLE,  new Candidates(List.of("시금치", "달걀"),
+                                                           List.of("술"))),
+            Map.entry(Concern.PIGMENTATION, new Candidates(List.of("토마토", "키위", "파프리카"),
+                                                           List.of("술"))),
+            Map.entry(Concern.ELASTICITY,   new Candidates(List.of("닭가슴살", "달걀", "베리류"),
+                                                           List.of("탄산음료"))),
+            Map.entry(Concern.PUFFINESS,    new Candidates(List.of("오이", "바나나"),
+                                                           List.of("라면", "가공육"))),
+            // 습관 축 — 나쁜 값일 때만 트리거된다
+            Map.entry(Concern.SLEEP_LACK,   new Candidates(List.of("바나나", "우유"),
+                                                           List.of("커피", "술"))),
+            Map.entry(Concern.STRESS_HIGH,  new Candidates(List.of("견과류", "녹차", "연어"),
+                                                           List.of("커피"))),
+            Map.entry(Concern.EXERCISE_NONE, new Candidates(List.of("두부", "달걀", "닭가슴살"),
+                                                            List.of("패스트푸드"))));
 
     public static Candidates of(Concern concern) {
         return TABLE.get(concern);
     }
 
     /**
-     * <b>실제로 취약한</b> 항목만 심각한 순으로 최대 N개. 없으면 빈 목록이다.
+     * 자가 신고 고민 → 추천 축. (설계서 2026-08-15 §3)
+     * switch 가 전사라서 SkinConcern 에 값을 추가하고 여기를 빠뜨리면 컴파일이 깨진다.
+     */
+    public static Concern mapDeclared(SkinConcern concern) {
+        return switch (concern) {
+            case ACNE         -> Concern.TROUBLE;
+            case REDNESS      -> Concern.REDNESS;
+            case DRYNESS      -> Concern.DRY;
+            case OILINESS     -> Concern.OILY;
+            case TEXTURE      -> Concern.BARRIER_WEAK;
+            case DARK_CIRCLE  -> Concern.DARK_CIRCLE;
+            case PIGMENTATION -> Concern.PIGMENTATION;
+            case ELASTICITY   -> Concern.ELASTICITY;
+            case PUFFINESS    -> Concern.PUFFINESS;
+        };
+    }
+
+    /**
+     * <b>실제로 취약한</b> 항목만 심각한 순으로 최대 N개 뽑는다. 없으면 빈 목록이다.
      *
-     * 판정은 SkinMetrics 의 판정자를 그대로 쓴다. 여기에 임계값을 다시 적으면
+     * 판정은 {@link SkinMetrics} 의 판정자를 그대로 쓴다. 여기서 임계값을 다시 적으면
      * 같은 뜻의 숫자가 두 곳에 생기고, Rule Engine 은 "건조하지 않다"고 보는 지표를
      * 추천만 "건조하다"고 보는 날이 온다.
      *
-     * 거르지 않으면 피부가 멀쩡해도 상위 두 개가 뽑힌다 — 심사위원이 본인 얼굴로
+     * 거르지 않으면 <b>피부가 멀쩡해도 상위 두 개가 뽑힌다.</b> 모든 지표가 좋은
+     * 사용자에게 "장벽 회복을 위해 연어를 드세요"가 뜨는데, 심사위원이 본인 얼굴로
      * 찍어 보는 순간이 정확히 그 경우다.
      */
-    public static List<Concern> topConcerns(SkinMetrics m, int n) {
+    public static List<Concern> topConcerns(SkinMetrics metrics, int count) {
         record Scored(Concern concern, boolean present, int severity) {}
 
         return List.of(
-                        new Scored(Concern.DRY,          m.isDry(),         100 - m.getHydration()),
-                        new Scored(Concern.BARRIER_WEAK, m.isBarrierWeak(), 100 - m.getBarrier()),
-                        new Scored(Concern.OILY,         m.isOily(),        m.getOil()),
-                        new Scored(Concern.REDNESS,      m.hasRedness(),    m.getRedness()),
-                        new Scored(Concern.TROUBLE,      m.hasTrouble(),    m.getTrouble()))
+                        new Scored(Concern.DRY,          metrics.isDry(),         100 - metrics.getHydration()),
+                        new Scored(Concern.BARRIER_WEAK, metrics.isBarrierWeak(), 100 - metrics.getBarrier()),
+                        new Scored(Concern.OILY,         metrics.isOily(),        metrics.getOil()),
+                        new Scored(Concern.REDNESS,      metrics.hasRedness(),    metrics.getRedness()),
+                        new Scored(Concern.TROUBLE,      metrics.hasTrouble(),    metrics.getTrouble()))
                 .stream()
                 .filter(Scored::present)
-                // 동점이면 순서가 흔들려 같은 지표에 다른 추천이 나온다. 이름으로 고정한다.
+                // 동점일 때 순서가 흔들리면 같은 지표에 다른 추천이 나온다.
+                // 재현성이 이 테이블의 존재 이유이므로 이름으로 한 번 더 고정한다.
                 .sorted(Comparator.comparingInt(Scored::severity).reversed()
                                   .thenComparing(scored -> scored.concern().name()))
-                .limit(n)
+                .limit(count)
                 .map(Scored::concern)
                 .toList();
     }
 
     /**
-     * 음식별 추천 문구. 후보 표의 24개 음식이 각자의 문장을 갖는다.
-     * 항목별로 한 문장씩 두면 같은 취약 항목에서 나온 음식들이 글자까지 같은 문장을
-     * 달고 줄줄이 뜬다 — S08 은 영상에 나가는 화면이다. (전문은 구현 파일 참조)
+     * 음식별 추천 문구. (PRD §14.3 ⑧)
+     *
+     * 항목별로 한 문장씩 두면 같은 취약 항목에서 나온 음식들이 <b>글자까지 똑같은
+     * 문장</b>을 달고 화면에 줄줄이 뜬다 — 시연 지표에서는 추천 7장에 문장이 2종뿐이었다.
+     * S08 은 영상에 나가는 화면이다.
+     *
+     * AI 로 문장을 만들지 않는다. §18.9 는 문장 생성을 AI 몫으로 뒀지만 그건 G4
+     * 축소 경로("추천을 정적 문구로 대체")를 두고 한 설계이고, 지금은 그 경로를 쓴다.
+     * 무대에서 같은 사진에 같은 문장이 나오는 쪽이 자연스러운 문장보다 중요하다.
+     *
+     * 음식 이름을 바꾸면 여기도 같이 바꾼다 — 빠지면 문구 없이 이름만 뜬다.
      */
-    private static final Map<String, String> REASONS = Map.ofEntries(/* 음식명 → 문구 24개 */);
+    private static final Map<String, String> REASONS = Map.ofEntries(
+            // 추천
+            Map.entry("연어",      "오메가3와 단백질이 들어 있어 피부 장벽을 채우는 데 좋습니다."),
+            Map.entry("아보카도",  "불포화지방과 비타민E가 수분이 빠져나가는 것을 붙잡아 줍니다."),
+            Map.entry("견과류",    "비타민E와 좋은 지방이 들어 있어 조금씩 자주 먹기 좋습니다."),
+            Map.entry("브로콜리",  "항산화 성분이 풍부한 채소라 자극받은 피부에 부담이 적습니다."),
+            Map.entry("녹차",      "폴리페놀이 들어 있고 카페인이 커피보다 적습니다."),
+            Map.entry("토마토",    "라이코펜이 들어 있어 붉어진 피부를 진정시키는 데 도움이 됩니다."),
+            Map.entry("키위",      "비타민C가 많아 피부 컨디션을 관리하기에 좋습니다."),
+            Map.entry("고구마",    "식이섬유와 베타카로틴이 함께 들어 있습니다."),
+            Map.entry("채소",      "기름기가 적어 유분이 많은 날에도 부담이 없습니다."),
+            Map.entry("두부",      "지방은 적고 단백질은 챙길 수 있습니다."),
+            Map.entry("흰살생선",  "기름기가 적은 단백질이라 유분이 많을 때 알맞습니다."),
+            Map.entry("달걀",      "단백질과 아미노산이 고루 들어 있습니다."),
+            Map.entry("아몬드",    "비타민E가 많아 장벽이 약할 때 곁들이기 좋습니다."),
+            // 주의
+            Map.entry("술",        "탈수를 부르고 혈관을 확장시켜 붉은기를 키울 수 있습니다."),
+            Map.entry("매운 음식",  "캡사이신이 혈관을 확장시켜 홍조를 더 붉게 만들 수 있습니다."),
+            Map.entry("초콜릿",    "당과 지방이 함께 많아 트러블이 있을 때 부담이 됩니다."),
+            Map.entry("튀김",      "튀김 기름이 유분과 트러블 양쪽을 자극할 수 있습니다."),
+            Map.entry("패스트푸드", "기름기와 나트륨이 함께 높습니다."),
+            Map.entry("인스턴트",  "가공도가 높아 장벽 회복에 도움이 되지 않습니다."),
+            // 교체 (기존 문구가 새 맥락에서 어색해지는 것들)
+            Map.entry("오이",      "수분이 대부분이라 물기를 채우고 붓기를 가라앉히는 데 좋습니다."),
+            Map.entry("커피",      "카페인이 수분을 빼앗고 잠들기도 어렵게 만듭니다."),
+            Map.entry("탄산음료",  "당류가 많아 트러블과 탄력 저하를 함께 부추길 수 있습니다."),
+            Map.entry("라면",      "나트륨이 높아 붓기를 부르고 수분을 빼앗아 갑니다."),
+            Map.entry("가공육",    "나트륨과 첨가물이 많아 붓기와 장벽 회복 모두에 부담이 됩니다."),
+            // 신규
+            Map.entry("시금치",    "철분과 루테인이 들어 있어 눈가 그늘 관리에 곁들이기 좋습니다."),
+            Map.entry("파프리카",  "비타민C가 풍부해 칙칙해진 톤을 관리하는 데 도움이 됩니다."),
+            Map.entry("닭가슴살",  "단백질이 풍부해 피부 탄력의 재료를 채워 줍니다."),
+            Map.entry("베리류",    "안토시아닌 같은 항산화 성분이 탄력 저하를 늦추는 데 좋습니다."),
+            Map.entry("바나나",    "칼륨이 나트륨 배출을 도와 붓기를 가라앉히고 저녁 간식으로도 부담이 없습니다."),
+            Map.entry("우유",      "트립토판이 들어 있어 잠들기 어려운 날 저녁에 알맞습니다."));
 
     /** 표에 없는 음식이면 이름만 남긴다 — 문구가 없다고 추천이 사라지면 안 된다. */
     public static String reasonOf(String foodName) {
@@ -4253,6 +4393,8 @@ public final class RecommendationCandidates {
 ```
 
 > **AI 문장 생성이 실패해도 화면은 비지 않는다.** 후보 음식이 코드에 있으므로 정적 이유 문구로 폴백하면 된다. PRD의 G4 축소 경로("추천을 정적 문구로 대체")가 그제서야 실제로 동작하는 경로가 된다.
+>
+> **축은 12종이지만 측정에서 진입하는 것은 앞의 5종뿐이다.** `topConcerns` 는 `SkinMetrics` 만 보므로 뒤 7종을 절대 고르지 않는다. 다크서클·색소침착·탄력·부기는 `mapDeclared` 를 거친 자가 신고에서만, 수면·스트레스·운동은 습관 슬롯에서만 들어온다 — **자가 신고값이 점수 계산에 개입하지 않는다는 원칙(PRD §4.4.1)은 그대로다.** 추천 슬롯 조립은 `RecommendationService.slotConcerns` 에 있다(측정 2 + 신고 1 + 습관 1, PRD §18.9).
 
 ---
 
@@ -6125,11 +6267,11 @@ if (_consecutiveFailures >= 3) {
 | `POST /plates/records`<br>`GET /plates/{id}` | `SkinPlateResponse` | `plateId` · **`skinAnalysisId`** · `plateScore` · **`baseScore`** · `summary` · `food{...}` · `feedbacks{good,caution,action}` · `appliedRules[]` · **`aiTip`**(생성 실패 시 키 생략) · `createdAt` | `SkinPlateDto` |
 | `POST /plates/{id}/simulate` | `PlateSimulateResponse` | `plateId` · `beforeScore` · `afterScore` · `appliedActions[]` · `removedRules[]` · `summary` | `PlateSimulationDto` |
 | `POST /plates/simulate` | `PlateAnalysisSimulateResponse` | `beforeScore` · `afterScore` · `appliedActions[]` · `removedRules[]` · `summary` — **`plateId` 없음(저장 전, analysisToken 이 대상을 지목)** | `PlateSimulationDto` |
-| `GET /plates?from=&to=` | `PlateHistoryResponse` | `days[{date, skinScore, **plateScore**, **targetScore**, **aiComment**(없으면 키 생략), plates[{plateId, foodName, plateScore, **mealType**, recordedAt}]}]` | `PlateHistoryDto` |
+| `GET /plates?from=&to=` | `PlateHistoryResponse` | `days[{date, skinScore(없으면 키 생략), **plateScore**(평균 못 내면 키 생략), **targetScore**, **aiComment**(없으면 키 생략), plates[{plateId, foodName, plateScore, **mealType**, recordedAt}]}]` | `PlateHistoryDto` |
 | `GET /reports?period=` | `ReportResponse` | `period` · `from` · `to` · `latestSkinScore` · `skinScoreTrend[]` · `recordCount` · `averagePlateScore` · `penalties[]` · `meals[]` | `ReportDto` |
 | `GET /recommendations` | `RecommendationResponse` | `skinAnalysisId` · `recommend[]` · `avoid[]` · `generatedAt` | `RecommendationDto` |
 
-> **히스토리의 `days[].plateScore` 는 그날 기록들의 평균이고, `mealType` 은 `recordedAt` 에서 파생한다.** 확정 시안의 홈이 "오늘의 피부 식단 점수 / 목표 80점"을, 기록 카드가 "아침 8:20"을 보여주면서 생긴 필드다. 둘 다 새 컬럼 없이 만든다 — 평균은 저장할 값이 아니고(기록이 하나 추가되면 바뀐다), 끼니를 고르는 UI 가 시안에 없어 사용자가 값을 줄 방법이 없다. **앱에서 평균을 내지 않는 이유는 반올림 때문이다.** 76.5 를 서버는 올리고 앱은 내리면 같은 날에 두 숫자가 뜬다. `targetScore` 를 매번 실어 보내는 것도 같은 이유다 — 앱에 80 을 박으면 사용자별 목표를 줄 때 앱 배포가 필요해진다.
+> **히스토리의 `days[].plateScore` 는 그날 기록들의 평균이고, `mealType` 은 `recordedAt` 에서 파생한다.** 평균을 못 내는 날(기록 없음)은 non_null 직렬화가 키를 지우고, 앱 DTO 는 `int?` 로 받는다 — `@Default(0)` 을 두면 홈이 "0점 · 주의"를 그리는데, 0점은 "아주 나쁘게 먹었다"지 "아직 안 먹었다"가 아니다. 확정 시안의 홈이 "오늘의 피부 식단 점수 / 목표 80점"을, 기록 카드가 "아침 8:20"을 보여주면서 생긴 필드다. 둘 다 새 컬럼 없이 만든다 — 평균은 저장할 값이 아니고(기록이 하나 추가되면 바뀐다), 끼니를 고르는 UI 가 시안에 없어 사용자가 값을 줄 방법이 없다. **앱에서 평균을 내지 않는 이유는 반올림 때문이다.** 76.5 를 서버는 올리고 앱은 내리면 같은 날에 두 숫자가 뜬다. `targetScore` 를 매번 실어 보내는 것도 같은 이유다 — 앱에 80 을 박으면 사용자별 목표를 줄 때 앱 배포가 필요해진다.
 >
 > **앱은 두 simulate 응답을 `PlateSimulationDto` 하나로 받는다.** `PlateAnalysisSimulationDto` 를 따로 두지 않는다 — 두 응답의 차이가 `plateId` 하나뿐인데 앱이 그 값을 읽지 않기 때문이다(`{id}` 쪽은 요청할 때 이미 알고 있던 값이다). DTO 에서 `plateId` 필드를 아예 뺐고, 저장된 기록용 응답에 그 키가 있어도 무시하고 파싱된다. 앱 계약 테스트가 두 응답을 같은 DTO 로 읽어 이 전제를 고정한다.
 >

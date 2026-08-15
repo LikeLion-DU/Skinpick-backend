@@ -1589,6 +1589,23 @@ public class AppUser extends BaseTimeEntity {
     @Column(length = 20)
     private SkinType declaredSkinType;
 
+    /** 자가 신고 피부 고민 (복수 선택). 표시·추천 보완 전용 — 점수 계산에는 넣지 않는다 */
+    @ElementCollection(fetch = FetchType.LAZY)
+    @CollectionTable(name = "user_skin_concern", joinColumns = @JoinColumn(name = "user_id"))
+    @Column(name = "concern", nullable = false, length = 20)   // 생략하면 skin_concerns 로 잡혀 validate 가 죽는다
+    @Enumerated(EnumType.STRING)
+    private Set<SkinConcern> skinConcerns = new HashSet<>();   // 초기화 생략 시 순수 객체 픽스처에서 NPE
+
+    /** 생활 습관 3종. NULL = 미선택 (declaredSkinType 과 같은 의미론) */
+    @Enumerated(EnumType.STRING) @Column(length = 20)
+    private SleepPattern sleepPattern;
+
+    @Enumerated(EnumType.STRING) @Column(length = 20)
+    private StressLevel stressLevel;
+
+    @Enumerated(EnumType.STRING) @Column(length = 20)
+    private ExerciseHabit exerciseHabit;
+
     private LocalDateTime lastLoginAt;
 
     public static AppUser create(String email, String encodedPassword, String nickname) {
@@ -1614,6 +1631,22 @@ public class AppUser extends BaseTimeEntity {
     public void declareSkinType(SkinType skinType) {
         this.declaredSkinType = skinType;
     }
+
+    public void changeNickname(String nickname) {
+        this.nickname = nickname;
+    }
+
+    public void updateSkinConcerns(Collection<SkinConcern> concerns) {
+        // 참조 교체가 아니라 내용 교체 — Hibernate 가 delete+insert 로 처리한다
+        this.skinConcerns.clear();
+        this.skinConcerns.addAll(concerns);
+    }
+
+    public void changeSleepPattern(SleepPattern sleepPattern)    { this.sleepPattern = sleepPattern; }
+
+    public void changeStressLevel(StressLevel stressLevel)       { this.stressLevel = stressLevel; }
+
+    public void changeExerciseHabit(ExerciseHabit exerciseHabit) { this.exerciseHabit = exerciseHabit; }
 }
 ```
 
@@ -2122,6 +2155,8 @@ public class Recommendation extends BaseTimeEntity {
 > **건너뛰기는 API를 호출하지 않는다.** 아무것도 보내지 않고 다음 화면으로 넘어가면 `declared_skin_type`이 `NULL`로 남고, 그게 "아직 안 정함"의 정확한 표현이다. `UNKNOWN`을 대신 넣으면 "잘 모르겠다고 답한 사용자"와 구분이 사라져 나중에 다시 물어볼지 판단할 수 없다.
 >
 > **`skinConcerns`만 빈 배열이 "전부 해제"다.** `null`(필드 생략)과 `[]`을 구분해야 한다 — 생략하면 기존 값을 유지하고, `[]`을 보내면 전부 해제된다. `sleepPattern`·`stressLevel`·`exerciseHabit`은 해제 개념이 없어 `null`(생략) = 변경 없음으로 충분하다.
+>
+> **응답의 `skinConcerns` 는 보낸 순서가 아니라 `SkinConcern` enum 선언 순으로 고정돼 내려간다.** 저장이 `Set` 이라 입력 순서가 남지 않으므로, 앱이 칩 순서를 서버 응답에 맡겨도 같은 선택이면 항상 같은 배열이 온다. 배열 안에 `null` 원소가 섞이면 **400 `INVALID_INPUT`** 이다.
 
 ---
 
@@ -2415,13 +2450,17 @@ int after = engine.evaluate(new PlateContext(skin, copy)).score();
       { "foodName": "토마토",   "reason": "라이코펜이 들어 있어 붉어진 피부를 진정시키는 데 도움이 됩니다." },
       { "foodName": "연어",     "reason": "오메가3와 단백질이 들어 있어 피부 장벽을 채우는 데 좋습니다." },
       { "foodName": "아보카도", "reason": "불포화지방과 비타민E가 수분이 빠져나가는 것을 붙잡아 줍니다." },
-      { "foodName": "오이",     "reason": "수분이 대부분이라 부담 없이 물기를 채울 수 있습니다." },
-      { "foodName": "견과류",   "reason": "비타민E와 좋은 지방이 들어 있어 조금씩 자주 먹기 좋습니다." }
+      { "foodName": "오이",     "reason": "수분이 대부분이라 물기를 채우고 붓기를 가라앉히는 데 좋습니다." },
+      { "foodName": "견과류",   "reason": "비타민E와 좋은 지방이 들어 있어 조금씩 자주 먹기 좋습니다." },
+      { "foodName": "시금치",   "reason": "철분과 루테인이 들어 있어 눈가 그늘 관리에 곁들이기 좋습니다." },
+      { "foodName": "달걀",     "reason": "단백질과 아미노산이 고루 들어 있습니다." },
+      { "foodName": "바나나",   "reason": "칼륨이 나트륨 배출을 도와 붓기를 가라앉히고 저녁 간식으로도 부담이 없습니다." },
+      { "foodName": "우유",     "reason": "트립토판이 들어 있어 잠들기 어려운 날 저녁에 알맞습니다." }
     ],
     "avoid": [
       { "foodName": "매운 음식", "reason": "캡사이신이 혈관을 확장시켜 홍조를 더 붉게 만들 수 있습니다." },
       { "foodName": "술",       "reason": "탈수를 부르고 혈관을 확장시켜 붉은기를 키울 수 있습니다." },
-      { "foodName": "커피",     "reason": "카페인이 이뇨 작용을 해 수분이 더 빠질 수 있습니다." }
+      { "foodName": "커피",     "reason": "카페인이 수분을 빼앗고 잠들기도 어렵게 만듭니다." }
     ],
     "generatedAt": "2026-08-07T12:31:00"
   },
@@ -2429,11 +2468,13 @@ int after = engine.evaluate(new PlateContext(skin, copy)).score();
 }
 ```
 
-> **위 예시는 §14.3 ⑤ 의 시연 지표(38/52/64/25/78)에서 실제로 나오는 결과다.** 홍조(64)·건조(62)가 취약 항목으로 잡혀 두 후보군이 합쳐진다. **키위는 트러블 전용 후보라 여기 나오지 않는다** — trouble 이 60 을 넘는 분석에서 나온다.
+> **위 예시는 §14.3 ⑤ 의 시연 지표(38/52/64/25/78) + 테스트 계정 시드 프로필에서 실제로 나오는 결과다.** 네 슬롯이 전부 차서 후보군 넷이 합쳐진다 — 측정 **홍조(64)·건조(62)**, 신고 **다크서클**, 습관 **수면 부족**(§18.9). **키위는 트러블 전용 후보라 여기 나오지 않는다** — trouble 이 60 을 넘는 분석에서 나온다.
+>
+> **중복은 순서를 지키며 걸러지되 추천·주의를 따로 센다.** `avoid` 가 3개뿐인 것은 네 축의 주의 후보가 `술`·`커피`로 크게 겹치기 때문이고, `술`이 `recommend` 쪽에 없다고 지워지지도 않는다.
 >
 > **취약 항목이 하나도 없으면 `generatedAt` 키가 응답에서 빠진다.** 만들어진 추천이 없어 생성 시각도 없고, `default-property-inclusion: non_null` 이 null 키를 지운다. 앱 DTO 는 이미 `DateTime?` 로 받고 있어 문제가 되지 않지만, **"항상 있는 필드"가 아니라는 것은 여기 적어 둔다** — 없는 값을 채우려고 `now()` 를 넣으면 "추천이 없는데 방금 생성됨"이라는 더 이상한 응답이 된다.
 >
-> **취약하지 않은 항목은 뽑지 않는다.** 판정은 `SkinMetrics` 의 임계값을 그대로 쓴다(건조<40 · 유분>70 · 홍조>60 · 트러블>60 · 장벽<40). **다섯 지표가 모두 정상이면 `recommend` 와 `avoid` 가 빈 배열로 나간다** — 없는 걱정을 만들어 음식을 권하지 않는다. 심사위원이 본인 얼굴로 찍어 보는 경우가 정확히 이 경로다.
+> **취약하지 않은 항목은 뽑지 않는다.** 판정은 `SkinMetrics` 의 임계값을 그대로 쓴다(건조<40 · 유분>70 · 홍조>60 · 트러블>60 · 장벽<40). **다섯 지표가 모두 정상이고 프로필도 비어 있으면 `recommend` 와 `avoid` 가 빈 배열로 나간다** — 없는 걱정을 만들어 음식을 권하지 않는다. 심사위원이 본인 얼굴로 찍어 보는 경우가 정확히 이 경로다. 지표가 전부 정상이어도 **고민이나 나쁜 습관을 골라 뒀다면 그 슬롯만큼은 채워져 나간다**(§18.9).
 >
 > **문구는 음식별로 코드에 고정돼 있다.** 항목별로 한 문장씩 두면 같은 취약 항목에서 나온 음식들이 글자까지 같은 문장을 달고 줄줄이 뜬다. §18.9 는 문장 생성을 AI 몫으로 뒀지만 지금은 **G4 축소 경로(정적 문구 대체)를 쓴다** — 무대에서 같은 사진에 같은 문장이 나오는 쪽이 우선이다.
 >
@@ -3496,7 +3537,10 @@ public class SpicyRednessRule implements PlateRule {
 Skin Plate Score와 달리 **추천 문구는 자연어 품질이 중요**하므로 하이브리드로 간다.
 
 ```
-[Backend] 피부 지표 → 임계값을 넘은 취약 항목만, 심각한 순 최대 2개 (규칙 기반)
+[Backend] 피부 지표 → 임계값을 넘은 취약 항목만, 심각한 순 최대 2개  (측정 슬롯)
+          자가 신고 고민 → 측정이 아직 안 본 축 1개                  (신고 슬롯)
+          생활 습관 → 나쁜 값 1개 (수면 > 스트레스 > 운동)           (습관 슬롯)
+                    ↓
                     → 후보 음식 풀 선택 (규칙 기반, 사전 정의 매핑)
                     ↓
 [OpenAI]  후보 + 피부 상태 → 추천 이유 문장 생성 (자연어만)
@@ -3504,7 +3548,25 @@ Skin Plate Score와 달리 **추천 문구는 자연어 품질이 중요**하므
 [Backend] recommendation 테이블 저장
 ```
 
-**취약 항목 → 후보 음식 매핑 (정적 테이블)**
+**추천 슬롯 규칙 (확정)**
+
+> **추천은 최초 추천 생성 시점의 프로필을 기준으로 생성하며, 생성 후 결과는 고정한다.**
+>
+> **추천 슬롯은 측정 최대 2 + 자가 신고 최대 1 + 습관 최대 1이며, 해당 원천의 데이터가 없으면 해당 슬롯은 비워둔다.**
+
+| 슬롯 | 상한 | 원천 | 비었을 때 |
+|---|---|---|---|
+| 측정 | 2 | `SkinMetrics` 5지표 중 임계값을 넘은 것, 심각한 순 | 모든 지표가 양호하면 0개 |
+| 자가 신고 | 1 | `skinConcerns` 를 enum 선언 순으로 훑어 **측정이 이미 잡은 축이 아닌** 첫 항목 | 미선택이거나 전부 측정과 겹치면 0개 |
+| 습관 | 1 | `sleepPattern=LACKING` > `stressLevel=HIGH` > `exerciseHabit=NONE` 중 먼저 걸리는 하나 | 미선택이거나 전부 좋은 값이면 0개 |
+
+> **왜 원천별로 슬롯을 나눴는가** — 자가 신고에는 심각도 숫자가 없어 측정과 한 줄에 세워 정렬할 근거가 없다. 그렇다고 상한을 좁게 잡으면 습관 축은 영영 화면에 못 나온다. 원천마다 자리를 보장하는 쪽을 골랐다.
+>
+> **"생성 후 고정"의 실제 의미** — 추천은 `GET /recommendations` 안에서 없으면 그 자리에 만든다(lazy). 프로필을 나중에 바꿔도 이미 만들어진 추천은 다시 계산되지 않는다. 단, **취약 항목이 하나도 없어 아무것도 저장되지 않은 분석**은 계속 "없음" 상태이므로, 그 뒤에 프로필이 생기면 다음 조회에서 그때 만들어진다.
+>
+> **자가 신고값 반영은 추천 한정이다 — 점수 계산 제외 원칙은 §4.4.1 참조.** `PlateContext` 는 여전히 `(SkinMetrics, FoodAnalysis)` 뿐이다.
+
+**취약 항목 → 후보 음식 매핑 (정적 테이블 · 측정 5축)**
 
 | 취약 항목 | 추천 후보 | 주의 후보 |
 |---|---|---|
@@ -3514,7 +3576,33 @@ Skin Plate Score와 달리 **추천 문구는 자연어 품질이 중요**하므
 | 유분 (oil↑) | 채소, 두부, 흰살생선 | 튀김, 라면, 패스트푸드 |
 | 장벽 (barrier↓) | 연어, 달걀, 아몬드 | 인스턴트, 가공육 |
 
+**신규 7축 (자가 신고·습관에서만 진입 · 측정으로는 절대 안 뽑힌다)**
+
+| 취약 항목 | 진입 조건 | 추천 후보 | 주의 후보 |
+|---|---|---|---|
+| 다크서클 | `SkinConcern.DARK_CIRCLE` | 시금치, 달걀 | 술 |
+| 색소침착 | `SkinConcern.PIGMENTATION` | 토마토, 키위, 파프리카 | 술 |
+| 탄력 저하 | `SkinConcern.ELASTICITY` | 닭가슴살, 달걀, 베리류 | 탄산음료 |
+| 부기 | `SkinConcern.PUFFINESS` | 오이, 바나나 | 라면, 가공육 |
+| 수면 부족 | `sleepPattern = LACKING` | 바나나, 우유 | 커피, 술 |
+| 스트레스 높음 | `stressLevel = HIGH` | 견과류, 녹차, 연어 | 커피 |
+| 운동 안 함 | `exerciseHabit = NONE` | 두부, 달걀, 닭가슴살 | 패스트푸드 |
+
+> 나머지 자가 신고 5종은 측정 축으로 접힌다 — `ACNE`→트러블, `REDNESS`→홍조, `DRYNESS`→건조, `OILINESS`→유분, `TEXTURE`→장벽. 측정이 이미 그 축을 잡았으면 신고 슬롯은 쓰이지 않는다.
+
 > **왜 후보를 코드로 고정하는가** — LLM이 매번 다른 음식을 추천하면 데모마다 결과가 달라져 설명이 어렵다. **음식 선정은 규칙, 문장 생성은 AI.** 이 분리로 "재현 가능하면서도 자연스러운" 추천이 나온다.
+
+> **중복은 추천·주의를 따로 센다.** 슬롯 4개가 같은 음식을 가리킬 수 있다(연어는 건조·장벽·스트레스 셋 다에 나온다). 화면에 같은 이름이 두 번 뜨지 않게 순서를 지키며 거르되, 추천 목록과 주의 목록은 각각 따로 센다 — V3 의 UNIQUE 가 `(분석, 타입, 음식)` 이라 DB 는 양쪽 공존을 허용하기 때문이다.
+
+**시연 대본 — 화면 순서가 결과를 결정한다**
+
+> **프로필 입력 → 피부 분석 → 추천 화면 순서를 지킨다.** 추천을 먼저 열면 그 시점의 (비어 있는) 프로필로 결과가 굳고, 그 뒤에 고민·습관을 채워도 이미 만들어진 추천은 바뀌지 않는다. 무대에서 "고민을 넣었는데 왜 안 나오죠"가 되는 경로가 정확히 이것이다.
+>
+> 테스트 계정 시드는 `skinConcerns = [DARK_CIRCLE]` · `sleepPattern = LACKING` 이라, 시연 지표(38/52/64/25/78)와 합치면 네 슬롯이 전부 찬다 — 측정 **홍조·건조**, 신고 **다크서클**, 습관 **수면 부족**.
+
+**⚠️ 프론트 확인 필요 (S09 이전)**
+
+> 위 시연 조합에서 `GET /recommendations` 는 **추천 11장 + 주의 3장**을 내려준다(측정 2축 시절 7+3 에서 늘었다). **S08(Flutter) 추천 화면 레이아웃이 이 분량을 감당하는지 프론트 저장소에서 확인해야 한다** — 스크롤·카드 높이·빈 상태 처리. S09 작업 전에 확인이 끝나야 하고, 감당이 안 되면 슬롯 상한이 아니라 화면 쪽에서 자른다(백엔드는 원천별 보장이 목적이다).
 
 ---
 
