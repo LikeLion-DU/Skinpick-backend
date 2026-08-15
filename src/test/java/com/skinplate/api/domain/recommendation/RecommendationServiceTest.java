@@ -136,6 +136,20 @@ class RecommendationServiceTest {
     }
 
     @Test
+    @DisplayName("신고 고민이 일부만 겹치면 — 겹친 것을 건너뛰고 다음 신고가 슬롯을 쓴다")
+    void declaredPartialOverlap_skipsToNextConcern() {
+        // 측정: 홍조·건조. 신고 {민감/홍조, 다크서클} 중 홍조는 겹쳐 스킵, 다크서클이 신고 슬롯
+        givenAnalysis(SkinMetrics.of(38, 52, 64, 25, 78), user ->
+                user.updateSkinConcerns(Set.of(SkinConcern.REDNESS, SkinConcern.DARK_CIRCLE)));
+
+        RecommendationResponse response = recommendationService.getOrCreate(USER_ID, ANALYSIS_ID);
+
+        assertThat(response.recommend()).extracting(RecommendedFoodDto::foodName)
+                .containsExactly("브로콜리", "녹차", "토마토", "연어", "아보카도", "오이", "견과류",
+                                 "시금치", "달걀");
+    }
+
+    @Test
     @DisplayName("피부가 멀쩡해도 신고 고민·나쁜 습관이 있으면 그 근거로 추천이 생긴다")
     void healthySkinWithProfile_stillRecommends() {
         givenAnalysis(SkinMetrics.of(95, 5, 5, 5, 95), user -> {

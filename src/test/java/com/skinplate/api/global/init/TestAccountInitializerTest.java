@@ -10,6 +10,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -59,5 +60,25 @@ class TestAccountInitializerTest {
 
         assertThat(slotOne.getSkinConcerns()).containsExactly(SkinConcern.DARK_CIRCLE);
         assertThat(slotOne.getSleepPattern()).isEqualTo(SleepPattern.LACKING);
+    }
+
+    @Test
+    @DisplayName("이미 프로필이 있으면 seed 가 덮어쓰지 않는다 — 시연 중 바꾼 값이 재기동에도 보존된다")
+    void doesNotReseedWhenProfileExists() throws Exception {
+        AppUserRepository repository = mock(AppUserRepository.class);
+        PasswordEncoder encoder = mock(PasswordEncoder.class);
+        given(encoder.encode(any())).willReturn("encoded");
+        given(repository.existsByEmail(anyString())).willReturn(true);
+        AppUser slotOne = AppUser.createTestAccount("test@skinplate.app", "encoded", "테스트유저");
+        slotOne.updateSkinConcerns(Set.of(SkinConcern.ACNE));
+        slotOne.changeSleepPattern(SleepPattern.ENOUGH);
+        given(repository.findByEmail("test@skinplate.app")).willReturn(Optional.of(slotOne));
+
+        TestAccountInitializer initializer = new TestAccountInitializer(repository, encoder);
+        ReflectionTestUtils.setField(initializer, "password", "test1234!");
+        initializer.run(null);
+
+        assertThat(slotOne.getSkinConcerns()).containsExactly(SkinConcern.ACNE);
+        assertThat(slotOne.getSleepPattern()).isEqualTo(SleepPattern.ENOUGH);
     }
 }
