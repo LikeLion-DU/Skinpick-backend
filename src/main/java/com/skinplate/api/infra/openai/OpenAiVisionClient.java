@@ -7,10 +7,12 @@ import com.skinplate.api.infra.openai.dto.FacePhoto;
 import com.skinplate.api.infra.openai.dto.OpenAiFoodResult;
 import com.skinplate.api.infra.openai.dto.OpenAiSkinResult;
 import com.skinplate.api.infra.openai.dto.PlateComments;
+import com.skinplate.api.infra.openai.dto.SkinInsightSentences;
 import com.skinplate.api.infra.openai.exception.OpenAiClientException;
 import com.skinplate.api.infra.openai.prompt.FoodAnalysisPrompt;
 import com.skinplate.api.infra.openai.prompt.PlateCommentPrompt;
 import com.skinplate.api.infra.openai.prompt.SkinAnalysisPrompt;
+import com.skinplate.api.infra.openai.prompt.SkinInsightPrompt;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -39,6 +41,13 @@ public class OpenAiVisionClient implements VisionClient {
     private static final String FOOD_DETAIL = "low";
     private static final double TEMPERATURE = 0.2;      // 재현성 확보
     private static final int MAX_TOKENS = 800;          // 출력 폭주 방지
+
+    /**
+     * 인사이트만 상한이 크다. 한국어 문장이 넷(summary + description ×3)이라 800 이 상한에
+     * 닿는데, 잘려서 실패하면 temperature 0.2 라 다시 불러도 같은 자리에서 또 잘린다 —
+     * 재시도로 회복되지 않는 실패다.
+     */
+    private static final int INSIGHT_MAX_TOKENS = 1200;
 
     private final WebClient openAiWebClient;
     private final ObjectMapper objectMapper;
@@ -71,21 +80,31 @@ public class OpenAiVisionClient implements VisionClient {
         }
 
         return call(SkinAnalysisPrompt.SYSTEM, SkinAnalysisPrompt.SCHEMA,
-                "skin_analysis", content, OpenAiSkinResult.class);
+                "skin_analysis", content, MAX_TOKENS, OpenAiSkinResult.class);
     }
 
     @Override
     public OpenAiFoodResult analyzeFood(String base64Image, String mediaType) {
         return call(FoodAnalysisPrompt.SYSTEM, FoodAnalysisPrompt.SCHEMA, "food_analysis",
                 List.of(text(FoodAnalysisPrompt.USER), image(base64Image, mediaType, FOOD_DETAIL)),
-                OpenAiFoodResult.class);
+                MAX_TOKENS, OpenAiFoodResult.class);
     }
 
     /** 텍스트 전용이라 이미지 파트가 없다. 같은 call() 을 타므로 타임아웃·429 정책도 같다. */
     @Override
     public PlateComments generateComments(String userContext) {
         return call(PlateCommentPrompt.SYSTEM, PlateCommentPrompt.SCHEMA, "plate_comments",
-                List.of(text(userContext)), PlateComments.class);
+                List.of(text(userContext)), MAX_TOKENS, PlateComments.class);
+    }
+
+    /**
+     * generateComments 와 같은 텍스트 전용 호출이다. 타임아웃·429 정책도 같고,
+     * 출력 상한만 INSIGHT_MAX_TOKENS 로 넓힌다.
+     */
+    @Override
+    public SkinInsightSentences generateSkinInsight(String userContext) {
+        return call(SkinInsightPrompt.SYSTEM, SkinInsightPrompt.SCHEMA, "skin_insight",
+                List.of(text(userContext)), INSIGHT_MAX_TOKENS, SkinInsightSentences.class);
     }
 
     private static Map<String, Object> text(String value) {
@@ -103,7 +122,7 @@ public class OpenAiVisionClient implements VisionClient {
     }
 
     private <T> T call(String system, Map<String, Object> schema, String schemaName,
-                       List<Map<String, Object>> userContent, Class<T> type) {
+                       List<Map<String, Object>> userContent, int maxTokens, Class<T> type) {
 
         Map<String, Object> body = Map.of(
                 "model", model,
@@ -117,7 +136,7 @@ public class OpenAiVisionClient implements VisionClient {
                                 "strict", true,
                                 "schema", schema)),
                 "temperature", TEMPERATURE,
-                "max_tokens", MAX_TOKENS);
+                "max_tokens", maxTokens);
 
         return openAiWebClient.post()
                 .uri("/chat/completions")

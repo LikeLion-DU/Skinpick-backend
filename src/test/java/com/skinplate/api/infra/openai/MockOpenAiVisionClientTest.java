@@ -5,6 +5,7 @@ import com.skinplate.api.domain.food.entity.FoodAnalysis;
 import com.skinplate.api.domain.food.entity.FoodIngredient;
 import com.skinplate.api.domain.food.entity.IngredientTag;
 import com.skinplate.api.domain.food.entity.Nutrition;
+import com.skinplate.api.domain.insight.entity.InsightCategory;
 import com.skinplate.api.domain.plate.engine.PlateContext;
 import com.skinplate.api.domain.plate.engine.PlateRuleEngine;
 import com.skinplate.api.domain.plate.engine.rules.*;
@@ -13,10 +14,12 @@ import com.skinplate.api.infra.openai.dto.FacePhoto;
 import com.skinplate.api.infra.openai.dto.FacePhotoType;
 import com.skinplate.api.infra.openai.dto.OpenAiFoodResult;
 import com.skinplate.api.infra.openai.dto.OpenAiSkinResult;
+import com.skinplate.api.infra.openai.dto.SkinInsightSentences;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -77,5 +80,17 @@ class MockOpenAiVisionClientTest {
                 .isEqualTo(client.analyzeSkin(PHOTOS));
         assertThat(client.analyzeFood("a", "image/jpeg"))
                 .isEqualTo(client.analyzeFood("b", "image/png"));
+    }
+
+    @Test
+    @DisplayName("인사이트는 13종 전부에 문장을 갖는다 — 하나라도 비면 그 주제 조합에서만 무대에서 죽는다")
+    void insightCoversEveryCategory() {
+        SkinInsightSentences sentences = client.generateSkinInsight("무시된다");
+
+        assertThat(sentences.summary()).isNotBlank();
+        assertThat(sentences.topics()).extracting(SkinInsightSentences.Topic::category)
+                .containsExactly(Stream.of(InsightCategory.values()).map(Enum::name).toArray(String[]::new));
+        assertThat(sentences.topics()).allSatisfy(topic ->
+                assertThat(topic.description()).as("%s 의 문장", topic.category()).isNotBlank());
     }
 }

@@ -9,6 +9,7 @@ import com.skinplate.api.domain.auth.service.AuthService;
 import com.skinplate.api.domain.user.entity.AppUser;
 import com.skinplate.api.domain.user.entity.SkinConcern;
 import com.skinplate.api.domain.user.entity.SleepPattern;
+import com.skinplate.api.domain.user.entity.WaterIntake;
 import com.skinplate.api.domain.user.repository.AppUserRepository;
 import com.skinplate.api.global.exception.BusinessException;
 import com.skinplate.api.global.exception.ErrorCode;
@@ -151,19 +152,20 @@ class AuthServiceTest {
         given(userRepository.findById(1L)).willReturn(Optional.of(user));
 
         MeResponse afterConcerns = authService.updateProfile(1L, new UpdateProfileRequest(
-                null, null, List.of(SkinConcern.REDNESS, SkinConcern.ACNE), null, null, null));
+                null, null, List.of(SkinConcern.REDNESS, SkinConcern.ACNE), null, null, null, null));
 
         assertThat(afterConcerns.skinConcerns())
                 .containsExactly(SkinConcern.ACNE, SkinConcern.REDNESS);   // 선언 순
         assertThat(afterConcerns.sleepPattern()).isNull();
 
         MeResponse afterSleep = authService.updateProfile(1L, new UpdateProfileRequest(
-                null, null, null, SleepPattern.LACKING, null, null));
+                null, null, null, SleepPattern.LACKING, null, null, WaterIntake.LACKING));
 
         // skinConcerns 를 안 보냈으니(null) 그대로다
         assertThat(afterSleep.skinConcerns())
                 .containsExactly(SkinConcern.ACNE, SkinConcern.REDNESS);
         assertThat(afterSleep.sleepPattern()).isEqualTo(SleepPattern.LACKING);
+        assertThat(afterSleep.waterIntake()).isEqualTo(WaterIntake.LACKING);
     }
 
     @Test
@@ -172,10 +174,10 @@ class AuthServiceTest {
         AppUser user = savedUser("duing@example.com");
         given(userRepository.findById(1L)).willReturn(Optional.of(user));
         authService.updateProfile(1L, new UpdateProfileRequest(
-                null, null, List.of(SkinConcern.ACNE), null, null, null));
+                null, null, List.of(SkinConcern.ACNE), null, null, null, null));
 
         MeResponse cleared = authService.updateProfile(1L, new UpdateProfileRequest(
-                null, null, List.of(), null, null, null));
+                null, null, List.of(), null, null, null, null));
 
         assertThat(cleared.skinConcerns()).isEmpty();
     }

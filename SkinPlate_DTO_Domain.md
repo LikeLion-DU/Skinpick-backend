@@ -4,8 +4,8 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | v1.8 |
-| 기준 문서 | Skin Plate PRD & Technical Design **v1.7** |
+| 문서 버전 | v1.9 |
+| 기준 문서 | Skin Plate PRD & Technical Design **v1.8** |
 | 범위 | 설정, 마이그레이션, Entity, Enum, Repository, DTO, Rule Engine 골격 (Backend) / DTO, Entity, Repository 인터페이스 (Flutter) |
 | 제외 | Service·Controller 구현체, OpenAI 호출 구현, UI 위젯 |
 
@@ -41,7 +41,7 @@ skinplate-api/
 │   ├── application-prod.yml
 │   └── db/migration/  V1__init.sql · V2__drop_image_url.sql
 │                      V3__recommendation_unique.sql · V4__plate_ai_comments.sql
-│                      V5__skin_profile.sql
+│                      V5__skin_profile.sql · V6__skin_insight.sql
 └── src/main/java/com/skinplate/api/
     ├── SkinPlateApplication.java
     ├── global/
@@ -85,12 +85,18 @@ skinplate-api/
     │   │       └── rules/   SodiumRule · SpicyRednessRule · SugarTroubleRule
     │   │                    FriedOilRule · HydrationFoodRule · Omega3BarrierRule
     │   │                    ProteinRule · VitaminRule · ProbioticRule
-    │   └── recommendation/
-    │       ├── entity/      Recommendation · RecommendationType
-    │       ├── service/     RecommendationCandidates
-    │       ├── repository/  RecommendationRepository
-    │       └── dto/         RecommendationResponse · RecommendedFoodDto
-    └── infra/openai/dto/    OpenAiSkinResult · OpenAiFoodResult
+    │   ├── recommendation/
+    │   │   ├── entity/      Recommendation · RecommendationType
+    │   │   ├── service/     RecommendationCandidates
+    │   │   ├── repository/  RecommendationRepository
+    │   │   └── dto/         RecommendationResponse · RecommendedFoodDto
+    │   └── insight/
+    │       ├── entity/      SkinInsight · SkinInsightItem · InsightCategory
+    │       ├── service/     InsightTopics · SkinInsightService
+    │       ├── repository/  SkinInsightRepository
+    │       ├── controller/  SkinInsightController
+    │       └── dto/         SkinInsightResponse
+    └── infra/openai/dto/    OpenAiSkinResult · OpenAiFoodResult · SkinInsightSentences
                              (infra/storage 없음 — 이미지를 저장하지 않는다)
 
 src/test/java/com/skinplate/api/domain/plate/engine/
@@ -467,6 +473,56 @@ CREATE TABLE user_skin_concern (
 ```
 
 > V4 는 PR #28 이 선점해 V5 로 번호를 밀었다. 스키마 자체는 목업 "피부설정" 화면의 나머지 두 블록(고민·생활 습관) 저장용이다.
+
+**`src/main/resources/db/migration/V6__skin_insight.sql`**
+
+```sql
+-- 개인화 피부 인사이트.
+--
+-- 주제 선정·우선순위는 백엔드 규칙이 정하고 AI 는 문장만 만든다(PRD §18.10).
+-- 그래서 저장하는 것도 문장과 "무엇을 근거로 골랐는가"뿐이다 — 점수는 여기 없다.
+
+-- 수분 섭취 자가 신고. NULL = 미선택 (습관 3종과 같은 의미론).
+ALTER TABLE app_user ADD COLUMN water_intake VARCHAR(20);
+
+-- skin_analysis_id UNIQUE = 분석 1건당 인사이트 1건.
+-- 생성 1회 고정이 정책인데 애플리케이션 검사만으로는 READ COMMITTED 동시 요청을
+-- 막을 수 없다(V3 가 추천에서 겪은 그대로다). 락으로 줄을 세우고 이 제약이 뒤를 받친다.
+--
+-- snapshot_* 는 생성 당시 프로필이다. 프로필을 나중에 바꿔도 과거 인사이트의 근거는
+-- 안 바뀌어야 한다 — 문장은 그때의 습관을 말하고 있는데 근거만 새 값으로 보이면
+-- "왜 이런 말이 나왔나"를 설명할 수 없다.
+CREATE TABLE skin_insight (
+    id                      BIGSERIAL PRIMARY KEY,
+    user_id                 BIGINT       NOT NULL REFERENCES app_user (id) ON DELETE CASCADE,
+    skin_analysis_id        BIGINT       NOT NULL UNIQUE REFERENCES skin_analysis (id) ON DELETE CASCADE,
+    summary                 VARCHAR(300) NOT NULL,
+    snapshot_sleep_pattern  VARCHAR(20),
+    snapshot_stress_level   VARCHAR(20),
+    snapshot_exercise_habit VARCHAR(20),
+    snapshot_water_intake   VARCHAR(20),
+    snapshot_concerns       VARCHAR(200) NOT NULL DEFAULT '',
+    created_at              TIMESTAMP    NOT NULL,
+    updated_at              TIMESTAMP
+);
+
+-- 주제별 항목 (최대 3). display_order 0/1/2 가 그대로 우선순위 HIGH/MEDIUM/LOW 다 —
+-- 우선순위를 따로 컬럼으로 두면 순서와 등급이 어긋나는 상태가 표현 가능해진다.
+CREATE TABLE skin_insight_item (
+    id              BIGSERIAL PRIMARY KEY,
+    skin_insight_id BIGINT       NOT NULL REFERENCES skin_insight (id) ON DELETE CASCADE,
+    category        VARCHAR(20)  NOT NULL,
+    title           VARCHAR(50)  NOT NULL,
+    description     VARCHAR(300) NOT NULL,
+    action_title    VARCHAR(100) NOT NULL,
+    display_order   INT          NOT NULL DEFAULT 0,
+    created_at      TIMESTAMP    NOT NULL,
+    updated_at      TIMESTAMP
+);
+CREATE INDEX idx_skin_insight_item_insight ON skin_insight_item (skin_insight_id);
+```
+
+> **`updated_at` 이 NULL 허용인 것은 V1 과 같은 이유다** — `BaseTimeEntity.updatedAt` 에 `nullable = false` 가 없다. `validate` 는 nullability 를 보지 않으니 기동은 어느 쪽이든 통과하지만, 기존 테이블과 다른 규칙을 새로 만들 이유가 없다.
 
 ---
 
@@ -1443,6 +1499,28 @@ public enum ExerciseHabit {
 }
 ```
 
+**`domain/user/entity/WaterIntake.java`** — v1.9 신규 (PRD §18.10 인사이트 습관 슬롯)
+
+```java
+package com.skinplate.api.domain.user.entity;
+
+/** 수분 섭취 (자가 신고). NULL = 미선택. */
+public enum WaterIntake {
+
+    LACKING("부족해요"),
+    NORMAL ("보통이에요"),
+    ENOUGH ("충분해요");
+
+    private final String label;
+
+    WaterIntake(String label) { this.label = label; }
+
+    public String getLabel() { return label; }
+}
+```
+
+> **왜 수분만 추가하고 음주·흡연은 안 넣는가** — 습관 축을 늘리는 비용은 enum 하나가 아니라 "그 축에 대해 무슨 말을 할 것인가"다. 수분은 행동 제안이 한 줄로 끝나고(§18.10 `WATER` 의 `actionTitle`) 부작용이 없다. 음주·흡연은 같은 자리에서 건강 조언에 가까워지고, 그건 이 앱이 지지 않기로 한 책임이다.
+
 **`domain/user/entity/AppUser.java`**
 
 ```java
@@ -1526,6 +1604,10 @@ public class AppUser extends BaseTimeEntity {
     @Column(length = 20)
     private ExerciseHabit exerciseHabit;
 
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private WaterIntake waterIntake;
+
     private LocalDateTime lastLoginAt;
 
     // ---- 팩토리 ----
@@ -1571,6 +1653,8 @@ public class AppUser extends BaseTimeEntity {
     public void changeStressLevel(StressLevel stressLevel)       { this.stressLevel = stressLevel; }
 
     public void changeExerciseHabit(ExerciseHabit exerciseHabit) { this.exerciseHabit = exerciseHabit; }
+
+    public void changeWaterIntake(WaterIntake waterIntake)       { this.waterIntake = waterIntake; }
 
     /**
      * 가입 시점에 소문자로 정규화한다.
@@ -2638,6 +2722,175 @@ public interface RecommendationRepository extends JpaRepository<Recommendation, 
 
 ---
 
+## 1.15.1 domain/insight — 개인화 인사이트 [v1.9]
+
+§1.15 를 그대로 미러링한다. 다른 점 셋만 적어 둔다.
+
+1. **주제 선정이 결정적이다** — `InsightTopics` 가 슬롯·순서·상한을 다 정하고, AI 는 주제별 문장 하나씩만 채운다 (PRD §18.10).
+2. **분석당 1회 고정** — `skin_analysis_id` UNIQUE. 프로필을 바꿔도 다시 만들지 않는다. **단, 다룰 주제가 없으면 저장 자체를 하지 않는다** — 빈 인사이트를 저장하면 1회 고정이 족쇄가 되어, 그 뒤에 고민·습관을 채워도 그 분석은 영영 빈 화면이다(`RecommendationService.createOnce` 의 `if (built.isEmpty()) return;` 과 같은 판단).
+3. **AI 실패를 삼키지 않는다** — 추천과 다른 유일한 지점이다. 1회 고정이라 정적 폴백을 한 번 저장하면 그 분석은 영원히 폴백 화면을 갖는다.
+
+**`domain/insight/entity/InsightCategory.java`**
+
+```java
+public enum InsightCategory {
+
+    // 측정 5종
+    DRY         ("수분 관리",     "오늘은 보습 중심의 간단한 케어를 해보세요"),
+    OILY        ("유분 관리",     "기름진 간식 대신 물이나 채소를 곁들여 보세요"),
+    REDNESS     ("진정 관리",     "자극이 적은 진정 케어를 해보세요"),
+    TROUBLE     ("트러블 관리",   "얼굴에 손이 가는 횟수를 줄이고 자극을 피해 보세요"),
+    BARRIER_WEAK("장벽 관리",     "세안 뒤 3분 안에 보습을 마무리해 보세요"),
+
+    // 자가 신고 4종 — 측정 지표로는 볼 수 없는 고민이다
+    DARK_CIRCLE ("다크서클 관리", "잠들기 전 화면 보는 시간을 30분만 줄여 보세요"),
+    PIGMENTATION("톤 관리",       "외출 30분 전에 자외선 차단제를 발라 보세요"),
+    ELASTICITY  ("탄력 관리",     "단백질이 들어간 한 끼를 오늘 안에 챙겨 보세요"),
+    PUFFINESS   ("붓기 관리",     "국물은 조금 남기고 짠 간식을 한 번 건너뛰어 보세요"),
+
+    // 생활 습관 4종 — 나쁜 값일 때만 진입한다
+    SLEEP       ("수면 관리",     "오늘은 7시간 이상 수면을 목표로 해보세요"),
+    STRESS      ("스트레스 관리", "10분만 걸으며 숨을 고르는 시간을 가져 보세요"),
+    EXERCISE    ("운동 습관",     "가볍게 20분만 몸을 움직여 보세요"),
+    WATER       ("수분 섭취",     "물을 평소보다 한두 잔 더 챙겨 마셔보세요");
+
+    private final String title;
+    private final String actionTitle;
+    // 생성자 · getTitle() · getActionTitle() 생략
+}
+```
+
+> **제목과 행동 문구를 AI 에게 맡기지 않는다.** 제목이 매번 달라지면 같은 사진에서 같은 화면이 안 나온다. 행동 문구는 사용자가 실제로 따라 하는 문장이라, "물을 마시라"가 어느 날 다른 말이 되면 안 된다. AI 몫은 `description` 한 줄뿐이다.
+
+**`domain/insight/entity/SkinInsight.java`** — 스켈레톤
+
+```java
+@Entity
+@Getter
+@Table(name = "skin_insight")
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
+public class SkinInsight extends BaseTimeEntity {
+
+    private static final int SUMMARY_MAX_LENGTH = 300;   // V6 의 length 와 묶인다
+
+    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "user_id", nullable = false)
+    private AppUser user;
+
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "skin_analysis_id", nullable = false, unique = true)
+    private SkinAnalysis skinAnalysis;
+
+    @Column(nullable = false, length = SUMMARY_MAX_LENGTH)
+    private String summary;
+
+    // snapshot_* 4종 (@Enumerated STRING · length 20) + snapshotConcerns (쉼표 구분 문자열)
+
+    @OneToMany(mappedBy = "skinInsight", cascade = CascadeType.PERSIST)
+    @OrderBy("displayOrder ASC")
+    private List<SkinInsightItem> items = new ArrayList<>();
+
+    /**
+     * 주제를 고르고 문장을 만든 시점의 프로필. 저장 시점의 user 에서 다시 뽑으면,
+     * 그 사이 25초짜리 AI 호출 동안의 PATCH /auth/me 가 끼어들어 "수면이 부족하다"는
+     * 문장 옆에 ENOUGH 가 저장된다. 1회 고정이라 영구히 그 상태다.
+     */
+    public record ProfileSnapshot(SleepPattern sleepPattern, StressLevel stressLevel,
+                                  ExerciseHabit exerciseHabit, WaterIntake waterIntake,
+                                  String concerns) {
+
+        /** AppUser 하나에서만 만든다 — 호출부가 임의 값을 실을 여지를 없앤다 */
+        public static ProfileSnapshot of(AppUser user) { ... }
+    }
+
+    /**
+     * 스냅샷은 주제를 고른 트랜잭션에서 만들어 인자로 받는다 — 저장 트랜잭션에서 다시
+     * 뽑으면 AI 호출 25초 사이의 프로필 변경이 끼어든다. user 연관관계만 저장 트랜잭션의
+     * 것을 쓰고, snapshot_* 에 들어가는 값은 전부 인자에서 온다.
+     */
+    public static SkinInsight create(AppUser user, SkinAnalysis skinAnalysis, String summary,
+                                     ProfileSnapshot snapshot, List<SkinInsightItem> items) { ... }
+
+    /** 서로게이트 경계까지 보는 클램프. SkinInsightItem 도 이것을 쓴다(상한만 다르다) */
+    static String clamp(String sentence, int maxLength) { ... }
+}
+```
+
+**`domain/insight/entity/SkinInsightItem.java`** — `category` · `title` · `description`(300자 클램프 — `SkinInsight.clamp` 를 호출한다) · `actionTitle` · `displayOrder`. 부모는 LAZY, 정적 팩토리 `of(category, description, displayOrder)` 가 `title`·`actionTitle` 을 카테고리에서 복사한다.
+
+**`domain/insight/repository/SkinInsightRepository.java`**
+
+```java
+public interface SkinInsightRepository extends JpaRepository<SkinInsight, Long> {
+
+    Optional<SkinInsight> findBySkinAnalysisIdAndUserId(Long skinAnalysisId, Long userId);
+}
+```
+
+> **`existsBySkinAnalysisId` 를 두지 않는다.** 추천과 다른 점이다 — 락을 잡은 뒤의 재확인이 "있으면 **그것을** 돌려줘야" 하므로 엔티티가 필요하고, 그러면 `exists` 는 같은 조건을 두 번 세는 셈이 된다.
+
+**`domain/insight/service/InsightTopics.java`** — 스켈레톤
+
+```java
+public final class InsightTopics {
+
+    public static final int MAX_TOPICS = 3;
+    private static final int MEASURED_SLOT = 2;
+
+    public record Topic(InsightCategory category, String reason) {}
+
+    /** 슬롯: 측정 2 + 습관 1 + 신고 1 → [측정, 습관, 신고] 순으로 합쳐 3개로 자른다 */
+    public static List<Topic> select(SkinMetrics metrics, AppUser user) {
+        List<Topic> topics = new ArrayList<>();
+
+        // 임계값을 다시 적지 않는다 — §1.22.2 의 판정을 그대로 부른다
+        for (Concern concern : RecommendationCandidates.topConcerns(metrics, MEASURED_SLOT)) {
+            topics.add(new Topic(map(concern), "측정 지표가 취약 판정을 받음"));
+        }
+
+        habitTopic(user).ifPresent(topics::add);          // 수면 > 스트레스 > 운동 > 수분
+        declaredTopic(user, topics).ifPresent(topics::add); // 이미 뽑힌 축이면 다음 고민
+
+        return topics.stream().limit(MAX_TOPICS).toList();
+    }
+}
+```
+
+**`domain/insight/dto/SkinInsightResponse.java`** — `skinAnalysisId` · `summary` · `changes`(nullable) · `insights[]` · `todayActions[]` · `generatedAt`.
+
+> **`priority` 는 저장하지 않고 `displayOrder` 에서 유도한다**(0/1/2 = HIGH/MEDIUM/LOW). 등급을 따로 저장하면 "0번인데 LOW" 같은 모순 상태가 표현 가능해진다.
+>
+> **`changes` 도 저장하지 않는다.** 직전 분석이 불변이라 조회할 때마다 계산해도 같은 값이 나온다. 직전 분석은 `created_at` 이 아니라 **`id`** 로 고른다 — 같은 초에 두 건이 들어오면 시각 정렬은 순서가 흔들린다.
+
+**`infra/openai/dto/SkinInsightSentences.java`**
+
+```java
+public record SkinInsightSentences(String summary, List<Topic> topics) {
+
+    public record Topic(String category, String description) {}
+}
+```
+
+**`SkinInsightService` 의 트랜잭션 경계** — `SkinPlateService.saveRecord` 와 같은 `TransactionTemplate` 2단 구조다.
+
+```
+[읽기 tx]  소유 확인(findByIdAndUserId · 404) → 기존 인사이트 있으면 응답 완성 후 반환
+           → 주제가 비면 정적 응답을 만들어 반환하고 여기서 끝낸다 (저장 없음)
+           → 있으면 프롬프트 문자열 + ProfileSnapshot 까지 여기서 만들어 나간다
+              (user·metrics 를 들고 나가면 트랜잭션 밖에서 LAZY 가 터지고,
+               스냅샷을 쓰기 tx 에서 다시 뽑으면 25초 사이의 프로필 변경이 끼어든다)
+                    ↓
+[tx 밖]    visionClient.generateSkinInsight(...)  ← 25초를 커넥션 쥐고 기다리지 않는다
+           AI 문장 → 주제 매핑도 여기서. 실패하면 저장 트랜잭션에 들어가지도 않는다
+                    ↓
+[쓰기 tx]  findForUpdate 로 줄 세움 → 재조회(앞선 요청이 만들었으면 그것을 반환) → 저장
+```
+
+---
+
 ## 1.16 DTO — 인증
 
 **`domain/auth/dto/SignupRequest.java`**
@@ -2728,6 +2981,7 @@ import com.skinplate.api.domain.user.entity.SkinConcern;
 import com.skinplate.api.domain.user.entity.SkinType;
 import com.skinplate.api.domain.user.entity.SleepPattern;
 import com.skinplate.api.domain.user.entity.StressLevel;
+import com.skinplate.api.domain.user.entity.WaterIntake;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
@@ -2741,7 +2995,7 @@ import java.util.List;
  *
  * skinConcerns 만은 빈 배열이 "전부 해제"다 — null(생략)과 [] 를 구분한다.
  * hasNickname 의 isBlank 패턴을 복붙하면 해제가 조용히 무시되므로 null 검사만 한다.
- * 습관 3종은 UI 에 해제 개념이 없어 null = 변경 없음으로 충분하다.
+ * 습관 4종은 UI 에 해제 개념이 없어 null = 변경 없음으로 충분하다.
  */
 public record UpdateProfileRequest(
 
@@ -2756,7 +3010,9 @@ public record UpdateProfileRequest(
 
         StressLevel stressLevel,
 
-        ExerciseHabit exerciseHabit
+        ExerciseHabit exerciseHabit,
+
+        WaterIntake waterIntake
 ) {
     public boolean hasSkinType()      { return declaredSkinType != null; }
     public boolean hasNickname()      { return nickname != null && !nickname.isBlank(); }
@@ -2764,6 +3020,7 @@ public record UpdateProfileRequest(
     public boolean hasSleepPattern()  { return sleepPattern != null; }
     public boolean hasStressLevel()   { return stressLevel != null; }
     public boolean hasExerciseHabit() { return exerciseHabit != null; }
+    public boolean hasWaterIntake()   { return waterIntake != null; }
 }
 ```
 
@@ -2808,6 +3065,7 @@ import com.skinplate.api.domain.user.entity.SkinConcern;
 import com.skinplate.api.domain.user.entity.SkinType;
 import com.skinplate.api.domain.user.entity.SleepPattern;
 import com.skinplate.api.domain.user.entity.StressLevel;
+import com.skinplate.api.domain.user.entity.WaterIntake;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -2822,12 +3080,13 @@ public record MeResponse(
         SkinType declaredSkinType,
 
         /* 항상 배열로 나간다. 빈 배열 = 미설정 — non_null 은 컬렉션에 통하지 않는다
-           (빈 Set 은 null 이 아니다). 습관 3종만 키 생략 규칙을 따른다. */
+           (빈 Set 은 null 이 아니다). 습관 4종만 키 생략 규칙을 따른다. */
         List<SkinConcern> skinConcerns,
 
         SleepPattern sleepPattern,
         StressLevel stressLevel,
         ExerciseHabit exerciseHabit,
+        WaterIntake waterIntake,
 
         /* boolean 접근자의 JSON 키는 Jackson 버전과 네이밍 전략에 따라
            isTestAccount / testAccount 로 갈릴 여지가 있다.
@@ -2849,6 +3108,7 @@ public record MeResponse(
                 user.getSleepPattern(),
                 user.getStressLevel(),
                 user.getExerciseHabit(),
+                user.getWaterIntake(),
                 user.isTestAccount(),
                 user.getCreatedAt());
     }
@@ -6303,7 +6563,7 @@ if (_consecutiveFailures >= 3) {
 | API | 서버 DTO | JSON 키 | 앱 DTO |
 |---|---|---|---|
 | `POST /auth/signup`<br>`POST /auth/login`<br>`POST /auth/test-login` | `AuthResponse` | `accessToken` · `tokenType` · `expiresIn` · `user{userId,email,nickname}` | `AuthResponseDto` |
-| `GET /auth/me`<br>`PATCH /auth/me` | `MeResponse` | `userId` · `email` · `nickname` · **`declaredSkinType`**(미선택 시 키 생략) · **`isTestAccount`** · `joinedAt` | `MeResponseDto` |
+| `GET /auth/me`<br>`PATCH /auth/me` | `MeResponse` | `userId` · `email` · `nickname` · **`declaredSkinType`**(미선택 시 키 생략) · `skinConcerns[]` · `sleepPattern` · `stressLevel` · `exerciseHabit` · **`waterIntake`**(습관 4종 모두 미선택 시 키 생략) · **`isTestAccount`** · `joinedAt` | `MeResponseDto` |
 | `POST /skin/analyses`<br>`GET /skin/analyses/latest`<br>`GET /skin/analyses/{id}` | `SkinAnalysisResponse` | `skinAnalysisId` · `skinScore` · `metrics{5}` · `summary` · `highlights[{label,status}]` · **`skinTypeGap{declared,observed,matched,message}`**(미선택 시 키 생략) · `analyzedAt` | `SkinAnalysisDto` |
 | `POST /plates/analyze` | `PlateAnalysisResponse` | **`analysisToken`** · `skinAnalysisId` · `plateScore` · `baseScore` · `summary` · `food{...}`(**`foodAnalysisId` 없음**) · `feedbacks{good,caution,action}` · `appliedRules[]` — **`plateId`·`createdAt` 없음(저장 전)** | `PlateAnalysisDto` |
 | `POST /plates/records`<br>`GET /plates/{id}` | `SkinPlateResponse` | `plateId` · **`skinAnalysisId`** · `plateScore` · **`baseScore`** · `summary` · `food{...}` · `feedbacks{good,caution,action}` · `appliedRules[]` · **`aiTip`**(생성 실패 시 키 생략) · `createdAt` | `SkinPlateDto` |
@@ -6312,6 +6572,7 @@ if (_consecutiveFailures >= 3) {
 | `GET /plates?from=&to=` | `PlateHistoryResponse` | `days[{date, skinScore, **plateScore**, **targetScore**, **aiComment**(없으면 키 생략), plates[{plateId, foodName, plateScore, **mealType**, recordedAt}]}]` — **기록 없는 날은 `days[]` 에 항목 자체가 없다** | `PlateHistoryDto` |
 | `GET /reports?period=` | `ReportResponse` | `period` · `from` · `to` · `latestSkinScore` · `skinScoreTrend[]` · `recordCount` · `averagePlateScore` · `penalties[]` · `meals[]` | `ReportDto` |
 | `GET /recommendations` | `RecommendationResponse` | `skinAnalysisId` · `recommend[]` · `avoid[]` · `generatedAt` | `RecommendationDto` |
+| `GET /skin-insights` | `SkinInsightResponse` | `skinAnalysisId` · `summary` · **`changes{hydration,oil,redness,trouble,barrier,skinScore}`**(직전 분석 없으면 키 생략) · `insights[{category,**priority**,title,description}]` · `todayActions[{category,title}]` · `generatedAt` | *(앱 미구현)* |
 
 > **히스토리의 `days[].plateScore` 는 그날 기록들의 평균이고, `mealType` 은 `recordedAt` 에서 파생한다.** **`days[]` 는 기록을 날짜로 `groupingBy` 한 결과라, 기록이 없는 날은 키가 생략되는 게 아니라 그 날짜 항목 자체가 배열에 없다.** 그래서 `plateScore` 는 primitive `int` 로 둘 수 있다 — 평균을 낼 대상이 없는 날은 애초에 이 DTO 가 만들어지지 않는다. 같은 이유로 `skinScore` 도 항상 채워진다: 그날 얼굴을 안 찍었어도 그날 첫 기록이 채점 기준으로 쓴 분석의 점수로 폴백하고, `skin_plate.skin_analysis_id` 가 NOT NULL 이라 기록이 있으면 그 값은 반드시 존재한다. **키가 실제로 빠질 수 있는 것은 `aiComment` 뿐이다**(AI 생성 실패). 확정 시안의 홈이 "오늘의 피부 식단 점수 / 목표 80점"을, 기록 카드가 "아침 8:20"을 보여주면서 생긴 필드다. 둘 다 새 컬럼 없이 만든다 — 평균은 저장할 값이 아니고(기록이 하나 추가되면 바뀐다), 끼니를 고르는 UI 가 시안에 없어 사용자가 값을 줄 방법이 없다. **끼니 라벨과 날짜 귀속은 별개다** — 일 경계는 캘린더일(00:00)이고 `mealType` 은 표시 라벨만 정하므로, 8/14 02:00 의 야식은 8/14 카드에 "저녁"으로 뜬다. 사용자 인지(전날 야식)와 어긋날 수 있음을 알고 택한 단순화다: 일 경계를 옮기면 이미 쌓인 기록의 날짜가 바뀌면서 히스토리·리포트·일 평균이 함께 흔들린다. **앱에서 평균을 내지 않는 이유는 반올림 때문이다.** 76.5 를 서버는 올리고 앱은 내리면 같은 날에 두 숫자가 뜬다. `targetScore` 를 매번 실어 보내는 것도 같은 이유다 — 앱에 80 을 박으면 사용자별 목표를 줄 때 앱 배포가 필요해진다.
 >
@@ -6397,6 +6658,27 @@ npx wrangler pages deploy build/web --project-name=skinplate
 ---
 
 ## 부록. 리뷰 반영 이력
+
+### v1.9 (2026-08-15 · 개인화 피부 인사이트 — PRD v1.8 대응)
+
+지표는 이미 있는데 "그래서 오늘 뭘 하면 되나"가 화면에 없었다. 추천(§18.9)이 음식으로 답하고, 인사이트가 생활로 답한다.
+
+| 항목 | 변경 |
+|---|---|
+| **`WaterIntake` [신설]** | 생활 습관 4번째 축. **수분만 늘리고 음주·흡연은 넣지 않았다** — 축을 늘리는 비용은 enum 하나가 아니라 "그 축에 대해 무슨 말을 할 것인가"다. 수분은 행동 제안이 한 줄로 끝나고 부작용이 없다 |
+| **`V6__skin_insight.sql` [신설]** | `app_user.water_intake` + `skin_insight`(`skin_analysis_id` **UNIQUE**) + `skin_insight_item`. 기존 마이그레이션은 손대지 않았다 |
+| **`domain/insight` [신설]** | `InsightCategory`(13종) · `SkinInsight` · `SkinInsightItem` · `InsightTopics` · `SkinInsightService` · `SkinInsightController` · `SkinInsightResponse` |
+| **`InsightTopics` [신설]** | 슬롯 **측정 2 + 습관 1 + 신고 1 → 상한 3**. **임계값을 다시 적지 않고** `RecommendationCandidates.topConcerns` 를 그대로 부른다 — 같은 뜻의 숫자가 두 곳에 생기면 추천은 "건조하다"고 보고 인사이트만 "괜찮다"고 보는 날이 온다 |
+| **`RecommendationService` [변경 없음]** | 습관 축에 수분을 넣지 않았다. 추천은 축마다 후보 음식 표가 필요한데 "물을 더 마셔라"는 음식으로 옮길 대상이 아니다 |
+| **`VisionClient.generateSkinInsight` [추가]** | `generateComments` 와 같은 텍스트 전용 호출. 공용 `call()` 을 타므로 타임아웃·429 정책이 같다 |
+| **`SkinInsightPrompt` [신설]** | **인과 확정 금지**가 이 프롬프트에만 있는 규칙이다 — "수면이 부족해서 건조하다"는 이 앱이 증명할 수 없는 문장이고, 그 선을 넘으면 자가 신고 한 줄로 진단을 내리는 앱이 된다. 미입력 습관은 줄 자체를 빼고, 이름·이메일은 넣지 않는다 |
+| **`MockOpenAiVisionClient` [추가]** | **13종 전부**의 문장을 들고 있는다. 하나라도 빠지면 그 주제 조합에서만 실패하는데, 하필 무대에서 처음 밟는 조합이 그것일 수 있다 |
+| **AI 실패 처리 [추천과 다름]** | 인사이트는 **저장하지 않고 예외를 그대로 던진다.** 분석당 1회 고정이라 정적 폴백을 한 번 저장하면 그 분석은 영원히 폴백 화면을 갖는다. 저장하지 않으면 다음 조회가 재시도가 된다 |
+| **주제 0건 [저장 안 함]** | 지표가 전부 양호하고 프로필도 비면 정적 응답을 그 자리에서 만들어 돌려주고 **행을 남기지 않는다.** 저장하면 1회 고정이 족쇄가 되어, 그 뒤에 고민·습관을 채워도 그 분석은 영영 빈 화면이다 — `RecommendationService.createOnce` 와 같은 규칙으로 맞췄다. 형제 기능 둘이 반대로 동작하면 "프로필 입력이 추천에는 반영되는데 인사이트에만 안 되는" 화면이 된다 |
+| **`ProfileSnapshot` [선정 시점]** | 스냅샷은 **주제를 고르고 문장을 만든 시점**의 프로필이다. 저장 시점에 다시 읽으면 그 사이 25초짜리 AI 호출 동안의 `PATCH /auth/me` 가 끼어들어, "수면이 부족하다"는 문장 옆에 `ENOUGH` 가 저장된다 |
+| **변화량(`changes`) [저장 안 함]** | 직전 분석이 불변이라 조회할 때마다 계산해도 같은 값이다. 직전 분석은 `created_at` 이 아니라 **`id`** 로 고른다 — 같은 초에 두 건이 들어오면 시각 정렬은 순서가 흔들리고, 그러면 같은 분석의 변화량이 조회마다 달라진다 |
+
+---
 
 ### v1.8 (2026-08-13 · 피부 분석 3방향 입력 — PRD v1.7 대응)
 

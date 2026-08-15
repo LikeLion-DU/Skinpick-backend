@@ -4,6 +4,7 @@ import com.skinplate.api.infra.openai.dto.FacePhoto;
 import com.skinplate.api.infra.openai.dto.OpenAiFoodResult;
 import com.skinplate.api.infra.openai.dto.OpenAiSkinResult;
 import com.skinplate.api.infra.openai.dto.PlateComments;
+import com.skinplate.api.infra.openai.dto.SkinInsightSentences;
 
 import java.util.List;
 
@@ -33,4 +34,11 @@ public interface VisionClient {
      * (PRD §18.9 — 음식 선정은 규칙, 문장 생성만 AI)
      */
     PlateComments generateComments(String userContext);
+
+    /**
+     * 개인화 인사이트의 문장을 만든다. <b>판단은 이미 끝나 있다</b> — 다룰 주제도
+     * 그 순서도 userContext 에 실려 오고, AI 는 주제마다 문장 하나씩만 채운다.
+     * (PRD §18.10 — 주제 선정은 규칙, 문장 생성만 AI)
+     */
+    SkinInsightSentences generateSkinInsight(String userContext);
 }

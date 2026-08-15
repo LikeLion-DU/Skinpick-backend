@@ -7,6 +7,7 @@ import com.skinplate.api.domain.user.entity.SkinConcern;
 import com.skinplate.api.domain.user.entity.SkinType;
 import com.skinplate.api.domain.user.entity.SleepPattern;
 import com.skinplate.api.domain.user.entity.StressLevel;
+import com.skinplate.api.domain.user.entity.WaterIntake;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -21,12 +22,13 @@ public record MeResponse(
         SkinType declaredSkinType,
 
         /* 항상 배열로 나간다. 빈 배열 = 미설정 — non_null 은 컬렉션에 통하지 않는다
-           (빈 Set 은 null 이 아니다). 습관 3종만 키 생략 규칙을 따른다. */
+           (빈 Set 은 null 이 아니다). 습관 4종만 키 생략 규칙을 따른다. */
         List<SkinConcern> skinConcerns,
 
         SleepPattern sleepPattern,
         StressLevel stressLevel,
         ExerciseHabit exerciseHabit,
+        WaterIntake waterIntake,
 
         /* boolean 접근자의 JSON 키는 Jackson 버전과 네이밍 전략에 따라
            isTestAccount / testAccount 로 갈릴 여지가 있다.
@@ -48,6 +50,7 @@ public record MeResponse(
                 user.getSleepPattern(),
                 user.getStressLevel(),
                 user.getExerciseHabit(),
+                user.getWaterIntake(),
                 user.isTestAccount(),
                 user.getCreatedAt());
     }
