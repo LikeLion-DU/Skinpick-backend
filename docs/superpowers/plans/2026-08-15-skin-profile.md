@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- 기존 Flyway 마이그레이션 수정 금지. 신규 `V4__skin_profile.sql`만 추가
+- 기존 Flyway 마이그레이션 수정 금지. 신규 `V5__skin_profile.sql`만 추가
 - Entity: `@NoArgsConstructor(PROTECTED)` + 행위 메서드, setter 금지. DTO 는 전부 record. 연관·컬렉션은 전부 LAZY
 - 자가 신고값은 점수 계산(PlateContext·Rule Engine)에 넣지 않는다 — 추천 반영만 허용 (스펙 §0-1)
 - 확정 문장 ①: "추천은 최초 추천 생성 시점의 프로필을 기준으로 생성하며, 생성 후 결과는 고정한다"
@@ -157,17 +157,19 @@ git commit -m "feat(user): 피부 고민·생활 습관 enum 4종 추가"
 
 ---
 
-### Task 2: V4 마이그레이션 + AppUser 확장
+### Task 2: V5 마이그레이션 + AppUser 확장
+
+> V4 는 PR #28(feat/plate-daily-score)이 선점해 V5 를 쓴다.
 
 **Files:**
-- Create: `src/main/resources/db/migration/V4__skin_profile.sql`
+- Create: `src/main/resources/db/migration/V5__skin_profile.sql`
 - Modify: `src/main/java/com/skinplate/api/domain/user/entity/AppUser.java` (필드 블록은 `declaredSkinType` 아래, 행위 메서드는 `declareSkinType` 아래)
 
 **Interfaces:**
 - Consumes: Task 1 의 enum 4종
 - Produces: `AppUser.getSkinConcerns(): Set<SkinConcern>` · `getSleepPattern()/getStressLevel()/getExerciseHabit()` · `updateSkinConcerns(Collection<SkinConcern>)` · `changeSleepPattern(SleepPattern)` · `changeStressLevel(StressLevel)` · `changeExerciseHabit(ExerciseHabit)`
 
-- [ ] **Step 1: V4 작성**
+- [ ] **Step 1: V5 작성**
 
 ```sql
 -- 피부 프로필 (목업 "피부설정") — 자가 신고 고민·생활 습관.
@@ -191,7 +193,7 @@ CREATE TABLE user_skin_concern (
      * 자가 신고 피부 고민 (복수 선택). 표시·추천 보완 전용 — 점수 계산에는 넣지 않는다.
      *
      * @Column(name) 을 빠뜨리면 기본 이름이 skin_concerns 가 되어
-     * ddl-auto: validate 가 V4 의 concern 컬럼과 어긋나 기동에서 죽는다.
+     * ddl-auto: validate 가 V5 의 concern 컬럼과 어긋나 기동에서 죽는다.
      * 필드 초기화를 빠뜨리면 순수 객체 픽스처(AppUser.create)에서 NPE 다.
      */
     @ElementCollection(fetch = FetchType.LAZY)
@@ -237,13 +239,13 @@ import 추가: `java.util.Collection`, `java.util.HashSet`, `java.util.Set` (jak
 Run: `./gradlew test`
 Expected: BUILD SUCCESSFUL, 실패 0
 
-- [ ] **Step 5: 기동 검증 — Flyway V4 적용 + `ddl-auto: validate` 통과**
+- [ ] **Step 5: 기동 검증 — Flyway V5 적용 + `ddl-auto: validate` 통과**
 
 ```bash
 docker compose up -d postgres
 set -a && source .env && set +a
 timeout 90 ./gradlew bootRun > /tmp/skinplate-bootrun.log 2>&1 || true   # 90초 후 자동 종료
-grep "계정 생성" /tmp/skinplate-bootrun.log        # 나오면 Flyway V4 + validate 통과
+grep "계정 생성" /tmp/skinplate-bootrun.log        # 나오면 Flyway V5 + validate 통과
 grep -A3 "APPLICATION FAILED" /tmp/skinplate-bootrun.log && echo "기동 실패 — 로그 확인" || true
 ```
 
@@ -260,9 +262,9 @@ Expected: `user_skin_concern_pkey|p` 포함
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/main/resources/db/migration/V4__skin_profile.sql \
+git add src/main/resources/db/migration/V5__skin_profile.sql \
         src/main/java/com/skinplate/api/domain/user/entity/AppUser.java
-git commit -m "feat(user): 피부 프로필 컬럼·컬렉션 추가 — V4 마이그레이션"
+git commit -m "feat(user): 피부 프로필 컬럼·컬렉션 추가 — V5 마이그레이션"
 ```
 
 ---
@@ -558,7 +560,7 @@ git commit -m "feat(user): 슬롯 1 시연 프로필 seed — 다크서클·수�
 
 - [ ] **Step 2: 설계서(SkinPlate_DTO_Domain.md) 갱신**
 
-1. §1.4 마이그레이션 목록에 V4 블록(Task 2 의 SQL 전문) 추가
+1. §1.4 마이그레이션 목록에 V5 블록(Task 2 의 SQL 전문) 추가
 2. AppUser 코드 블록을 Task 2 완료본으로 교체
 3. UpdateProfileRequest · MeResponse 코드 블록을 Task 3 완료본으로 교체
 
@@ -576,7 +578,7 @@ gh pr create --base develop --title "feat(user): 피부 프로필(고민·생활
 빈 배열과 생략을 구분하는 문제가 핵심이었습니다. 고민 목록만은 [] 가 "전부 해제"라서, 기존 hasNickname 의 isBlank 패턴을 그대로 쓰면 해제가 조용히 무시됩니다. null 검사만 하도록 갈랐고 테스트로 못 박았습니다. 응답의 고민 목록은 항상 배열로 나가는데, non_null 직렬화가 컬렉션에는 통하지 않기 때문입니다(빈 Set 은 null 이 아닙니다).
 
 ## 💬 리뷰 중점사항
-LAZY 컬렉션을 응답에 담기 전에 트랜잭션 안에서 정렬하며 초기화하는 부분과, V4 의 컬렉션 테이블 컬럼명이 엔티티 매핑과 정확히 일치하는지 봐주시면 좋겠습니다. 자가 신고값은 점수 계산에 넣지 않는 원칙은 그대로이고, 추천 반영은 다음 PR 입니다.
+LAZY 컬렉션을 응답에 담기 전에 트랜잭션 안에서 정렬하며 초기화하는 부분과, V5 의 컬렉션 테이블 컬럼명이 엔티티 매핑과 정확히 일치하는지 봐주시면 좋겠습니다. 자가 신고값은 점수 계산에 넣지 않는 원칙은 그대로이고, 추천 반영은 다음 PR 입니다.
 EOF
 )"
 ```

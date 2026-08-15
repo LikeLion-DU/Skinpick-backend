@@ -20,7 +20,7 @@
 | `StressLevel` | LOW(낮음) · NORMAL(보통) · HIGH(높음) |
 | `ExerciseHabit` | NONE(거의 안 함) · LIGHT(주 1-2회) · REGULAR(주 3회 이상) |
 
-### `V4__skin_profile.sql` (기존 마이그레이션 불변, 신규 추가만)
+### `V5__skin_profile.sql` (기존 마이그레이션 불변, 신규 추가만)
 
 ```sql
 ALTER TABLE app_user ADD COLUMN sleep_pattern  VARCHAR(20);
@@ -120,5 +120,5 @@ merged   = measured + declared + habit                      // 원천별 상한,
 
 ## 7. 브랜치 — 2 PR, 순차 머지 (②는 ①에 의존)
 
-1. `feat/skin-profile-api` — V4 + enum 4종 + AppUser + PATCH·GET `/auth/me` + 시연 seed + 문서(ERD·④-b)
+1. `feat/skin-profile-api` — V5 + enum 4종 + AppUser + PATCH·GET `/auth/me` + 시연 seed + 문서(ERD·④-b)
 2. `feat/recommendation-profile` — Concern 7종 + 후보·문구 + 슬롯 로직 + 문서(§18.9)

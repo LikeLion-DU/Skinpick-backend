@@ -56,7 +56,7 @@ public class AppUser extends BaseTimeEntity {
      * 자가 신고 피부 고민 (복수 선택). 표시·추천 보완 전용 — 점수 계산에는 넣지 않는다.
      *
      * @Column(name) 을 빠뜨리면 기본 이름이 skin_concerns 가 되어
-     * ddl-auto: validate 가 V4 의 concern 컬럼과 어긋나 기동에서 죽는다.
+     * ddl-auto: validate 가 V5 의 concern 컬럼과 어긋나 기동에서 죽는다.
      * 필드 초기화를 빠뜨리면 순수 객체 픽스처(AppUser.create)에서 NPE 다.
      */
     @ElementCollection(fetch = FetchType.LAZY)
