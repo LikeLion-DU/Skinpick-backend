@@ -116,4 +116,14 @@ class RecommendationCandidatesTest {
                 .collect(java.util.stream.Collectors.toSet());
         assertThat(distinct).hasSameSizeAs(foods);
     }
+
+    @Test
+    @DisplayName("H. 12개 축 전부 후보 표가 있다 — enum 만 늘리고 표를 빠뜨리면 NPE 로 무대에서 죽는다")
+    void everyConcernHasCandidates() {
+        for (Concern concern : Concern.values()) {
+            assertThat(RecommendationCandidates.of(concern))
+                    .as("%s 의 후보", concern).isNotNull();
+        }
+        assertThat(Concern.values()).hasSize(12);
+    }
 }
