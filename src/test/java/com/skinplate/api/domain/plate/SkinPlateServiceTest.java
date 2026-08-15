@@ -403,7 +403,8 @@ class SkinPlateServiceTest {
         verify(visionClient).generateComments(promptCaptor.capture());
         String captured = promptCaptor.getValue();
 
-        assertThat(captured.indexOf("아침")).isLessThan(captured.indexOf("점심"));
+        // 순서만 보면 "아침" 줄이 통째로 사라져도 -1 이 앞선다며 통과한다. 내용까지 붙여 고정한다.
+        assertThat(captured).contains("아침 그릭요거트 78점\n점심 비빔밥 78점");
     }
 
     /**
