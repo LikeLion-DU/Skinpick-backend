@@ -23,7 +23,7 @@ class VisionClientSwitchTest {
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withConfiguration(AutoConfigurations.of(JacksonAutoConfiguration.class))
             .withUserConfiguration(TestBeans.class)
-            .withPropertyValues("app.ai.model=gpt-4o", "app.ai.timeout-seconds=18",
+            .withPropertyValues("app.ai.model=gpt-5.6-luna", "app.ai.timeout-seconds=18",
                                 "app.ai.skin-max-tokens=1400", "app.ai.skin-timeout-seconds=30");
 
     @Test

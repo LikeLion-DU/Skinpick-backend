@@ -2264,7 +2264,8 @@ public class Recommendation extends BaseTimeEntity {
     ],
     "skinType": {
       "primary": "DRY",
-      "traits": ["SENSITIVE_TENDENCY"]
+      "traits": ["SENSITIVE_TENDENCY"],
+      "label": "건성 · 민감 경향"
     },
     "skinAge": {
       "estimatedSkinAge": 29,
@@ -2792,7 +2793,7 @@ public record ScoredItemDto(String key, int score, SkinLevel level, List<String>
 public enum SkinLevel { SEVERE, CAUTION, NORMAL, GOOD, EXCELLENT }
 
 /** primary 는 DRY · NORMAL · OILY · COMBINATION 만. SENSITIVE 는 traits 쪽이다 */
-public record SkinTypeDto(SkinType primary, List<SkinTrait> traits) {}
+public record SkinTypeDto(SkinType primary, List<SkinTrait> traits, String label) {}
 
 public enum SkinTrait { DEHYDRATED, OILY_T_ZONE, SENSITIVE_TENDENCY, TROUBLE_TENDENCY }
 

@@ -3279,14 +3279,20 @@ public enum SkinLevel {
 
 ```java
 /** primary 는 DRY · NORMAL · OILY · COMBINATION 만. SENSITIVE 는 traits 쪽이다 */
-public record SkinTypeDto(SkinType primary, List<SkinTrait> traits) {}
+public record SkinTypeDto(SkinType primary, List<SkinTrait> traits, String label) {
+
+    /** 앱이 조합하지 않도록 서버가 문구까지 만든다 — 갭 카드와 같은 원칙이다 */
+    public static SkinTypeDto of(SkinType primary, List<SkinTrait> traits) { ... }
+}
 
 public enum SkinTrait { DEHYDRATED, OILY_T_ZONE, SENSITIVE_TENDENCY, TROUBLE_TENDENCY }
 ```
 
 > **`skinTypeGap.observed` 와는 다른 값이다.** 그쪽은 `SkinType.observe(metrics)` 규칙 도출값이고(§1.12.2 · PRD §14.3), 이쪽은 AI 관찰이다. 둘이 갈리는 것은 오류가 아니라 정보다 — **갭 카드는 계속 규칙값을 쓰고 재분류하지 않는다.** 백엔드는 명백한 모순(유분 임계 미달인데 OILY 등)일 때 경고 로그만 남긴다.
 >
-> "수부지"를 primary 로 만들지 않는다. `COMBINATION` + `DEHYDRATED` 로 표현하면 primary 목록이 늘어나지 않는다.
+> "수부지"를 primary 로 만들지 않는다. `COMBINATION` + `DEHYDRATED` 로 표현하면 primary 목록이 늘어나지 않는다. 대신 **`label` 이 그 조합에서만 "복합성 · 수분 부족 경향(수부지)" 로 별칭을 붙인다** — 사용자가 부르는 말이 없으면 자기 피부인 줄 모른다.
+>
+> **`label` 은 서버가 만든다.** 앱이 primary 4개 × traits 4개를 각자 조합하기 시작하면 문구를 바꿀 때 두 곳이 어긋나고, 어긋난 쪽이 화면이다. 갭 카드가 `message` 를 통째로 내려보내는 것과 같은 원칙이다(§1.12.2). 앱은 `label` 을 그대로 그리면 되고, 칩을 따로 그리고 싶으면 `primary` · `traits` 를 쓴다.
 
 **`domain/skin/dto/SkinAgeDto.java`**
 
@@ -6632,7 +6638,7 @@ if (_consecutiveFailures >= 3) {
 |---|---|---|---|
 | `POST /auth/signup`<br>`POST /auth/login`<br>`POST /auth/test-login` | `AuthResponse` | `accessToken` · `tokenType` · `expiresIn` · `user{userId,email,nickname}` | `AuthResponseDto` |
 | `GET /auth/me`<br>`PATCH /auth/me` | `MeResponse` | `userId` · `email` · `nickname` · **`declaredSkinType`**(미선택 시 키 생략) · `skinConcerns[]` · `sleepPattern` · `stressLevel` · `exerciseHabit` · **`waterIntake`**(습관 4종 모두 미선택 시 키 생략) · **`isTestAccount`** · `joinedAt` | `MeResponseDto` |
-| `POST /skin/analyses`<br>`GET /skin/analyses/latest`<br>`GET /skin/analyses/{id}` | `SkinAnalysisResponse` | `skinAnalysisId` · `skinScore` · `metrics{5}` · **`metricDetails[{key,score,level,evidence[]}]`** · **`skinType{primary,traits[]}`**(예전 분석이면 키 생략) · **`skinAge{estimatedSkinAge,axes[7],assessment}`**(예전 분석이면 키 생략) · `summary` · `highlights[{label,status}]` · **`skinTypeGap{declared,observed,matched,message}`**(미선택 시 키 생략) · `analyzedAt` | `SkinAnalysisDto` |
+| `POST /skin/analyses`<br>`GET /skin/analyses/latest`<br>`GET /skin/analyses/{id}` | `SkinAnalysisResponse` | `skinAnalysisId` · `skinScore` · `metrics{5}` · **`metricDetails[{key,score,level,evidence[]}]`** · **`skinType{primary,traits[],label}`**(예전 분석이면 키 생략) · **`skinAge{estimatedSkinAge,axes[7],assessment}`**(예전 분석이면 키 생략) · `summary` · `highlights[{label,status}]` · **`skinTypeGap{declared,observed,matched,message}`**(미선택 시 키 생략) · `analyzedAt` | `SkinAnalysisDto` |
 | `POST /plates/analyze` | `PlateAnalysisResponse` | **`analysisToken`** · `skinAnalysisId` · `plateScore` · `baseScore` · `summary` · `food{...}`(**`foodAnalysisId` 없음**) · `feedbacks{good,caution,action}` · `appliedRules[]` — **`plateId`·`createdAt` 없음(저장 전)** | `PlateAnalysisDto` |
 | `POST /plates/records`<br>`GET /plates/{id}` | `SkinPlateResponse` | `plateId` · **`skinAnalysisId`** · `plateScore` · **`baseScore`** · `summary` · `food{...}` · `feedbacks{good,caution,action}` · `appliedRules[]` · **`aiTip`**(생성 실패 시 키 생략) · `createdAt` | `SkinPlateDto` |
 | `DELETE /plates/{id}` | — | 본문 없음(`204`) | 앱이 확인 창 뒤에 부른다 |

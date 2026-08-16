@@ -70,6 +70,9 @@ public class OpenAiVisionClient implements VisionClient {
      *   max_tokens        → 400 "Use 'max_completion_tokens' instead"
      *   temperature=0.2   → 400 "Only the default (1) value is supported"
      * 모델 이름으로 갈라 두면 모델 교체가 application.yml 한 줄로 끝난다.
+     *
+     * startsWith 가 아니라 contains 다. 파인튜닝 모델은 {@code ft:gpt-5.6-luna:...} 처럼
+     * 접두사가 붙어서, startsWith 면 조용히 옛 규약으로 나가 네 호출이 한꺼번에 400 이 된다.
      */
     private final boolean reasoningModel;
 
@@ -88,7 +91,7 @@ public class OpenAiVisionClient implements VisionClient {
         this.timeout = Duration.ofSeconds(timeoutSeconds);
         this.skinMaxTokens = skinMaxTokens;
         this.skinTimeout = Duration.ofSeconds(skinTimeoutSeconds);
-        this.reasoningModel = model.startsWith("gpt-5");
+        this.reasoningModel = model.contains("gpt-5");
     }
 
     /**

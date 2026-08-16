@@ -199,7 +199,7 @@ public class SkinAnalysisService {
                        .filter(Objects::nonNull)
                        .toList();
 
-        return new SkinTypeDto(primary, traits);
+        return SkinTypeDto.of(primary, traits);
     }
 
     /**

@@ -315,6 +315,8 @@ class SkinAnalysisServiceTest {
 
         assertThat(response.skinType().primary()).isEqualTo(SkinType.DRY);
         assertThat(response.skinType().traits()).containsExactly(SkinTrait.SENSITIVE_TENDENCY);
+        // 앱이 조합하지 않도록 서버가 문구까지 만들어 준다 — 갭 카드와 같은 원칙이다
+        assertThat(response.skinType().label()).isEqualTo("건성 · 민감 경향");
         // 지표 38/52/64/25/78 → observe() 는 DRY. AI 가 뭘 말하든 이 값이 갭 카드를 만든다.
         assertThat(response.skinTypeGap().observed()).isEqualTo(SkinType.DRY);
     }
