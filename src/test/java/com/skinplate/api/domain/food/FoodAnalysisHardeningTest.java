@@ -1,9 +1,11 @@
 package com.skinplate.api.domain.food;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.skinplate.api.domain.food.entity.CookingMethod;
+import com.skinplate.api.domain.food.entity.FoodAnalysis;
 import com.skinplate.api.domain.food.entity.Nutrition;
 import com.skinplate.api.domain.food.service.FoodAnalysisService;
-import com.skinplate.api.domain.food.service.StandardNutrition;
+import com.skinplate.api.domain.food.service.StandardFoodTable;
 import com.skinplate.api.global.exception.BusinessException;
 import com.skinplate.api.global.exception.ErrorCode;
 import com.skinplate.api.infra.openai.VisionClient;
@@ -33,26 +35,82 @@ class FoodAnalysisHardeningTest {
     @Test
     @DisplayName("시연 음식은 재료가 앞에 붙어도 표준값을 찾는다 — 여기가 60점의 근거다")
     void demoDishes_matchWithPrefixedIngredients() {
-        assertThat(StandardNutrition.find("돼지고기 김치찌개")).isPresent();
-        assertThat(StandardNutrition.find("김치찌개")).isPresent();
-        assertThat(StandardNutrition.find("연어구이")).isPresent();
-        assertThat(StandardNutrition.find("간장 연어구이")).isPresent();
-        assertThat(StandardNutrition.find("신라면")).isPresent();
+        // 이름까지 본다 — isPresent() 만 보면 돼지고기(고기구이 값)로 잡혀도 통과한다.
+        assertThat(StandardFoodTable.find("돼지고기 김치찌개").orElseThrow().name())
+                .contains("김치찌개");
+        assertThat(StandardFoodTable.find("김치찌개")).isPresent();
+        assertThat(StandardFoodTable.find("연어구이")).isPresent();
+        assertThat(StandardFoodTable.find("간장 연어구이").orElseThrow().name())
+                .contains("연어구이");
+        assertThat(StandardFoodTable.find("신라면").orElseThrow().name())
+                .contains("라면");
     }
 
     @Test
     @DisplayName("낱말 가운데에 키가 들어간 다른 음식은 잡지 않는다 — 부대찌개가 라면 값을 받으면 안 된다")
     void otherDishes_areNotSubstituted() {
-        // contains 였을 때 라면으로 잡혀 부대찌개에 라면 영양값이 들어갔다.
-        assertThat(StandardNutrition.find("라면사리 부대찌개")).isEmpty();
-        assertThat(StandardNutrition.find("김치볶음밥")).isEmpty();
-        assertThat(StandardNutrition.find("된장찌개")).isEmpty();
+        // 구 3종 표에서는 이 이름들이 비어 있는지 봤다. 공공데이터로 넓어진 지금은
+        // 제 항목이 생겼으므로, "제 값을 받는가"로 같은 위험(엉뚱한 치환)을 잡는다.
+        assertThat(StandardFoodTable.find("라면사리 부대찌개").orElseThrow().name())
+                .contains("부대찌개");
+        assertThat(StandardFoodTable.find("된장찌개").orElseThrow().name())
+                .contains("된장찌개");
     }
 
     @Test
     @DisplayName("이름이 없으면 표준값도 없다")
     void nullName_isEmpty() {
-        assertThat(StandardNutrition.find(null)).isEmpty();
+        assertThat(StandardFoodTable.find(null)).isEmpty();
+    }
+
+    // ---- 표준값이 AI 를 덮어쓰는 규칙 ----
+    //
+    // 셋의 확신도가 다르다. 영양값은 표준 DB 가 항상 이기고, 조리법·매운맛은
+    // 이름에서 뽑은 값이라 "확실할 때만" 이긴다. 이 구분이 무너지면 사진을 본 AI 의
+    // 정답이 문자열 규칙에 지워진다.
+
+    @Test
+    @DisplayName("영양값은 표준 DB 가 이긴다 — 룰이 비교하는 숫자가 그것뿐이다")
+    void nutrition_comesFromStandardTable() {
+        FoodAnalysis food = foodAnalysisService.toEntity(null,
+                aiResult("돼지고기 김치찌개", "BOILED", true));
+
+        assertThat(food.getNutrition().getSodiumMg()).isEqualTo(1850);
+        assertThat(food.getNutrition().getProteinG()).isEqualByComparingTo("28.5");
+    }
+
+    @Test
+    @DisplayName("조리법은 표준 DB 가 확실할 때만 이긴다 — 김치찌개는 AI 가 튀김이라 해도 국물이다")
+    void cookingMethod_standardWinsWhenKnown() {
+        FoodAnalysis food = foodAnalysisService.toEntity(null,
+                aiResult("돼지고기 김치찌개", "FRIED", true));
+
+        assertThat(food.getCookingMethod()).isEqualTo(CookingMethod.BOILED);
+    }
+
+    @Test
+    @DisplayName("표준 DB 의 ETC 는 '아니다'가 아니라 '모르겠다' — 사진을 본 AI 답을 지우지 않는다")
+    void cookingMethod_etcDoesNotOverwriteAi() {
+        // 가지나물은 이름 규칙으로 조리법이 안 잡혀 ETC 다.
+        FoodAnalysis food = foodAnalysisService.toEntity(null,
+                aiResult("가지나물", "RAW", false));
+
+        assertThat(StandardFoodTable.find("가지나물").orElseThrow().cookingMethod())
+                .isEqualTo(CookingMethod.ETC);
+        assertThat(food.getCookingMethod()).isEqualTo(CookingMethod.RAW);
+    }
+
+    @Test
+    @DisplayName("표준 DB 의 spicy=false 는 AI 의 매운맛을 지우지 않는다 — 이름에 없을 뿐이다")
+    void spicy_standardNeverClearsAi() {
+        // 부대찌개는 이름에 매운맛 낱말이 없어 표준값이 false 다. 덮어쓰면 홍조 룰(R02)이
+        // 진짜 매운 음식에서 조용히 빠진다.
+        assertThat(StandardFoodTable.find("부대찌개").orElseThrow().spicy()).isFalse();
+
+        assertThat(foodAnalysisService.toEntity(null, aiResult("부대찌개", "BOILED", true))
+                .isSpicy()).isTrue();
+        assertThat(foodAnalysisService.toEntity(null, aiResult("부대찌개", "BOILED", false))
+                .isSpicy()).isFalse();
     }
 
     // ---- 영양값 범위 ----
@@ -159,5 +217,12 @@ class FoodAnalysisHardeningTest {
         return new OpenAiFoodResult(detected, foodName, "한식/찌개", "BOILED", true,
                 List.of(), new OpenAiFoodResult.Nutrition(520, new BigDecimal("28.5"),
                 new BigDecimal("24.0"), new BigDecimal("32.0"), 1850, new BigDecimal("6.2")));
+    }
+
+    /** 영양값은 표준 DB 와 겹치지 않는 숫자로 둔다 — 어느 쪽이 이겼는지 보이게. */
+    private static OpenAiFoodResult aiResult(String foodName, String cookingMethod, boolean spicy) {
+        return new OpenAiFoodResult(true, foodName, "한식", cookingMethod, spicy,
+                List.of(), new OpenAiFoodResult.Nutrition(111, new BigDecimal("1.1"),
+                new BigDecimal("1.1"), new BigDecimal("1.1"), 111, new BigDecimal("1.1")));
     }
 }

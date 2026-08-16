@@ -15,13 +15,18 @@ import com.skinplate.api.global.image.ImageEncoder;
 import com.skinplate.api.global.image.ImageEncoder.EncodedImage;
 import com.skinplate.api.infra.openai.VisionClient;
 import com.skinplate.api.infra.openai.dto.OpenAiFoodResult;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Optional;
+import java.util.Set;
 
 /**
  * 음식 사진 인식. AI 는 "무슨 음식인가"만 판단하고 점수는 Rule Engine 이 계산한다.
@@ -44,6 +49,16 @@ public class FoodAnalysisService {
     private final VisionClient visionClient;
     private final ObjectMapper objectMapper;
 
+    /**
+     * 표준 음식 테이블을 기동 때 적재한다. 놔두면 첫 요청이 316KB 파싱을 물게 되는데,
+     * 그 첫 요청이 기록 저장이면 `findForUpdate` 로 잡은 행 잠금과 커넥션을 쥔 채로
+     * 파일을 읽는다. 리소스가 깨져 있어도 사용자가 아니라 기동 로그에서 먼저 드러난다.
+     */
+    @PostConstruct
+    void loadStandardFoodTable() {
+        StandardFoodTable.size();
+    }
+
     /** 트랜잭션 밖에서 부른다. */
     public OpenAiFoodResult recognize(MultipartFile image) {
         EncodedImage encoded = ImageEncoder.encode(image);
@@ -64,9 +79,10 @@ public class FoodAnalysisService {
     /**
      * 트랜잭션 안에서 부른다. 아직 저장하지는 않는다 — 호출자가 Repository 에 넘긴다.
      *
-     * 표준 영양값 덮어쓰기가 여기서 일어난다. 룰 엔진은 sodiumMg 를 1500과 비교하는데
-     * 그 값이 AI 추정치면 같은 사진에 세 번 다른 점수가 나온다. 시연 음식 3종만
-     * 표준 DB 값으로 바꿔 재현성을 확보한다. (설계서 §1.22.1)
+     * 표준값 덮어쓰기가 여기서 일어난다. 룰 엔진은 sodiumMg 를 1500과 비교하는데
+     * 그 값이 AI 추정치면 같은 사진에 세 번 다른 점수가 나온다. 공공데이터 기반
+     * 표준 테이블에서 찾히면 그 값으로 바꿔 재현성을 확보한다.
+     * (설계서 §1.22.1 · {@link StandardFoodTable})
      */
     public FoodAnalysis toEntity(AppUser user, OpenAiFoodResult aiResult) {
         return toEntity(user, aiResult, null);
@@ -79,35 +95,87 @@ public class FoodAnalysisService {
     public FoodAnalysis toEntity(AppUser user, OpenAiFoodResult aiResult, String jti) {
         String foodName = trim(aiResult.foodName(), NAME_MAX_LENGTH);
 
-        Nutrition nutrition = StandardNutrition.find(foodName)
-                .orElseGet(() -> toNutrition(aiResult.nutrition()));
+        Nutrition aiNutrition = toNutrition(aiResult.nutrition());
+        Optional<StandardFood> standard = StandardFoodTable.find(foodName);
 
-        if (StandardNutrition.isStandard(foodName)) {
-            log.debug("표준 영양값 적용: {}", foodName);
-        }
+        // 표준 DB 에 있으면 영양값뿐 아니라 조리법·매운맛까지 고정한다.
+        // 영양값만 고정하면 R02(매운맛)·R07(튀김)이 여전히 AI 추정에 흔들려
+        // 같은 사진에서 점수가 갈린다 — 재현성이 반쪽이 된다.
+        //
+        // 다만 셋의 확신도가 다르다. 영양값은 표준 DB 가 항상 이긴다(룰이 비교하는
+        // 숫자가 그것뿐이다). 조리법·매운맛은 이름에서 뽑은 값이라 사진을 본 AI 보다
+        // 확실할 때만 이긴다 — ETC 와 spicy=false 는 "아니다"가 아니라 "이름만 봐서는
+        // 모르겠다"는 뜻이므로 AI 의 답을 지우지 않는다.
+        Nutrition nutrition = standard
+                .map(food -> food.toNutrition(aiNutrition))
+                .orElse(aiNutrition);
+        CookingMethod cookingMethod = standard
+                .map(StandardFood::cookingMethod)
+                .filter(method -> method != CookingMethod.ETC)
+                .orElseGet(() -> toCookingMethod(aiResult.cookingMethod()));
+        boolean spicy = standard.map(StandardFood::spicy).orElse(false) || aiResult.spicy();
+
+        // 이름이 그대로면 debug 로 충분하지만, 다른 이름의 값으로 바뀌었다면 그게 요점이다.
+        // "돈코츠 라멘" 이 "라멘" 값을 받은 걸 배포 서버(기본 INFO)에서 볼 수 없으면,
+        // 점수가 사진과 무관한 숫자로 계산돼도 사용자도 로그도 알 방법이 없다.
+        standard.ifPresent(food -> {
+            String message = "표준 음식 적용: {} → {} ({}, 표본 {}건)";
+            if (food.name().equals(foodName)) {
+                log.debug(message, foodName, food.name(),
+                        food.measured() ? "실측" : "산출", food.sampleCount());
+            } else {
+                log.info(message, foodName, food.name(),
+                        food.measured() ? "실측" : "산출", food.sampleCount());
+            }
+        });
 
         FoodAnalysis food = FoodAnalysis.create(
                 user,
                 foodName,
                 trim(aiResult.foodCategory(), CATEGORY_MAX_LENGTH),
                 nutrition,
-                toCookingMethod(aiResult.cookingMethod()),
-                aiResult.spicy(),
+                cookingMethod,
+                spicy,
                 toJson(aiResult, jti));
 
-        food.addIngredients(toIngredients(aiResult.ingredients()));
+        food.addIngredients(toIngredients(aiResult.ingredients(), standard.orElse(null)));
         return food;
     }
 
-    private List<FoodIngredient> toIngredients(List<OpenAiFoodResult.Ingredient> ingredients) {
-        if (ingredients == null) return List.of();
+    /**
+     * AI 가 사진에서 읽은 재료를 그대로 쓰되, 표준 DB 가 아는 태그를 보탠다.
+     *
+     * AI 를 지우지 않는 이유 — 사진에는 이름에 없는 재료가 보인다("김치찌개"에
+     * 올라간 두부). 표준 DB 를 보태는 이유 — 이름에서 확실히 아는 태그(김치→발효)를
+     * AI 가 어떤 날 빠뜨리면 그날만 점수가 달라진다. 둘은 서로를 대체하지 않는다.
+     */
+    private List<FoodIngredient> toIngredients(List<OpenAiFoodResult.Ingredient> ingredients,
+                                               StandardFood standard) {
+        List<FoodIngredient> result = new ArrayList<>();
+        Set<IngredientTag> seen = EnumSet.noneOf(IngredientTag.class);
 
-        return ingredients.stream()
-                .filter(ingredient -> ingredient.name() != null && !ingredient.name().isBlank())
-                .limit(INGREDIENT_MAX_COUNT)
-                .map(ingredient -> FoodIngredient.of(
-                        trim(ingredient.name(), 50), toIngredientTag(ingredient.tag())))
-                .toList();
+        if (ingredients != null) {
+            ingredients.stream()
+                    .filter(ingredient -> ingredient.name() != null && !ingredient.name().isBlank())
+                    .limit(INGREDIENT_MAX_COUNT)
+                    .forEach(ingredient -> {
+                        IngredientTag tag = toIngredientTag(ingredient.tag());
+                        result.add(FoodIngredient.of(trim(ingredient.name(), 50), tag));
+                        seen.add(tag);
+                    });
+        }
+
+        if (standard != null) {
+            for (IngredientTag tag : standard.tags()) {
+                // ETC 는 "모르겠다"는 뜻이라 보탤 값이 없다.
+                if (tag == IngredientTag.ETC || !seen.add(tag)) continue;
+                if (result.size() >= INGREDIENT_MAX_COUNT) break;
+                // 위 AI 경로와 같은 이유로 자른다 — food_ingredient.name 은 VARCHAR(50) 이고,
+                // 표준 DB 이름은 스크립트가 만든다(`곱창전골_간편조리세트_…`).
+                result.add(FoodIngredient.of(trim(standard.name(), 50), tag));
+            }
+        }
+        return result;
     }
 
     /**
