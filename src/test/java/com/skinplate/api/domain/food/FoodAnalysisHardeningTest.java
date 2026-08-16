@@ -3,7 +3,7 @@ package com.skinplate.api.domain.food;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.skinplate.api.domain.food.entity.Nutrition;
 import com.skinplate.api.domain.food.service.FoodAnalysisService;
-import com.skinplate.api.domain.food.service.StandardNutrition;
+import com.skinplate.api.domain.food.service.StandardFoodTable;
 import com.skinplate.api.global.exception.BusinessException;
 import com.skinplate.api.global.exception.ErrorCode;
 import com.skinplate.api.infra.openai.VisionClient;
@@ -33,26 +33,32 @@ class FoodAnalysisHardeningTest {
     @Test
     @DisplayName("시연 음식은 재료가 앞에 붙어도 표준값을 찾는다 — 여기가 60점의 근거다")
     void demoDishes_matchWithPrefixedIngredients() {
-        assertThat(StandardNutrition.find("돼지고기 김치찌개")).isPresent();
-        assertThat(StandardNutrition.find("김치찌개")).isPresent();
-        assertThat(StandardNutrition.find("연어구이")).isPresent();
-        assertThat(StandardNutrition.find("간장 연어구이")).isPresent();
-        assertThat(StandardNutrition.find("신라면")).isPresent();
+        // 이름까지 본다 — isPresent() 만 보면 돼지고기(고기구이 값)로 잡혀도 통과한다.
+        assertThat(StandardFoodTable.find("돼지고기 김치찌개").orElseThrow().name())
+                .contains("김치찌개");
+        assertThat(StandardFoodTable.find("김치찌개")).isPresent();
+        assertThat(StandardFoodTable.find("연어구이")).isPresent();
+        assertThat(StandardFoodTable.find("간장 연어구이").orElseThrow().name())
+                .contains("연어구이");
+        assertThat(StandardFoodTable.find("신라면").orElseThrow().name())
+                .contains("라면");
     }
 
     @Test
     @DisplayName("낱말 가운데에 키가 들어간 다른 음식은 잡지 않는다 — 부대찌개가 라면 값을 받으면 안 된다")
     void otherDishes_areNotSubstituted() {
-        // contains 였을 때 라면으로 잡혀 부대찌개에 라면 영양값이 들어갔다.
-        assertThat(StandardNutrition.find("라면사리 부대찌개")).isEmpty();
-        assertThat(StandardNutrition.find("김치볶음밥")).isEmpty();
-        assertThat(StandardNutrition.find("된장찌개")).isEmpty();
+        // 구 3종 표에서는 이 이름들이 비어 있는지 봤다. 공공데이터로 넓어진 지금은
+        // 제 항목이 생겼으므로, "제 값을 받는가"로 같은 위험(엉뚱한 치환)을 잡는다.
+        assertThat(StandardFoodTable.find("라면사리 부대찌개").orElseThrow().name())
+                .contains("부대찌개");
+        assertThat(StandardFoodTable.find("된장찌개").orElseThrow().name())
+                .contains("된장찌개");
     }
 
     @Test
     @DisplayName("이름이 없으면 표준값도 없다")
     void nullName_isEmpty() {
-        assertThat(StandardNutrition.find(null)).isEmpty();
+        assertThat(StandardFoodTable.find(null)).isEmpty();
     }
 
     // ---- 영양값 범위 ----

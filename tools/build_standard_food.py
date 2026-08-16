@@ -59,7 +59,16 @@ COOKING_RULES = [
 # TAG_RULES 의 CAPSAICIN 이 사실상 합쳐진다. 한쪽만 넣어도 발동한다.
 SPICY_WORDS = ['매운', '매콤', '불닭', '고추', '청양', '떡볶이', '제육',
                '아귀찜', '짬뽕', '육개장', '김치찌개', '김치볶음', '닭갈비',
-               '쭈꾸미', '주꾸미', '낙지볶음', '비빔', '어묵볶음말고']
+               '쭈꾸미', '주꾸미', '낙지볶음', '비빔']
+
+# 공공데이터에 없는 시연 음식. 발표 시연 3종(김치찌개·연어구이·라면) 중
+# 연어구이만 원본에 없다(음식 DB 에는 연어롤뿐이다). 시연 음식이 AI 추정치로
+# 떨어지면 같은 사진에 점수가 흔들리는 문제가 그 음식에서만 되살아나므로,
+# 구 수기 표의 값을 그대로 남긴다. 조리법·매운맛·태그는 같은 이름 규칙으로 뽑는다.
+MANUAL_FOODS = [
+    {'name': '연어구이', 'caloriesKcal': 610, 'proteinG': 32.0, 'fatG': 28.0,
+     'carbG': 45.0, 'sodiumMg': 1600, 'sugarG': 4.0},
+]
 
 # 재료 태그. 이름에 등장하면 붙인다.
 TAG_RULES = [
@@ -206,6 +215,19 @@ def main(csv_path, json_path):
 
     exact = [aggregate(name, *buckets) for name, buckets in sorted(exact_groups.items())]
     base = [aggregate(name, *buckets) for name, buckets in sorted(base_groups.items())]
+
+    # 수동 보충은 공공데이터가 이긴다 — 언젠가 원본에 연어구이가 생기면 그쪽을 쓴다.
+    covered = {record['name'] for record in exact}
+    for manual in MANUAL_FOODS:
+        if manual['name'] in covered:
+            continue
+        record = dict(manual)
+        record['sampleCount'] = 1
+        record['measured'] = False
+        record['cookingMethod'] = cooking_method(record['name'])
+        record['spicy'] = is_spicy(record['name'])
+        record['tags'] = tags(record['name'])
+        exact.append(record)
 
     # 기본명이 exact 에도 똑같이 있으면 중복이다. exact 쪽이 더 구체적이므로 남기고
     # base 에서는 뺀다 — 조회는 exact 를 먼저 보기 때문에 결과가 같다.
