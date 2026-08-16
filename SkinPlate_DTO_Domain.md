@@ -5642,7 +5642,58 @@ class Highlight {
   final String label;
   final HighlightStatus status;
 }
+
+/// 점수 하나 + 관찰 근거. 피부 지표와 나이 축이 같이 쓴다.
+///
+/// 서버가 같이 주는 `level` 은 도메인까지 올리지 않는다 — 화면 색은 `MetricBand` 가
+/// 그리고 있어 읽는 곳이 없는데, 원시 문자열로 들고 있으면 "wire enum 은 파서를
+/// 거친다" 규칙만 헐거워진다. 계약 확인은 DTO 층 테스트가 한다.
+class ScoredItem {
+  const ScoredItem({
+    required this.key,
+    required this.score,
+    required this.evidence,
+  });
+
+  final String key;
+  final int score;          // 방향을 뒤집지 않은 원값. 바 길이는 이 값으로 그린다
+  final List<String> evidence;
+}
+
+/// AI 관찰 피부 타입. 화면 문구는 서버가 조합해 준 [label] 을 **그대로** 쓴다.
+class AiSkinType {
+  const AiSkinType({required this.primary, required this.label});
+
+  final SkinType? primary;  // 모르는 값이면 null. "미선택"과 섞지 않는다
+  final String label;       // "건성 · 민감 경향" · "복합성 · 수분 부족 경향(수부지)"
+}
+
+/// AI 추정 피부 나이. 실제 나이가 아니라 사진 기반 외관 추정이다.
+class SkinAge {
+  const SkinAge({
+    required this.estimatedSkinAge,
+    required this.axes,
+    required this.assessment,
+  });
+
+  final int estimatedSkinAge;
+  final List<ScoredItem> axes;   // 7개. 붉은기는 서버가 응답에서 뺀다
+  final String assessment;
+
+  /// 서버가 이미 18~80 을 보장하지만 앱이 한 번 더 본다.
+  /// 회귀가 나면 "AI 추정 피부 나이 0세" 가 확신에 찬 설명 옆에 그려진다.
+  bool get isUsable => estimatedSkinAge >= 18 && estimatedSkinAge <= 80;
+}
 ```
+
+> **`label` 뒤에 아무것도 붙이지 않는다.** '수부지' 처럼 괄호로 끝나는 문구가 있어서
+> `'$label 피부'` 로 이어 붙이면 "…(수부지) 피부" 가 된다.
+>
+> **카드 제목은 `skinTypeGap.observed`(규칙) 를 유지하고, `skinType` 은 칩으로 따로 단다.**
+> 제목을 AI 관찰값으로 덮으면 바로 아래 갭 카드와 한 화면에서 어긋난다 — 둘은 갈릴 수 있다.
+>
+> **AI 타입 칩이 뜨면 앱의 홍조 임계 배지는 달지 않는다.** 서버가 "민감 경향" 이라고 한
+> 옆에서 앱이 따로 판정하면, 두 판정이 어긋나는 날 어느 쪽을 믿을지 알 수 없다.
 
 **`lib/features/skin_analysis/data/models/skin_dtos.dart`**
 
@@ -5769,6 +5820,9 @@ extension SkinAnalysisDtoX on SkinAnalysisDto {
   SkinAnalysis toEntity() => SkinAnalysis(
         id: skinAnalysisId,
         skinScore: skinScore,
+        metricDetails: metricDetails.map((d) => d.toEntity()).toList(),
+        aiSkinType: skinType?.toEntity(),
+        skinAge: skinAge?.toEntity(),
         metrics: SkinMetrics(
           hydration: metrics.hydration,
           oil: metrics.oil,
