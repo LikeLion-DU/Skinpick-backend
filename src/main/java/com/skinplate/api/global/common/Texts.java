@@ -26,4 +26,18 @@ public final class Texts {
         int end = Character.isHighSurrogate(value.charAt(maxLength - 1)) ? maxLength - 1 : maxLength;
         return value.substring(0, end);
     }
+
+    /**
+     * 사용자에게 그대로 보이는 문장용. 잘렸다는 표시를 남긴다.
+     *
+     * 말없이 끊으면 "볼과 입가에 부분적인 각질이 보이고 특히 광대 주변에서 건조함이 두드러지"
+     * 처럼 문장이 그냥 멈춘 것으로 읽혀서, 사용자에게는 백엔드 버그로 보인다.
+     */
+    public static String ellipsize(String value, int maxLength) {
+        if (value == null || value.length() <= maxLength) return value;
+        // maxLength 가 1 이하면 truncate 가 charAt(-1) 로 터진다. 공유 유틸이라 막아 둔다.
+        if (maxLength <= 1) return "…";
+
+        return truncate(value, maxLength - 1) + "…";
+    }
 }

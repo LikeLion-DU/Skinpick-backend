@@ -100,6 +100,7 @@ docker exec -i skinplate-db psql -U skinplate -d skinplate -tAc \
 - Flyway 기존 마이그레이션 파일 수정
 - Controller에서 Entity 반환
 - 점수 계산을 LLM에 위임 (재현성이 이 제품의 주장이다)
+  - **예외는 `estimatedSkinAge` 하나다.** 8개 축을 종합한 인상이라 기계적 공식을 두지 않기로 결정했다(PRD §17.2). Skin Score·level·highlights·`skinTypeGap.observed` 는 전부 Backend 가 지표에서 다시 만든다 — 피부 나이만 재계산이 불가능하고, 그래서 흔들림도 여기서 가장 크게 보인다
 - `declaredSkinType`을 `PlateContext`에 넣기 — 자가 신고값은 표시·비교 전용
 - **08-21 이후 커밋.** 그날 업로드가 닫힌다 — 기능·QA·배포·촬영이 전부 그 안에 들어간다
 - 기능 동결은 날짜가 아니라 **G5(배포본 E2E 1회 완주)** 로 판단한다. PRD 의 "Day 8 동결"은 08-17 발표 전제였고 무효다

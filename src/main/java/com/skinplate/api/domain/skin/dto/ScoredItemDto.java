@@ -48,7 +48,7 @@ public record ScoredItemDto(String key, int score, SkinLevel level, List<String>
         return evidence.stream()
                 .filter(sentence -> sentence != null && !sentence.isBlank())
                 .limit(max)
-                .map(sentence -> Texts.truncate(sentence, EVIDENCE_MAX_LENGTH))
+                .map(sentence -> Texts.ellipsize(sentence, EVIDENCE_MAX_LENGTH))
                 .toList();
     }
 }

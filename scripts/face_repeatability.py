@@ -127,6 +127,15 @@ def levels_of(result):
     return levels
 
 
+def usable(result):
+    """집계가 건드릴 필드가 다 있는지. 하나라도 없으면 표본에서 뺀다."""
+    age = result.get("skinAgeAnalysis")
+    return (all(k in result for k in METRICS)
+            and isinstance(result.get("skinType"), dict) and "primary" in result["skinType"]
+            and isinstance(age, dict) and "estimatedSkinAge" in age
+            and all(isinstance(age.get(a), dict) and "score" in age[a] for a in AGE_AXES))
+
+
 def content_for(folder, user_prompt, labels, detail):
     parts = [{"type": "text", "text": user_prompt}]
     for slot in ["front", "left", "right"]:
@@ -164,8 +173,17 @@ def call(key, model, system, content, sch, max_tokens):
     try:
         with urllib.request.urlopen(request, timeout=120) as response:
             payload = json.load(response)
+        choice = payload["choices"][0]
+        # OpenAiVisionClient.extractContent 와 같은 판정. 이게 없으면 잘림이
+        # JSONDecodeError 로 뭉개져 "네트워크 오류" 로 읽히고, 정작 필요한 조치
+        # (SKIN_MAX_TOKENS 올리기)에 도달하지 못한다.
+        if choice.get("finish_reason") == "length":
+            return {"ok": False, "latency": time.time() - started, "code": "length",
+                    "rate_limited": False,
+                    "error": "출력 상한에서 잘렸다 — SKIN_MAX_TOKENS 를 올려야 한다 "
+                             f"(사용 {payload.get('usage', {}).get('completion_tokens', '?')})"}
         return {"ok": True, "latency": time.time() - started, "usage": payload["usage"],
-                "data": json.loads(payload["choices"][0]["message"]["content"])}
+                "data": json.loads(choice["message"]["content"])}
     except urllib.error.HTTPError as e:
         # 502·503 은 게이트웨이가 HTML 을 돌려준다. 여기서 json.loads 가 터지면
         # 아래 except Exception 이 못 잡는다 — 같은 try 의 형제 절이라서다.
@@ -191,7 +209,10 @@ def main():
     key, system, user_prompt, sch = api_key(), block("SYSTEM"), block("USER"), schema()
     labels, detail, max_tokens = photo_labels(), skin_detail(), skin_max_tokens()
 
-    people = sorted(d for d in os.listdir(FACES) if os.path.isdir(f"{FACES}/{d}"))
+    # os.listdir 을 먼저 부르면 FileNotFoundError 가 나서, 바로 아래 안내가 안 보인다.
+    # faces/ 는 .gitignore 대상이라 클론 직후에는 항상 없는 상태다.
+    people = sorted(d for d in os.listdir(FACES) if os.path.isdir(f"{FACES}/{d}")) \
+        if os.path.isdir(FACES) else []
     if not people:
         sys.exit(f"{FACES} 안에 사람별 폴더가 없다. front/left/right 3장씩 넣어라.")
     print(f"얼굴 {len(people)}세트 · 모델당 세트당 {RUNS}회 "
@@ -206,6 +227,11 @@ def main():
             data = []
             for i in range(RUNS):
                 result = call(key, model, system, content, sch, max_tokens)
+                if result["ok"] and not usable(result["data"]):
+                    # 파싱은 됐는데 축이나 타입이 빠진 응답이다. 아래 집계에서
+                    # KeyError 로 죽으면 이미 쓴 요청이 전부 날아간다.
+                    result = {**result, "ok": False, "code": "shape",
+                              "rate_limited": False, "error": "응답에 필요한 필드가 없다"}
                 if result["ok"]:
                     d = result["data"]
                     data.append((d, result))

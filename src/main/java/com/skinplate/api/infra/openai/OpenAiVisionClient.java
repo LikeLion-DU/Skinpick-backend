@@ -84,8 +84,26 @@ public class OpenAiVisionClient implements VisionClient {
     /** gpt-5 계열에서 reasoning 토큰은 출력 상한을 같이 갉아먹는다. 낮게 물려 상한을 지킨다. */
     private static final String REASONING_EFFORT = "low";
 
-    /** 0.1(429) + 2(재시도 대기) + 이 값 ≤ 클라이언트 상한 32초. */
-    private static final long MAX_SKIN_TIMEOUT_SECONDS = 28;
+    /**
+     * 네 호출 경로가 같은 규칙을 쓴다. 피부만 막아 두면 음식·문장·인사이트에 0 이
+     * 들어갔을 때 그쪽만 조용히 죽는다 — 위쪽 상한보다 이 아래쪽이 나쁘다.
+     * 아무 로그 없이 기능만 사라지기 때문이다.
+     */
+    private static long clampTimeout(long seconds, String property) {
+        long clamped = Math.max(MIN_TIMEOUT_SECONDS, Math.min(seconds, MAX_TIMEOUT_SECONDS));
+        if (clamped != seconds) {
+            log.warn("{}={} 는 허용 범위({}~{}초) 밖이라 {} 로 조정한다",
+                    property, seconds, MIN_TIMEOUT_SECONDS, MAX_TIMEOUT_SECONDS, clamped);
+        }
+        return clamped;
+    }
+
+    /** 429 재시도 대기. 전체 데드라인 계산에도 쓰인다. */
+    private static final long RETRY_DELAY_SECONDS = 2;
+
+    /** 이 값 + 재시도 대기 2초 ≤ 클라이언트 상한 32초. 네 호출 경로에 모두 적용된다. */
+    private static final long MAX_TIMEOUT_SECONDS = 28;
+    private static final long MIN_TIMEOUT_SECONDS = 1;
 
     public OpenAiVisionClient(WebClient openAiWebClient,
                               ObjectMapper objectMapper,
@@ -96,18 +114,22 @@ public class OpenAiVisionClient implements VisionClient {
         this.openAiWebClient = openAiWebClient;
         this.objectMapper = objectMapper;
         this.model = model;
-        this.timeout = Duration.ofSeconds(timeoutSeconds);
+        this.timeout = Duration.ofSeconds(clampTimeout(timeoutSeconds, "app.ai.timeout-seconds"));
         this.skinMaxTokens = skinMaxTokens;
-        this.skinTimeout = Duration.ofSeconds(Math.min(skinTimeoutSeconds, MAX_SKIN_TIMEOUT_SECONDS));
         this.reasoningModel = model.contains("gpt-5");
 
-        // 주석 넷이 지키라고 적어 둔 값을 여기서 한 번 강제한다. 느린 네트워크를 쫓다
-        // 40 을 넣으면 429 재시도가 낀 최악이 42초가 되고, 앱이 32초에 먼저 끊어
-        // AI_TIMEOUT 분기 — 재시도 버튼 UX 자체 — 가 도달 불가가 된다.
-        if (skinTimeoutSeconds > MAX_SKIN_TIMEOUT_SECONDS) {
-            log.warn("app.ai.skin-timeout-seconds={} 는 상한 {}초를 넘어 무시한다 — "
-                            + "429 재시도(2초)가 끼면 클라이언트 상한(32초)을 넘긴다",
-                    skinTimeoutSeconds, MAX_SKIN_TIMEOUT_SECONDS);
+        // 주석 넷이 지키라고 적어 둔 값을 여기서 한 번 강제한다. 위로는 40 을 넣으면
+        // 앱(32초)이 먼저 끊어 AI_TIMEOUT 분기 — 재시도 버튼 UX 자체 — 가 도달 불가가
+        // 되고, 아래로는 0 이 Duration.ZERO 가 되어 모든 분석이 즉시 타임아웃으로 죽는다.
+        // 후자가 더 나쁘다. 아무 로그 없이 기능만 사라지기 때문이다.
+        this.skinTimeout = Duration.ofSeconds(
+                clampTimeout(skinTimeoutSeconds, "app.ai.skin-timeout-seconds"));
+
+        // 재현성 레버가 사라진 것을 기동 로그에 남긴다. 모델 이름 한 줄로 조용히
+        // 꺼지는 스위치라, 발표 전에 눈에 띄어야 한다. (CLAUDE.md — 재현성이 이 제품의 주장)
+        if (reasoningModel) {
+            log.warn("모델 {} 은 temperature 를 1 로 고정한다 — 같은 사진에도 지표가 흔들릴 수 있다. "
+                    + "실기기 반복성은 scripts/face_repeatability.py 로 확인한다", model);
         }
     }
 
@@ -202,12 +224,13 @@ public class OpenAiVisionClient implements VisionClient {
                 .bodyToMono(JsonNode.class)
                 // 타임아웃은 재시도하지 않는다. 재시도까지 하면 앱 타임아웃(32초)을 넘긴다.
                 .timeout(callTimeout)
-                // 429 만 재시도한다. 429 응답은 즉시 오므로 최악은 0.1 + 2 + callTimeout 이다.
+                // 429 만 재시도한다. 429 가 언제 오든 위 전체 데드라인이 총 시간을 묶는다 —
+                // 예전에는 "429 는 즉시 온다"는 가정 위에 계산이 서 있었고, 그건 보장이 아니었다.
                 // 음식·문장(25초)은 ≈27초, 피부(28초)는 ≈30.1초로 둘 다 앱 타임아웃(32초) 안에
                 // 들어온다. 피부를 30초로 두면 32.1초가 되어 앱이 먼저 끊고, 그러면 AI_TIMEOUT
                 // 분기가 도달 불가가 된다 — 재시도 버튼 UX 가 통째로 죽는 자리다.
                 // 예산과 처리량 상한은 다른 축이고, 429 는 재시도가 유일한 정답인 에러다. (PRD §17.2)
-                .retryWhen(Retry.fixedDelay(1, Duration.ofSeconds(2))
+                .retryWhen(Retry.fixedDelay(1, Duration.ofSeconds(RETRY_DELAY_SECONDS))
                         .filter(error -> error instanceof WebClientResponseException.TooManyRequests)
                         // 기본 동작은 재시도가 소진되면 원래 예외를 Reactor 내부 예외로 갈아끼운다.
                         // 그러면 429 응답 본문(어떤 한도인지·언제 풀리는지)이 로그에서 사라지는데,
@@ -215,6 +238,11 @@ public class OpenAiVisionClient implements VisionClient {
                         .onRetryExhaustedThrow((spec, signal) -> signal.failure()))
                 .map(this::extractContent)
                 .map(content -> parse(content, type))
+                // 위 timeout 은 시도마다 새로 걸린다. 그것만으로는 총 시간이 안 묶인다 —
+                // 429 가 늦게(예: 8초) 오면 8 + 2 + 28 = 38초라 앱(32초)이 먼저 끊고,
+                // 그러면 AI_TIMEOUT 분기가 도달 불가가 된다. 재시도 대기까지 포함한
+                // 전체 데드라인을 여기서 한 번 더 건다.
+                .timeout(callTimeout.plusSeconds(RETRY_DELAY_SECONDS))
                 .onErrorMap(TimeoutException.class,
                         error -> new OpenAiClientException(ErrorCode.AI_TIMEOUT, error))
                 .onErrorMap(error -> !(error instanceof OpenAiClientException),

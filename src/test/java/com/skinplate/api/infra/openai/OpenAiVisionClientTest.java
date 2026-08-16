@@ -12,6 +12,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.mock.http.client.reactive.MockClientHttpRequest;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.web.reactive.function.client.ClientRequest;
 import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.reactive.function.client.ExchangeFunction;
@@ -193,6 +194,34 @@ class OpenAiVisionClientTest {
         return http.getBodyAsString().block();
     }
 
+    /**
+     * 실제로 타임아웃이 나기를 기다리면 이 테스트 하나가 28초를 먹는다.
+     * 클램프는 생성자에서 끝나므로 주입된 값만 본다 — 프로젝트가 이미 쓰는 방식이다.
+     */
+    private static Duration skinTimeoutOf(long configured) {
+        OpenAiVisionClient client = new OpenAiVisionClient(
+                WebClient.builder().build(), new ObjectMapper(),
+                "gpt-5.6-luna", 5, 1400, configured);
+        return (Duration) ReflectionTestUtils.getField(client, "skinTimeout");
+    }
+
+    @Test
+    @DisplayName("피부 타임아웃은 28초를 못 넘는다 — 넘기면 앱이 먼저 끊어 AI_TIMEOUT 이 도달 불가가 된다")
+    void skinTimeoutIsClampedToTheClientBudget() {
+        // 40 을 그대로 쓰면 429 재시도(2초)가 낀 최악이 42초라 클라이언트 상한(32초)을 넘는다.
+        assertThat(skinTimeoutOf(40)).isEqualTo(Duration.ofSeconds(28));
+        assertThat(skinTimeoutOf(28)).isEqualTo(Duration.ofSeconds(28));
+        assertThat(skinTimeoutOf(20)).isEqualTo(Duration.ofSeconds(20));   // 상한 아래는 그대로
+    }
+
+    @Test
+    @DisplayName("0 이하는 하한으로 올린다 — Duration.ZERO 면 모든 분석이 즉시 타임아웃으로 죽는다")
+    void skinTimeoutHasALowerBound() {
+        // 아무 로그 없이 기능만 사라지는 자리라 위쪽 상한보다 이쪽이 더 나쁘다.
+        assertThat(skinTimeoutOf(0)).isEqualTo(Duration.ofSeconds(1));
+        assertThat(skinTimeoutOf(-28)).isEqualTo(Duration.ofSeconds(1));
+    }
+
     @Test
     @DisplayName("타임아웃은 AI_TIMEOUT 으로 구분된다 — 앱이 재시도 버튼을 띄우는 분기다")
     void timeoutMapsToAiTimeout() {
@@ -216,7 +245,7 @@ class OpenAiVisionClientTest {
     }
 
     @Test
-    @DisplayName("타임아웃은 시도마다 새로 걸린다 — 전체에 한 번이 아니다")
+    @DisplayName("시도마다 타임아웃이 새로 걸린다 — 재시도 대기가 첫 시도 몫을 깎지 않는다")
     void timeoutAppliesPerAttempt() {
         // PRD §17.2 의 "최악 0.1+2+25 ≈ 27초" 계산이 이 전제 위에 서 있다.
         // 전체에 한 번이라면 재시도 대기 2초만으로도 1초 제한을 넘겨 실패해야 한다.
@@ -225,7 +254,9 @@ class OpenAiVisionClientTest {
         OpenAiSkinResult result = clientOf(request -> Mono.delay(Duration.ofMillis(300))
                 .then(Mono.just(calls.incrementAndGet() == 1
                         ? json(HttpStatus.TOO_MANY_REQUESTS, "{}")
-                        : json(HttpStatus.OK, ENVELOPE))), 1).analyzeSkin(PHOTOS);
+                        // 5초로 준다. 시도별 타임아웃만 보려는 테스트인데 1초면 전체
+                        // 데드라인(1+2=3초)이 재시도 도중에 먼저 걸려 CI 에서 흔들린다.
+                        : json(HttpStatus.OK, ENVELOPE))), 5).analyzeSkin(PHOTOS);
 
         assertThat(result.hydration()).isEqualTo(38);
         assertThat(calls.get()).isEqualTo(2);

@@ -31,9 +31,12 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Function;
 
 /**
  * 피부 분석 흐름 조율. 점수·요약 뱃지·갭 코멘트는 이미 완성된 세 컴포넌트가 계산하고,
@@ -60,8 +63,25 @@ public class SkinAnalysisService {
     private static final int MIN_SKIN_AGE = 18;
     private static final int MAX_SKIN_AGE = 80;
 
-    /** 응답에 실리는 나이 축 개수. AI 는 8개를 내지만 redness 는 빼고 내린다. */
-    private static final int AGE_AXIS_COUNT = 7;
+    /**
+     * 응답에 실리는 나이 축. AI 는 8개를 내지만 redness 는 빼고 내린다 —
+     * metricDetails 에 이미 있어 화면에 붉은기 숫자가 둘이 되기 때문이다.
+     * 아래 addAxis 호출과 이 목록이 같아야 한다.
+     */
+    private static final Map<String, Function<OpenAiSkinResult.SkinAgeAnalysis, OpenAiSkinResult.Axis>>
+            RESPONSE_AGE_AXES = new LinkedHashMap<>() {{
+                put("skinTexture",  OpenAiSkinResult.SkinAgeAnalysis::skinTexture);
+                put("elasticity",   OpenAiSkinResult.SkinAgeAnalysis::elasticity);
+                put("wrinkles",     OpenAiSkinResult.SkinAgeAnalysis::wrinkles);
+                put("skinTone",     OpenAiSkinResult.SkinAgeAnalysis::skinTone);
+                put("pores",        OpenAiSkinResult.SkinAgeAnalysis::pores);
+                put("pigmentation", OpenAiSkinResult.SkinAgeAnalysis::pigmentation);
+                put("blemishMarks", OpenAiSkinResult.SkinAgeAnalysis::blemishMarks);
+            }};
+
+    /** 위 축 중 "높을수록 나쁨". 나머지는 높을수록 좋다. */
+    private static final Set<String> AGE_HIGHER_IS_WORSE =
+            Set.of("wrinkles", "pores", "pigmentation", "blemishMarks");
 
     /** 경향은 최대 둘까지만 보여준다. 넷을 다 이어 붙이면 label 이 한 줄을 넘는다. */
     private static final int TRAITS_MAX = 2;
@@ -132,13 +152,15 @@ public class SkinAnalysisService {
                 aiResult.hydration(), aiResult.oil(), aiResult.redness(),
                 aiResult.trouble(), aiResult.barrier());
 
-        warnIfSkinTypeContradicts(aiResult.skinType(), metrics);
+        // 한 번만 만든다. 두 번 부르면 enum 파싱 경고가 사고마다 두 줄씩 찍힌다.
+        SkinTypeDto skinType = skinType(aiResult);
+        warnIfSkinTypeContradicts(skinType, metrics);
 
         SkinAnalysis analysis = skinAnalysisRepository.save(SkinAnalysis.create(
                 user, metrics, scoreCalculator.calculate(metrics),
                 trimSummary(aiResult.summary()), toJson(aiResult)));
 
-        return toResponse(analysis, aiResult);
+        return toResponse(analysis, aiResult, skinType);
     }
 
     /**
@@ -150,15 +172,17 @@ public class SkinAnalysisService {
      * 되읽는다. 전용 컬럼을 따로 두면 같은 JSON 이 두 벌이 되고 마이그레이션이 하나 는다.
      */
     private SkinAnalysisResponse toResponse(SkinAnalysis analysis) {
-        return toResponse(analysis, parseDetail(analysis.getRawAiResponse()));
+        OpenAiSkinResult detail = parseDetail(analysis.getRawAiResponse());
+        return toResponse(analysis, detail, skinType(detail));
     }
 
-    private SkinAnalysisResponse toResponse(SkinAnalysis analysis, OpenAiSkinResult detail) {
+    private SkinAnalysisResponse toResponse(SkinAnalysis analysis, OpenAiSkinResult detail,
+                                            SkinTypeDto skinType) {
         SkinMetrics metrics = analysis.getMetrics();
 
         return SkinAnalysisResponse.from(analysis,
                 metricDetails(metrics, detail),
-                skinType(detail),
+                skinType,
                 skinAge(detail),
                 highlightBuilder.build(metrics),
                 skinTypeGapAnalyzer.analyze(analysis.getUser().getDeclaredSkinType(), metrics));
@@ -240,32 +264,36 @@ public class SkinAnalysisService {
         if (detail == null || detail.skinAgeAnalysis() == null) return null;
         OpenAiSkinResult.SkinAgeAnalysis age = detail.skinAgeAnalysis();
 
+        // 축을 목록에서 만든다. 개수만 상수로 들고 있으면 사본이 하나 더 생긴 것뿐이라,
+        // 축을 늘리고 상수를 안 고치면 모든 응답에서 카드가 사라지고 로그는 "AI 가 8/7개를
+        // 줬다"로 찍혀 조사가 OpenAI 쪽으로 간다. 키를 오타 내도 개수는 맞아 통과한다.
         List<ScoredItemDto> axes = new ArrayList<>();
-        addAxis(axes, "skinTexture",  age.skinTexture(),  false);
-        addAxis(axes, "elasticity",   age.elasticity(),   false);
-        addAxis(axes, "wrinkles",     age.wrinkles(),     true);
-        addAxis(axes, "skinTone",     age.skinTone(),     false);
-        addAxis(axes, "pores",        age.pores(),        true);
-        addAxis(axes, "pigmentation", age.pigmentation(), true);
-        addAxis(axes, "blemishMarks", age.blemishMarks(), true);
+        RESPONSE_AGE_AXES.forEach((key, axis) ->
+                addAxis(axes, key, axis.apply(age), AGE_HIGHER_IS_WORSE.contains(key)));
 
         // 축이 하나라도 빠지거나 나이가 범위 밖이면 통째로 없는 것으로 본다.
         //
         // 일부만 채워 내보내면 안 된다 — 계약이 axes[7] 이라 앱이 인덱스로 그리면
         // 피부톤 라벨 밑에 모공 숫자가 찍힌다. clamp 로 살리는 것도 안 된다.
         // estimatedSkinAge 가 빠진 응답(0)이 18 로 둔갑해서 화면에 "피부 나이 18세"
-        // 라는 없는 데이터가 그려진다. skinType() 과 같은 규칙이다 — 의심스러우면 뺀다.
-        if (axes.size() != AGE_AXIS_COUNT
+        // 라는 없는 데이터가 그려진다. skinType() 과 같은 규칙 — 의심스러우면 뺀다.
+        if (axes.size() != RESPONSE_AGE_AXES.size()
                 || age.estimatedSkinAge() < MIN_SKIN_AGE || age.estimatedSkinAge() > MAX_SKIN_AGE) {
             log.warn("피부 나이 분석을 쓸 수 없다 — 나이 {} · 축 {}/{}개",
-                    age.estimatedSkinAge(), axes.size(), AGE_AXIS_COUNT);
+                    age.estimatedSkinAge(), axes.size(), RESPONSE_AGE_AXES.size());
             return null;
         }
 
-        // 프롬프트는 1~3문장을 지시하지만 그건 권고다. DB 컬럼에 안 닿아 500 이 나지 않으므로
-        // 폭주하면 화면만 조용히 깨진다 — summary 와 같은 상한으로 막는다.
-        return new SkinAgeDto(age.estimatedSkinAge(), List.copyOf(axes),
-                Texts.truncate(age.ageAssessment(), ASSESSMENT_MAX_LENGTH));
+        // 설명이 비었다고 카드를 버리지는 않는다. 점수 일곱 개는 멀쩡한데 문장 하나
+        // 때문에 다 버리면 그게 더 큰 손실이다. 키를 생략하면(non_null) 앱이 설명
+        // 블록만 접는다.
+        String assessment = Texts.ellipsize(age.ageAssessment(), ASSESSMENT_MAX_LENGTH);
+        if (assessment != null && assessment.isBlank()) {
+            log.warn("피부 나이 설명이 비어 있다 — 축 {}개는 그대로 내린다", axes.size());
+            assessment = null;
+        }
+
+        return new SkinAgeDto(age.estimatedSkinAge(), List.copyOf(axes), assessment);
     }
 
     private static void addAxis(List<ScoredItemDto> axes, String key,
@@ -295,13 +323,16 @@ public class SkinAnalysisService {
      * 여전히 규칙에서 나오므로(PRD §14.3), AI 가 틀려도 화면은 흔들리지 않는다.
      * 그래도 남기는 이유는 프롬프트가 언제부터 어긋났는지 알 방법이 이것뿐이라서다.
      */
-    private void warnIfSkinTypeContradicts(OpenAiSkinResult.SkinTypeResult skinType, SkinMetrics metrics) {
-        if (skinType == null || skinType.primary() == null) return;
+    private void warnIfSkinTypeContradicts(SkinTypeDto skinType, SkinMetrics metrics) {
+        if (skinType == null) return;
 
+        // 문자열이 아니라 이미 파싱된 enum 으로 받는다. 리터럴로 비교하면 SkinType 상수를
+        // 이름만 바꿔도 컴파일은 통과하고 switch 가 default 로 떨어져, 이 경고가 영영
+        // 안 뜬다 — 프롬프트가 언제부터 어긋났는지 알 방법이 이것뿐인데 그게 사라진다.
         boolean contradicts = switch (skinType.primary()) {
-            case "OILY" -> !metrics.isOily();     // 유분 임계(70)를 못 넘겼는데 지성이라 함
-            case "DRY"  -> !metrics.isDry();      // 수분 임계(40) 이상인데 건성이라 함
-            default     -> false;
+            case OILY -> !metrics.isOily();     // 유분 임계(70)를 못 넘겼는데 지성이라 함
+            case DRY  -> !metrics.isDry();      // 수분 임계(40) 이상인데 건성이라 함
+            default   -> false;
         };
 
         if (contradicts) {
