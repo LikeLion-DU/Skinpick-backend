@@ -241,8 +241,10 @@ app:
   ai:
     api-key: ${OPENAI_API_KEY:}
     base-url: https://api.openai.com/v1
-    model: gpt-4o
-    timeout-seconds: 25            # 타임아웃은 재시도 없음. 429만 1회 재시도 (피부는 high 3장)
+    model: ${OPENAI_MODEL:gpt-5.6-luna}
+    timeout-seconds: 25            # 음식·문장용. 타임아웃은 재시도 없음. 429만 1회 재시도
+    skin-max-tokens: ${SKIN_MAX_TOKENS:1400}      # 피부는 5지표+8축+근거라 출력이 크다
+    skin-timeout-seconds: ${SKIN_TIMEOUT_SECONDS:30}
     mock: ${AI_MOCK:false}
 
 springdoc:

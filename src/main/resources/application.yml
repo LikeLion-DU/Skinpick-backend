@@ -54,7 +54,9 @@ app:
   ai:
     api-key: ${OPENAI_API_KEY:}
     base-url: https://api.openai.com/v1
-    model: gpt-4o
+    # gpt-5 계열은 요청 규약이 다르다(OpenAiVisionClient 가 모델 이름으로 가른다).
+    # gpt-4o 로 되돌리려면 OPENAI_MODEL 한 줄이면 된다 — temperature 0.2 도 같이 돌아온다.
+    model: ${OPENAI_MODEL:gpt-5.6-luna}
     timeout-seconds: 25            # 음식·문장 생성용. 재시도 없는 단발.
                                    # 클라이언트 타임아웃(32초)보다 반드시 짧아야 한다
     # 피부만 따로 둔다. 출력이 5지표 + 8축 + 근거라 다른 호출의 두 배 가까이 나오고,

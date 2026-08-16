@@ -552,7 +552,7 @@ flowchart TB
     end
 
     subgraph Infra["🔌 Infrastructure"]
-        OPENAI[OpenAI Vision API<br/>gpt-4o]
+        OPENAI[OpenAI Vision API<br/>gpt-5.6-luna]
     end
 
     DB[(PostgreSQL<br/>로컬 Docker 16 · 배포 Supabase 17)]
@@ -593,7 +593,7 @@ flowchart TB
 | **인증** | **Spring Security + jjwt** | **6.3 / 0.12.x** | **JWT 검증 필터, BCrypt 해싱** |
 | ORM | Spring Data JPA | - | 빠른 CRUD |
 | DB | PostgreSQL | 16 | JSONB로 AI 원본 응답 저장 |
-| AI | OpenAI | gpt-4o | Vision + Structured Outputs 지원 |
+| AI | OpenAI | gpt-5.6-luna | Vision + Structured Outputs 지원. gpt-4o 대비 TPM 6배·비용 1/8 (§17.2) |
 | 문서화 | springdoc-openapi | 2.x | Swagger UI 자동 생성 |
 | 로컬 DB | Docker Compose | - | 개발 중 Postgres만 컨테이너로 |
 | **배포 · 백엔드** | **가비아 VM** (멋사 제공) | 2 vCore · 4GB · 1TB | **확정.** Docker 로 띄운다. HTTPS·본문 상한은 리버스 프록시 몫 (§9.6) |
@@ -3162,7 +3162,7 @@ sequenceDiagram
     participant C as Controller
     participant S as SkinAnalysisService
     participant O as OpenAiVisionClient
-    participant AI as OpenAI gpt-4o
+    participant AI as OpenAI gpt-5.6-luna
     participant D as PostgreSQL
 
     F->>C: POST /skin/analyses (multipart)<br/>front · left · right<br/>Authorization: Bearer …
@@ -3191,7 +3191,9 @@ public class OpenAiVisionClient {
     private final WebClient openAiWebClient;
     private final ObjectMapper objectMapper;
 
-    private static final String MODEL = "gpt-4o";
+    // 모델은 app.ai.model 에서 주입된다. gpt-5 계열이면 요청 규약이 갈린다
+    //   max_completion_tokens + reasoning_effort · temperature 미전송(1 고정)
+    private final String model;
 
     public OpenAiSkinResult analyzeSkin(List<FacePhoto> photos) {
         // 사진마다 앞에 방향 라벨을 끼운다. 순서로만 구분하면 한 장이 밀려도 드러나지 않는다.
@@ -3381,20 +3383,39 @@ public class MockOpenAiVisionClient implements VisionClient {
 |---|---|---|
 | 이미지 detail | 음식 `low` / 피부 `high` | 음식은 고정 85토큰. 피부는 얼굴 크롭 후 전송해 타일 수를 줄인다 |
 | 클라이언트 리사이즈 | 1024px / q80 | 업로드 트래픽 1/5 |
-| max_tokens | 800 | 출력 폭주 방지 |
+| max_tokens | 음식·문장 800 / **피부 1,400** | 출력 폭주 방지. 피부만 5지표 + 8축 + 근거라 따로 둔다 |
 
-**실제 비용 산정 (gpt-4o · $2.50 / $10 per 1M)**
+**실제 비용 산정 (gpt-5.6-luna · $0.20 / $1.20 per 1M — 실측)**
 
 | 항목 | 토큰 | 비용 |
 |---|---|---|
-| 피부 분석 (얼굴 크롭 `high` = 85 + 170×4타일, **×3방향**) | 3,395 in / 250 out | $0.0110 |
-| 음식 분석 (`low` = 85) | 785 in / 500 out | $0.0070 |
-| 추천 문장 생성 (텍스트) | 600 in / 400 out | $0.0055 |
-| **플로우 1회** | | **$0.024 (약 33원)** |
+| 피부 분석 (얼굴 크롭 `high` ×3방향 + 확장 스키마) | 5,643 in / 554 out | $0.0018 |
+| 음식 분석 (`low` = 85) | 785 in / 500 out | $0.0008 |
+| 추천 문장 생성 (텍스트) | 600 in / 400 out | $0.0006 |
+| **플로우 1회** | | **$0.0032 (약 4.4원)** |
 
-조직 크레딧 **$100 기준 약 4,200회**를 돌릴 수 있다. 개발 10일간 하루 80회(800회) + 리허설 50회 + 심사위원 체험 30회를 다 합쳐도 **$21, 예산의 21%**다.
+조직 크레딧 **$100 기준 약 31,000회**를 돌릴 수 있다. **예산은 더 이상 어떤 결정에도 개입하지 않는다.**
 
-> 3방향 촬영으로 피부 분석 입력이 1,265 → 3,395 토큰이 됐다. 회당 5.7원이 늘었고 예산 비중은 16% → 21%다. **여전히 제약이 아니다** — 세 각도를 종합한다는 것이 이 분석의 근거이므로 여기서 아끼면 아낄 대상을 잘못 고른 것이다.
+> gpt-4o 시절 플로우 1회가 $0.024(약 33원)였고, 피부 나이 8축이 붙어 출력이 250 → 554 토큰으로 늘었는데도 회당 비용은 **1/7.6**이 됐다. 모델을 바꾼 이유는 비용이 아니라 아래 처리량이다.
+
+**모델 선정 근거 (2026-08-17 실측)**
+
+| | gpt-4o | **gpt-5.6-luna** | gpt-5.6-terra |
+|---|---|---|---|
+| TPM | 10,000 | **60,000** | 10,000 |
+| RPM (조직 실측) | **3** | ≥5 | **3** |
+| 동시 3건 | **3/3 429** | 0/3 429 | — |
+| 비용/건 | $0.0177 | **$0.0021** | $0.0176 |
+| 사진 3장 지연 | 3.1초 | **2.5초** | 2.6초 |
+| `temperature=0.2` | ✓ | ✗ (1 고정) | ✗ |
+
+> **결정은 처리량이 갈랐다.** gpt-4o 는 이 조직에서 **RPM 3**이라 심사위원 두 명이 연달아 촬영하면 네 번째 요청부터 429다. 429 재시도는 2초 뒤인데 한도 창은 60초라 재시도로도 회복되지 않는다. 흔들리는 점수는 설명할 수 있지만 "분석 실패"는 못 한다.
+>
+> **대가는 `temperature=0.2` 다.** gpt-5 계열은 temperature 가 1로 고정이라 재현성 레버를 잃는다. synthetic 입력 반복 측정에서 Skin Score 변동 폭이 2 → 4 였다. 다만 **총점이 4점 흔들려도 `SkinLevel` 등급 구간 폭이 20이라 화면 문구와 뱃지 색은 바뀌지 않는다.**
+>
+> **미검증으로 남긴 것** — 실제 얼굴 사진 반복성은 아직 측정하지 못했다(테스트용 얼굴 세트 없음). 하네스는 준비돼 있고, 실기기 QA 때 세트당 5회씩 돌려 Skin Score 폭 ≤ 5 · 나이 폭 ≤ 3 · 타입 일치율 100% 를 확인한다. 여기서 벗어나면 `OPENAI_MODEL=gpt-4o` 환경변수 한 줄로 되돌린다.
+>
+> terra 는 후보에서 뺐다 — luna 보다 나은 항목이 하나도 없다. 나이 변동 폭 7 대 2, 비용 9.8배, TPM 1/6, RPM 3.
 
 > **예산은 제약이 아니다.** 그래서 피부 분석을 `detail:"high"`로 올리는 결정에 비용 부담이 없고, 일일 호출 제한(30회)도 개발을 방해하기만 한다. 제한 로직을 만드는 데 쓸 반나절을 다른 데 쓰는 편이 낫다.
 | ~~호출 제한~~ | — | **만들지 않는다.** 아래 산정대로 예산의 16%만 쓴다. 제한 로직은 개발만 방해한다 |
@@ -3998,8 +4019,10 @@ app:
       password: ${TEST_ACCOUNT_PASSWORD:test1234!}
   ai:
     api-key: ${OPENAI_API_KEY}
-    model: gpt-4o
+    model: ${OPENAI_MODEL:gpt-5.6-luna}
     timeout-seconds: 25
+    skin-max-tokens: ${SKIN_MAX_TOKENS:1400}
+    skin-timeout-seconds: ${SKIN_TIMEOUT_SECONDS:30}
     mock: ${AI_MOCK:false}
 
 spring:
