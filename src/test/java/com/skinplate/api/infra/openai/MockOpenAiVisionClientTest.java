@@ -9,6 +9,7 @@ import com.skinplate.api.domain.plate.engine.PlateContext;
 import com.skinplate.api.domain.plate.engine.PlateRuleEngine;
 import com.skinplate.api.domain.plate.engine.rules.*;
 import com.skinplate.api.domain.skin.entity.SkinMetrics;
+import com.skinplate.api.domain.user.entity.SkinType;
 import com.skinplate.api.infra.openai.dto.FacePhoto;
 import com.skinplate.api.infra.openai.dto.FacePhotoType;
 import com.skinplate.api.infra.openai.dto.OpenAiFoodResult;
@@ -52,6 +53,37 @@ class MockOpenAiVisionClientTest {
         assertThat(List.of(result.hydration(), result.oil(), result.redness(),
                            result.trouble(), result.barrier()))
                 .containsExactly(38, 52, 64, 25, 78);
+    }
+
+    @Test
+    @DisplayName("확장 필드가 하나도 비지 않는다 — 비면 그 칸만 무대에서 빈 채로 그려진다")
+    void skinFillsEveryExtendedField() {
+        OpenAiSkinResult result = client.analyzeSkin(PHOTOS);
+
+        assertThat(result.metricEvidence()).isNotNull();
+        assertThat(List.of(result.metricEvidence().hydration(), result.metricEvidence().oil(),
+                           result.metricEvidence().redness(), result.metricEvidence().trouble(),
+                           result.metricEvidence().barrier()))
+                .allSatisfy(evidence -> assertThat(evidence).isNotEmpty());
+
+        OpenAiSkinResult.SkinAgeAnalysis age = result.skinAgeAnalysis();
+        assertThat(age.estimatedSkinAge()).isBetween(18, 80);
+        assertThat(age.ageAssessment()).isNotBlank();
+        assertThat(List.of(age.skinTexture(), age.elasticity(), age.wrinkles(), age.skinTone(),
+                           age.pores(), age.pigmentation(), age.redness(), age.blemishMarks()))
+                .allSatisfy(axis -> assertThat(axis.evidence()).isNotEmpty());
+    }
+
+    @Test
+    @DisplayName("Mock 의 피부 타입이 규칙 도출값과 같다 — 다르면 한 화면에서 타입이 둘로 갈린다")
+    void skinTypeAgreesWithTheRule() {
+        OpenAiSkinResult result = client.analyzeSkin(PHOTOS);
+
+        SkinMetrics metrics = SkinMetrics.of(result.hydration(), result.oil(),
+                result.redness(), result.trouble(), result.barrier());
+
+        // 갭 카드는 observe() 를 쓴다. Mock 만 다른 타입을 말하면 무대에서 설명할 수 없다.
+        assertThat(result.skinType().primary()).isEqualTo(SkinType.observe(metrics).name());
     }
 
     @Test

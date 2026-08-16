@@ -65,11 +65,43 @@ public class MockOpenAiVisionClient implements VisionClient {
             Map.entry(InsightCategory.WATER,
                     "수분 섭취가 부족하다고 기록되고 있어요. 물 한두 잔을 더 챙기는 것부터 시작해 보세요."));
 
-    /** 사진이 몇 장이든 같은 값을 돌려준다. 시연에서 필요한 건 재현 가능한 60점이다. */
+    /**
+     * 사진이 몇 장이든 같은 값을 돌려준다. 시연에서 필요한 건 재현 가능한 60점이다.
+     *
+     * 피부 타입은 <b>DRY</b> 다. 설계 문서의 예시는 COMBINATION 이지만, 시연 지표에서
+     * {@code SkinType.observe} 가 도출하는 값은 DRY 이고 갭 카드도 "지성이라고
+     * 생각하셨지만… 건조" 로 뜬다. Mock 만 COMBINATION 이면 한 화면에서 타입이 두 개로
+     * 갈라져 보인다 — 무대에서 설명할 수 없는 종류의 어긋남이다.
+     *
+     * traits 에 SENSITIVE_TENDENCY 를 두는 근거는 붉어짐 64 다(임계 60 초과).
+     * 빈 배열로 두면 traits 칩이 시연에서 한 번도 안 그려진다.
+     */
     @Override
     public OpenAiSkinResult analyzeSkin(List<FacePhoto> photos) {
         return new OpenAiSkinResult(true, 38, 52, 64, 25, 78,
+                new OpenAiSkinResult.MetricEvidence(
+                        List.of("볼과 입가에 부분적인 각질이 보임"),
+                        List.of("T존에 중간 정도의 광택이 보임"),
+                        List.of("코와 볼 주변에 붉은기가 뚜렷함"),
+                        List.of("작은 융기가 소수만 보임"),
+                        List.of("전반적인 피부결이 균일한 편임")),
+                new OpenAiSkinResult.SkinTypeResult("DRY", List.of("SENSITIVE_TENDENCY")),
+                new OpenAiSkinResult.SkinAgeAnalysis(29,
+                        axis(72, "볼과 이마의 피부결이 균일한 편임"),
+                        axis(76, "턱선의 처짐이 뚜렷하지 않음"),
+                        axis(28, "이마에 얕은 선이 일부 보임"),
+                        axis(58, "볼 주변 톤이 다소 고르지 않음"),
+                        axis(42, "코 주변 모공이 일부 보임"),
+                        axis(35, "볼에 작은 색소가 일부 보임"),
+                        axis(60, "코 주변에 붉은기가 뚜렷함"),
+                        axis(30, "작은 트러블 흔적이 일부 보임"),
+                        "피부결과 탄력이 좋은 편이고 눈에 띄는 주름도 많지 않아 비교적 젊은 피부 외관으로 보여요. "
+                                + "다만 볼 주변의 붉은기와 톤 불균일이 피부 나이를 조금 높이는 요인으로 보여요."),
                 "피부 장벽은 양호하지만 건조하고 홍조가 관찰됩니다.");
+    }
+
+    private static OpenAiSkinResult.Axis axis(int score, String evidence) {
+        return new OpenAiSkinResult.Axis(score, List.of(evidence));
     }
 
     @Override
