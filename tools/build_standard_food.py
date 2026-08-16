@@ -52,6 +52,11 @@ DISH_CATEGORIES = {
 # FRIED 가 되어, AI 가 맞게 본 BOILED 를 덮어쓰고 없던 R07 감점이 생긴다.
 COOKING_RULES = [
     ('FRIED', ['튀김', '까스', '가스', '강정', '탕수', '프라이', '후라이', '전$']),
+    # 이름만 봐서는 국물인지 아닌지 모르는 면류. BOILED 보다 먼저 걸러 낸다 —
+    # '면'·'국' 부분일치에 걸려 비빔면·막국수가 국물 요리가 되면, 서버가 국물 없는
+    # 음식에 "국물을 절반만 남기세요" 라고 말하고 HALVE_SOUP 시뮬레이션까지 붙는다.
+    # ETC 는 "모르겠다"라서 사진을 본 AI 의 답이 그대로 남는다.
+    ('ETC', ['비빔', '쫄면', '볶음면', '냉면', '막국수', '파스타', '스파게티']),
     ('BOILED', ['국', '탕', '찌개', '전골', '죽', '면', '스프', '수프', '조림', '라면']),
     ('STEAMED', ['찜', '수육', '만두']),
     ('GRILLED', ['구이', '볶', '부침', '적', '갈비', '스테이크']),
@@ -93,11 +98,19 @@ TAG_RULES = [
     ('VITAMIN_A', ['당근', '시금치', '단호박', '부추', '깻잎']),
     ('ANTIOXIDANT', ['토마토', '녹차', '블루베리', '베리', '가지', '양파']),
     ('DAIRY', ['우유', '치즈', '크림', '버터', '요거트', '요구르트']),
-    ('GLUTEN', ['밀가루', '빵', '面', '국수', '라면', '우동', '파스타', '스파게티', '만두', '수제비']),
+    ('GLUTEN', ['밀가루', '빵', '국수', '라면', '우동', '파스타', '스파게티', '만두', '수제비']),
     ('CAFFEINE', ['커피', '홍차', '녹차', '콜라']),
     ('ALCOHOL', ['소주', '맥주', '막걸리', '와인', '청주']),
     ('HIGH_GI', ['흰쌀', '백미', '떡', '설탕', '시럽', '감자', '옥수수']),
 ]
+
+# 1인분으로 볼 수 없는 값의 상한. `식품중량` 이 2인분 밀키트 포장 무게인 행이 섞여
+# 있어서(라멘 1,519kcal·나트륨 7,127mg), 환산하면 한 끼가 아니라 한 봉지가 된다.
+# 그런 항목은 **버린다** — 룰이 나트륨을 1500 과 비교하는데 7,127 이면 감점이 상한에
+# 붙박이고, 그게 사진과 무관하게 매번 같은 값이라 사용자도 로그도 알아챌 수 없다.
+# 표준값이 없으면 AI 추정치로 떨어질 뿐이고, 그쪽이 흔들려도 실제에 가깝다.
+SERVING_MAX_KCAL = 1200
+SERVING_MAX_SODIUM_MG = 4000
 
 NUTRIENT_COLUMNS = {
     'caloriesKcal': '에너지(kcal)',
@@ -196,6 +209,12 @@ def tags(name):
     return found or ['ETC']
 
 
+def is_one_serving(record):
+    """한 끼로 볼 수 있는 값인가. 밀키트 포장 무게를 1인분으로 환산한 행을 걸러 낸다."""
+    return (record.get('caloriesKcal') or 0) <= SERVING_MAX_KCAL \
+        and (record.get('sodiumMg') or 0) <= SERVING_MAX_SODIUM_MG
+
+
 def median_of(entries, key):
     values = [entry[key] for entry in entries if key in entry]
     return round(statistics.median(values), 1) if values else None
@@ -247,6 +266,10 @@ def main(csv_path, json_path):
     exact = [aggregate(name, *buckets) for name, buckets in sorted(exact_groups.items())]
     base = [aggregate(name, *buckets) for name, buckets in sorted(base_groups.items())]
 
+    dropped = [record['name'] for record in exact + base if not is_one_serving(record)]
+    exact = [record for record in exact if is_one_serving(record)]
+    base = [record for record in base if is_one_serving(record)]
+
     # 수동 보충은 공공데이터가 이긴다 — 언젠가 원본에 연어구이가 생기면 그쪽을 쓴다.
     covered = {record['name'] for record in exact}
     for manual in MANUAL_FOODS:
@@ -275,10 +298,11 @@ def main(csv_path, json_path):
     with io.open(json_path, 'w', encoding='utf-8') as handle:
         json.dump(payload, handle, ensure_ascii=False, separators=(',', ':'))
 
-    measured = sum(1 for r in exact + base if r['measured'])
+    measured_count = sum(1 for record in exact + base if record['measured'])
     print(f'원본 {len(rows)}건 → 요리 {len(dishes)}건')
     print(f'exact {len(exact)}종 · base {len(base)}종')
-    print(f'실측 기반 {measured}종 / 산출 기반 {len(exact) + len(base) - measured}종')
+    print(f'실측 기반 {measured_count}종 / 산출 기반 {len(exact) + len(base) - measured_count}종')
+    print(f'1인분으로 볼 수 없어 버린 항목 {len(dropped)}종: {", ".join(sorted(dropped)[:10])} …')
 
 
 if __name__ == '__main__':

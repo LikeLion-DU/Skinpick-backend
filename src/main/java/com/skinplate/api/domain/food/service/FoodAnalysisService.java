@@ -15,6 +15,7 @@ import com.skinplate.api.global.image.ImageEncoder;
 import com.skinplate.api.global.image.ImageEncoder.EncodedImage;
 import com.skinplate.api.infra.openai.VisionClient;
 import com.skinplate.api.infra.openai.dto.OpenAiFoodResult;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -47,6 +48,16 @@ public class FoodAnalysisService {
 
     private final VisionClient visionClient;
     private final ObjectMapper objectMapper;
+
+    /**
+     * 표준 음식 테이블을 기동 때 적재한다. 놔두면 첫 요청이 316KB 파싱을 물게 되는데,
+     * 그 첫 요청이 기록 저장이면 `findForUpdate` 로 잡은 행 잠금과 커넥션을 쥔 채로
+     * 파일을 읽는다. 리소스가 깨져 있어도 사용자가 아니라 기동 로그에서 먼저 드러난다.
+     */
+    @PostConstruct
+    void loadStandardFoodTable() {
+        StandardFoodTable.size();
+    }
 
     /** 트랜잭션 밖에서 부른다. */
     public OpenAiFoodResult recognize(MultipartFile image) {
@@ -104,9 +115,19 @@ public class FoodAnalysisService {
                 .orElseGet(() -> toCookingMethod(aiResult.cookingMethod()));
         boolean spicy = standard.map(StandardFood::spicy).orElse(false) || aiResult.spicy();
 
-        standard.ifPresent(food -> log.debug(
-                "표준 음식 적용: {} → {} ({}, 표본 {}건)",
-                foodName, food.name(), food.measured() ? "실측" : "산출", food.sampleCount()));
+        // 이름이 그대로면 debug 로 충분하지만, 다른 이름의 값으로 바뀌었다면 그게 요점이다.
+        // "돈코츠 라멘" 이 "라멘" 값을 받은 걸 배포 서버(기본 INFO)에서 볼 수 없으면,
+        // 점수가 사진과 무관한 숫자로 계산돼도 사용자도 로그도 알 방법이 없다.
+        standard.ifPresent(food -> {
+            String message = "표준 음식 적용: {} → {} ({}, 표본 {}건)";
+            if (food.name().equals(foodName)) {
+                log.debug(message, foodName, food.name(),
+                        food.measured() ? "실측" : "산출", food.sampleCount());
+            } else {
+                log.info(message, foodName, food.name(),
+                        food.measured() ? "실측" : "산출", food.sampleCount());
+            }
+        });
 
         FoodAnalysis food = FoodAnalysis.create(
                 user,

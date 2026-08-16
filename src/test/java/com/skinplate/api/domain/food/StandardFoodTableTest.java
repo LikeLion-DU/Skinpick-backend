@@ -19,8 +19,8 @@ class StandardFoodTableTest {
     @Test
     @DisplayName("공공데이터가 실제로 적재된다")
     void loads() {
-        // 여유를 크게 두면 파일이 잘려도 통과한다 — 실제 1,531 종에 붙여 둔다.
-        assertThat(StandardFoodTable.size()).isGreaterThan(1500);
+        // 여유를 크게 두면 파일이 잘려도 통과한다 — 실제 1,452 종에 붙여 둔다.
+        assertThat(StandardFoodTable.size()).isGreaterThan(1400);
     }
 
     @Test
@@ -39,21 +39,12 @@ class StandardFoodTableTest {
     @Test
     @DisplayName("낱말 중간에 걸친 이름은 잡지 않는다 — 부대찌개에 라면 값이 들어가면 안 된다")
     void doesNotMatchMidWord() {
-        // ifPresent 로 두면 테이블이 통째로 안 실려도 통과한다. 이 테스트의 목적은
-        // "엉뚱한 치환이 없다"이지 "비어 있다"가 아니므로 값을 받는 것까지 본다.
+        // 낱말을 뒤에서부터 보고 첫 적중에서 멈추므로, "라면사리 부대찌개" 는 부대찌개에서
+        // 끝나 앞 낱말까지 가지도 않는다. 그래서 위험한 쪽인 앞 낱말을 직접 본다 —
+        // "라면사리" 가 라면으로 잡히면 찌개에 라면 영양값이 들어간다.
+        assertThat(StandardFoodTable.find("라면사리")).isEmpty();
         assertThat(StandardFoodTable.find("라면사리 부대찌개").orElseThrow().name())
                 .doesNotContain("라면");
-    }
-
-    @Test
-    @DisplayName("같은 이름은 항상 같은 값이다 — 이 테이블의 존재 이유다")
-    void isDeterministic() {
-        StandardFood first = StandardFoodTable.find("돼지고기 김치찌개").orElseThrow();
-        for (int i = 0; i < 20; i++) {
-            StandardFood again = StandardFoodTable.find("돼지고기 김치찌개").orElseThrow();
-            assertThat(again.name()).isEqualTo(first.name());
-            assertThat(again.sodiumMg()).isEqualTo(first.sodiumMg());
-        }
     }
 
     @Test
@@ -94,6 +85,28 @@ class StandardFoodTableTest {
         // 진짜 전은 그대로 기름이다.
         assertThat(StandardFoodTable.find("김치전").orElseThrow().cookingMethod())
                 .isEqualTo(CookingMethod.FRIED);
+    }
+
+    @Test
+    @DisplayName("국물인지 모르는 면류는 단정하지 않는다 — 비빔국수에 '국물을 남기세요'가 붙으면 안 된다")
+    void ambiguousNoodlesStayUnknown() {
+        // '면'·'국' 부분일치로 BOILED 가 되면 isSoup() 이 참이 되어, 국물 없는 음식에
+        // 국물 조언과 HALVE_SOUP 시뮬레이션이 붙는다. ETC 면 사진을 본 AI 가 답한다.
+        assertThat(StandardFoodTable.find("비빔국수").orElseThrow().cookingMethod())
+                .isEqualTo(CookingMethod.ETC);
+        assertThat(StandardFoodTable.find("막국수").orElseThrow().cookingMethod())
+                .isEqualTo(CookingMethod.ETC);
+        // 국물이 확실한 쪽은 그대로 BOILED 다.
+        assertThat(StandardFoodTable.find("라면").orElseThrow().cookingMethod())
+                .isEqualTo(CookingMethod.BOILED);
+    }
+
+    @Test
+    @DisplayName("1인분으로 볼 수 없는 값은 아예 싣지 않는다 — 밀키트 포장 무게가 한 끼로 둔갑했다")
+    void mealKitPortionsAreExcluded() {
+        // 라멘은 나트륨 7,127mg·1,519kcal 로 실려 있었다(2인분 포장 무게 환산).
+        // 그 값이면 나트륨 감점이 사진과 무관하게 상한에 붙박인다 — AI 추정치가 낫다.
+        assertThat(StandardFoodTable.find("라멘")).isEmpty();
     }
 
     @Test

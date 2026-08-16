@@ -45,11 +45,11 @@ public final class StandardFoodTable {
 
     private static final String RESOURCE = "food/standard-food.json";
 
-    /** 정확한 이름 → 항목. 완전 일치만 본다. */
-    private static final Map<String, StandardFood> EXACT = new HashMap<>();
-
-    /** 이름 → 항목. 낱말의 접미사를 긴 쪽부터 조회하므로 순서에 기대지 않는다. */
-    private static final Map<String, StandardFood> BASE = new HashMap<>();
+    /**
+     * 이름 → 항목. exact 와 base 를 한 통에 담는다 — 조회가 완전 일치를 먼저 보고
+     * 그다음 낱말의 접미사를 긴 쪽부터 보므로, 둘을 갈라 둘 필요가 없다.
+     */
+    private static final Map<String, StandardFood> TABLE = new HashMap<>();
 
     static {
         load();
@@ -60,18 +60,16 @@ public final class StandardFoodTable {
         try (InputStream stream = new ClassPathResource(RESOURCE).getInputStream()) {
             JsonNode root = mapper.readTree(stream);
 
-            for (JsonNode node : root.path("exact")) {
-                parse(node).ifPresent(food -> EXACT.put(food.name(), food));
-            }
+            // 기본명을 먼저, 정확한 이름을 나중에 — 같은 이름이 양쪽에 있으면
+            // 더 구체적인 exact 쪽이 남는다.
             for (JsonNode node : root.path("base")) {
-                parse(node).ifPresent(food -> BASE.put(food.name(), food));
+                parse(node).ifPresent(food -> TABLE.put(food.name(), food));
             }
-            // exact 에만 있는 이름도 낱말 매칭 대상이어야 한다. "김치찌개" 가
-            // exact 에 있으면 base 에서는 빠져 있는데(중복 제거), 그러면
-            // "돼지고기 김치찌개" 가 낱말 매칭에서 갈 곳을 잃는다.
-            BASE.putAll(EXACT);
+            for (JsonNode node : root.path("exact")) {
+                parse(node).ifPresent(food -> TABLE.put(food.name(), food));
+            }
 
-            log.info("표준 음식 테이블 적재: 정확 {}종 · 전체 {}종", EXACT.size(), BASE.size());
+            log.info("표준 음식 테이블 적재: {}종", TABLE.size());
         } catch (Exception e) {
             // 테이블이 없어도 앱은 떠야 한다. AI 추정치로 떨어질 뿐이다.
             // IOException 만 잡으면 나머지는 ExceptionInInitializerError 로 올라가고,
@@ -160,7 +158,7 @@ public final class StandardFoodTable {
 
         String trimmed = foodName.trim();
 
-        StandardFood exact = EXACT.get(trimmed);
+        StandardFood exact = TABLE.get(trimmed);
         if (exact != null) return Optional.of(exact);
 
         // **뒤 낱말부터 본다.** 한국어 음식 이름은 핵심 낱말이 끝에 온다 —
@@ -173,15 +171,15 @@ public final class StandardFoodTable {
             // 먼저 나오므로, 모든 찌개가 같은 값을 받는 일이 없다.
             String word = words[i];
             for (int start = 0; start < word.length(); start++) {
-                StandardFood hit = BASE.get(word.substring(start));
+                StandardFood hit = TABLE.get(word.substring(start));
                 if (hit != null) return Optional.of(hit);
             }
         }
         return Optional.empty();
     }
 
-    /** 조회 가능한 이름의 수. BASE 가 EXACT 를 포함하므로 이쪽이 전부다. */
+    /** 조회 가능한 이름의 수. 기동 로그와 적재 테스트가 본다. */
     public static int size() {
-        return BASE.size();
+        return TABLE.size();
     }
 }
