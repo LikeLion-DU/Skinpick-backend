@@ -22,12 +22,16 @@ public record OpenAiSkinResult(
         SkinAgeAnalysis skinAgeAnalysis,
         String summary
 ) {
-    /** 지표별 관찰 근거. 지표당 최대 2개 — 개수는 Backend 가 자른다. */
+    /** 지표별 관찰 근거. 지표당 최대 2개 — 개수와 길이는 Backend 가 자른다. */
     public record MetricEvidence(List<String> hydration,
                                  List<String> oil,
                                  List<String> redness,
                                  List<String> trouble,
-                                 List<String> barrier) {}
+                                 List<String> barrier) {
+
+        /** 확장 필드가 없던 기록을 읽을 때 쓴다. 조회마다 새로 만들 이유가 없다. */
+        public static final MetricEvidence EMPTY = new MetricEvidence(null, null, null, null, null);
+    }
 
     /**
      * enum 이 아니라 String 으로 받는다. 스키마가 값을 강제하지만 그건 OpenAI 쪽 약속이고,

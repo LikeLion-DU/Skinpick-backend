@@ -2255,6 +2255,30 @@ public class Recommendation extends BaseTimeEntity {
       "trouble": 25,
       "barrier": 78
     },
+    "metricDetails": [
+      { "key": "hydration", "score": 38, "level": "CAUTION", "evidence": ["볼과 입가에 부분적인 각질이 보임"] },
+      { "key": "oil",       "score": 52, "level": "NORMAL",  "evidence": ["T존에 중간 정도의 광택이 보임"] },
+      { "key": "redness",   "score": 64, "level": "CAUTION", "evidence": ["코와 볼 주변에 붉은기가 뚜렷함"] },
+      { "key": "trouble",   "score": 25, "level": "GOOD",    "evidence": ["작은 융기가 소수만 보임"] },
+      { "key": "barrier",   "score": 78, "level": "GOOD",    "evidence": ["전반적인 피부결이 균일한 편임"] }
+    ],
+    "skinType": {
+      "primary": "DRY",
+      "traits": ["SENSITIVE_TENDENCY"]
+    },
+    "skinAge": {
+      "estimatedSkinAge": 29,
+      "axes": [
+        { "key": "skinTexture",  "score": 72, "level": "GOOD",   "evidence": ["볼과 이마의 피부결이 균일한 편임"] },
+        { "key": "elasticity",   "score": 76, "level": "GOOD",   "evidence": ["턱선의 처짐이 뚜렷하지 않음"] },
+        { "key": "wrinkles",     "score": 28, "level": "GOOD",   "evidence": ["이마에 얕은 선이 일부 보임"] },
+        { "key": "skinTone",     "score": 58, "level": "NORMAL", "evidence": ["볼 주변 톤이 다소 고르지 않음"] },
+        { "key": "pores",        "score": 42, "level": "NORMAL", "evidence": ["코 주변 모공이 일부 보임"] },
+        { "key": "pigmentation", "score": 35, "level": "GOOD",   "evidence": ["볼에 작은 색소가 일부 보임"] },
+        { "key": "blemishMarks", "score": 30, "level": "GOOD",   "evidence": ["작은 트러블 흔적이 일부 보임"] }
+      ],
+      "assessment": "피부결과 탄력이 좋은 편이고 눈에 띄는 주름도 많지 않아 비교적 젊은 피부 외관으로 보여요."
+    },
     "summary": "피부 장벽은 양호하지만 건조하고 홍조가 관찰됩니다.",
     "highlights": [
       { "label": "피부 장벽 양호", "status": "GOOD" },
@@ -2277,13 +2301,27 @@ public class Recommendation extends BaseTimeEntity {
 >
 > `observed`는 AI에게 묻지 않는다. 5개 지표에서 **규칙으로 도출**한다(§4.4.1). 같은 지표면 항상 같은 타입이 나와야 갭 코멘트도 재현 가능하다. **이 값은 DB에 저장하지 않는다** — 지표에서 언제든 다시 계산되는 파생값이라 저장하면 규칙을 바꿨을 때 과거 데이터와 어긋난다.
 
+> **`skinType` 과 `skinTypeGap.observed` 는 서로 다른 값이다.** `skinType` 은 AI 가 사진에서 읽은 것이고, `observed` 는 위 규칙 도출값이다. 둘이 갈리는 것은 오류가 아니다 — 갭 카드는 계속 규칙값을 쓰고, 백엔드는 명백한 모순일 때 경고 로그만 남긴다. **재분류하지 않는다.**
+>
+> **`level` 은 AI 가 아니라 Backend 가 만든다.** 방향을 "높을수록 좋음"으로 맞춘 점수에 `SEVERE(0~20) · CAUTION(21~40) · NORMAL(41~60) · GOOD(61~80) · EXCELLENT(81~100)` 를 적용한다. 그래서 `oil: 52` 가 `NORMAL`(정렬 48)이고 `trouble: 25` 가 `GOOD`(정렬 75)이다. **`score` 는 뒤집지 않은 원값이므로 바 길이는 이 값으로 그린다.**
+>
+> **`skinAge.axes` 는 7개다.** AI 는 8축(+`redness`)을 평가하지만 응답에는 넣지 않는다 — `metricDetails` 에 이미 `redness` 가 있어 둘 다 내리면 화면에 붉은기 숫자가 둘이 되고, 값이 다를 때 사용자가 어느 쪽을 믿을지 알 수 없다. AI 판단과 `assessment` 근거에는 그대로 반영되고 원본은 `raw_ai_response` 에 남는다.
+>
+> **`estimatedSkinAge` 는 Skin Score 계산에 들어가지 않는다.** 실제 생물학적 나이의 측정값이 아니라 사진 기반 외관 추정이며, 앱은 "사진 속 피부결, 주름, 탄력, 피부톤 등을 종합한 AI 추정값입니다"를 함께 띄운다.
+>
+> **`metricDetails` 는 `metrics` 를 대체하지 않는다.** `metrics` 는 기존 계약 그대로 남는다. `skinType` · `skinAge` 는 이 기능 이전에 저장된 분석에서는 키가 생략되고, `metricDetails[].evidence` 는 빈 배열이 된다.
+
 **처리 흐름**
 
 ```
 세 장 각각 검증(매직바이트) → 각각 Base64 → OpenAI Vision 1회 (Structured Output)
-     → 5개 지표 수신 → SkinScoreCalculator로 종합 점수 산출
-     → highlights 생성 → (선언 타입이 있으면) skinTypeGap 생성
-     → DB 저장 → 응답
+     → 5개 지표 · 지표별 근거 · 피부 타입 · 피부 나이 8축 수신
+     → SkinScoreCalculator로 종합 점수 산출 (나이는 여기 안 들어간다)
+     → level 산출 · highlights 생성 · (선언 타입이 있으면) skinTypeGap 생성
+     → DB 저장 (AI 원본은 raw_ai_response 에 통째로) → 응답
+
+GET /latest · GET /{id} 는 raw_ai_response 를 되읽어 근거·타입·나이를 복원한다.
+지표에서 재계산할 수 없는 값이라 파생값 재계산 규칙(§14.3 ⑤)의 예외다.
 ```
 
 ---
@@ -2715,25 +2753,21 @@ public record MeResponse(
 public record SkinAnalysisResponse(
         Long skinAnalysisId,
         int skinScore,
-        SkinMetricsDto metrics,
+        SkinMetricsDto metrics,               // 기존 계약 그대로. S05 의 지표 바가 읽는다
+        List<ScoredItemDto> metricDetails,    // 같은 5개에 등급과 관찰 근거를 붙인 것
+        SkinTypeDto skinType,                 // AI 가 읽은 타입. 없으면 null → 키 생략
+        SkinAgeDto skinAge,                   // 예전 분석이면 null → 키 생략
         String summary,
         List<HighlightDto> highlights,
-        SkinTypeGapDto skinTypeGap,      // 선언 타입이 없으면 null → 키 생략
+        SkinTypeGapDto skinTypeGap,           // 선언 타입이 없으면 null → 키 생략
         LocalDateTime analyzedAt
 ) {
     public static SkinAnalysisResponse from(SkinAnalysis e,
+                                            List<ScoredItemDto> metricDetails,
+                                            SkinTypeDto skinType,
+                                            SkinAgeDto skinAge,
                                             List<HighlightDto> highlights,
-                                            SkinTypeGapDto gap) {
-        return new SkinAnalysisResponse(
-                e.getId(),
-                e.getSkinScore(),
-                SkinMetricsDto.from(e.getMetrics()),
-                e.getSummary(),
-                highlights,
-                gap,
-                e.getCreatedAt()
-        );
-    }
+                                            SkinTypeGapDto gap) { ... }
 }
 
 public record SkinMetricsDto(int hydration, int oil, int redness, int trouble, int barrier) {
@@ -2744,7 +2778,31 @@ public record SkinMetricsDto(int hydration, int oil, int redness, int trouble, i
 }
 
 public record HighlightDto(String label, String status) {}   // GOOD / WARN / CAUTION
+
+/**
+ * 점수 하나 + 등급 + 관찰 근거. 피부 상태 5지표와 피부 나이 7축이 화면에서 같은
+ * 모양(바 + 뱃지 + 한 줄)이라 DTO 를 하나만 둔다.
+ *
+ * score 는 뒤집지 않은 원값이다 — 바 길이는 이 값으로 그린다.
+ * level 은 방향을 맞춘 뒤 Backend 가 계산한다. AI 는 등급을 반환하지 않는다.
+ */
+public record ScoredItemDto(String key, int score, SkinLevel level, List<String> evidence) {}
+
+/** 0~20 SEVERE · 21~40 CAUTION · 41~60 NORMAL · 61~80 GOOD · 81~100 EXCELLENT */
+public enum SkinLevel { SEVERE, CAUTION, NORMAL, GOOD, EXCELLENT }
+
+/** primary 는 DRY · NORMAL · OILY · COMBINATION 만. SENSITIVE 는 traits 쪽이다 */
+public record SkinTypeDto(SkinType primary, List<SkinTrait> traits) {}
+
+public enum SkinTrait { DEHYDRATED, OILY_T_ZONE, SENSITIVE_TENDENCY, TROUBLE_TENDENCY }
+
+/** axes 는 7개다 — AI 는 redness 도 평가하지만 응답에는 넣지 않는다(§14.3) */
+public record SkinAgeDto(int estimatedSkinAge, List<ScoredItemDto> axes, String assessment) {}
 ```
+
+> **`ScoredItemDto` 를 5지표와 나이 축이 공유한다.** 둘로 나누면 등급 계산이 두 벌이 되고, 한쪽만 고쳐지는 날이 온다.
+>
+> **`evidence` 는 개수와 길이를 Backend 가 자른다** — 지표당 2개 · 나이 축당 1개 · 문장당 60자. OpenAI strict 스키마가 `maxItems` 를 지원하지 않아 프롬프트로만 지시되기 때문이다. `assessment` 도 300자에서 자른다.
 
 ### 15.5 Skin Plate DTO
 

@@ -13,6 +13,7 @@ import com.skinplate.api.domain.skin.repository.SkinAnalysisRepository;
 import com.skinplate.api.domain.user.entity.AppUser;
 import com.skinplate.api.domain.user.entity.SkinType;
 import com.skinplate.api.domain.user.repository.AppUserRepository;
+import com.skinplate.api.global.common.Texts;
 import com.skinplate.api.global.exception.BusinessException;
 import com.skinplate.api.global.exception.ErrorCode;
 import com.skinplate.api.global.image.ImageEncoder;
@@ -43,6 +44,9 @@ public class SkinAnalysisService {
 
     /** summary 컬럼이 VARCHAR(300) 이다. */
     private static final int SUMMARY_MAX_LENGTH = 300;
+
+    /** ageAssessment 는 DB 컬럼이 아니라 화면 상한이다. summary 와 같은 값으로 맞춘다. */
+    private static final int ASSESSMENT_MAX_LENGTH = 300;
 
     /**
      * evidence 개수 상한. 스키마로는 못 막는다 — strict 모드에 maxItems 가 없다.
@@ -170,8 +174,8 @@ public class SkinAnalysisService {
      */
     private List<ScoredItemDto> metricDetails(SkinMetrics metrics, OpenAiSkinResult detail) {
         OpenAiSkinResult.MetricEvidence found = detail == null ? null : detail.metricEvidence();
-        OpenAiSkinResult.MetricEvidence evidence = found != null ? found
-                : new OpenAiSkinResult.MetricEvidence(null, null, null, null, null);
+        OpenAiSkinResult.MetricEvidence evidence =
+                found != null ? found : OpenAiSkinResult.MetricEvidence.EMPTY;
 
         return List.of(
                 ScoredItemDto.of("hydration", metrics.getHydration(), false, evidence.hydration(), METRIC_EVIDENCE_MAX),
@@ -218,7 +222,10 @@ public class SkinAnalysisService {
 
         int estimated = Math.max(MIN_SKIN_AGE, Math.min(MAX_SKIN_AGE, age.estimatedSkinAge()));
 
-        return new SkinAgeDto(estimated, List.copyOf(axes), age.ageAssessment());
+        // 프롬프트는 1~3문장을 지시하지만 그건 권고다. DB 컬럼에 안 닿아 500 이 나지 않으므로
+        // 폭주하면 화면만 조용히 깨진다 — summary 와 같은 상한으로 막는다.
+        return new SkinAgeDto(estimated, List.copyOf(axes),
+                Texts.truncate(age.ageAssessment(), ASSESSMENT_MAX_LENGTH));
     }
 
     private static void addAxis(List<ScoredItemDto> axes, String key,
@@ -227,11 +234,18 @@ public class SkinAnalysisService {
         axes.add(ScoredItemDto.of(key, axis.score(), higherIsWorse, axis.evidence(), AGE_EVIDENCE_MAX));
     }
 
+    /**
+     * 로그를 남기는 이유 — 프롬프트나 enum 이름을 바꾸면 그 값만 조용히 사라지고
+     * S05 의 칩이 통째로 안 그려진다. 그때 원인을 알 방법이 이 한 줄뿐이다.
+     * {@code FoodAnalysisService.toIngredientTag} · {@code StandardFoodTable.toCookingMethod}
+     * 도 같은 상황에서 같은 이유로 로그를 남긴다.
+     */
     private static <E extends Enum<E>> E parseEnum(Class<E> type, String name) {
         if (name == null) return null;
         try {
             return Enum.valueOf(type, name);
         } catch (IllegalArgumentException e) {
+            log.warn("AI 가 모르는 {} 값을 보냈다: {}", type.getSimpleName(), name);
             return null;
         }
     }
@@ -271,20 +285,12 @@ public class SkinAnalysisService {
     }
 
     /**
-     * 프롬프트의 "40자 이내"는 권고일 뿐이라 AI 가 길게 답할 수 있다.
-     * 300자를 넘기면 저장에서 터지는데, 그 시점엔 25초짜리 유료 호출이 이미 끝나 있어
-     * 되돌릴 방법이 없다. 잘라서라도 결과를 돌려준다.
+     * 프롬프트의 "1~3문장, 200자 이내"는 권고일 뿐이라 AI 가 길게 답할 수 있다.
+     * 300자를 넘기면 저장에서 터지는데(summary 컬럼이 VARCHAR(300)), 그 시점엔
+     * 유료 호출이 이미 끝나 있어 되돌릴 방법이 없다. 잘라서라도 결과를 돌려준다.
      */
     private String trimSummary(String summary) {
-        if (summary == null || summary.length() <= SUMMARY_MAX_LENGTH) return summary;
-
-        // 경계가 이모지 한가운데면 반쪽짜리 문자가 남고, Postgres 가 UTF-8 인코딩에서 거절한다.
-        // 막으려던 그 500 이 그대로 난다.
-        int end = Character.isHighSurrogate(summary.charAt(SUMMARY_MAX_LENGTH - 1))
-                ? SUMMARY_MAX_LENGTH - 1
-                : SUMMARY_MAX_LENGTH;
-
-        return summary.substring(0, end);
+        return Texts.truncate(summary, SUMMARY_MAX_LENGTH);
     }
 
     /** raw_ai_response 는 jsonb 다. 파싱된 결과를 다시 직렬화해 원본 형태로 남긴다. */

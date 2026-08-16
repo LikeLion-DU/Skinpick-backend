@@ -22,7 +22,7 @@ import reactor.util.retry.Retry;
 
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeoutException;
@@ -44,9 +44,11 @@ public class OpenAiVisionClient implements VisionClient {
     private static final int MAX_TOKENS = 800;          // 출력 폭주 방지
 
     /**
-     * 인사이트만 상한이 크다. 한국어 문장이 넷(summary + description ×3)이라 800 이 상한에
-     * 닿는데, 잘려서 실패하면 temperature 0.2 라 다시 불러도 같은 자리에서 또 잘린다 —
-     * 재시도로 회복되지 않는 실패다.
+     * 인사이트는 한국어 문장이 넷(summary + description ×3)이라 800 이 상한에 닿는다.
+     * 잘림은 재시도로 회복되지 않는 실패다 — 같은 입력이면 같은 자리에서 또 잘린다.
+     *
+     * gpt-5 계열에서는 reasoning 토큰이 이 상한을 같이 먹는다. 실측(effort=low)은
+     * 353 토큰(reasoning 169 + 본문 184)이고 effort=medium 에서도 668 이라 여유가 있다.
      */
     private static final int INSIGHT_MAX_TOKENS = 1200;
 
@@ -150,7 +152,9 @@ public class OpenAiVisionClient implements VisionClient {
                        List<Map<String, Object>> userContent, int maxTokens,
                        Duration callTimeout, Class<T> type) {
 
-        Map<String, Object> body = new LinkedHashMap<>(Map.of(
+        // HashMap 이다. Map.of 는 JVM 마다 순회 순서가 달라 LinkedHashMap 에 담아도
+        // 키 순서가 고정되지 않는다 — 보장하지 못하는 것을 보장하는 척하지 않는다.
+        Map<String, Object> body = new HashMap<>(Map.of(
                 "model", model,
                 "messages", List.of(
                         Map.of("role", "system", "content", system),
@@ -179,9 +183,9 @@ public class OpenAiVisionClient implements VisionClient {
                 // 타임아웃은 재시도하지 않는다. 재시도까지 하면 앱 타임아웃(32초)을 넘긴다.
                 .timeout(callTimeout)
                 // 429 만 재시도한다. 429 응답은 즉시 오므로 최악은 0.1 + 2 + callTimeout 이다.
-                // 음식·문장(25초)은 ≈27초로 앱 타임아웃(32초) 안이지만, 피부(30초)는 ≈32.1초라
-                // 429 가 한 번 끼면 앱이 먼저 끊는다 — 그 경우 AI_TIMEOUT 분기가 아니라 앱의
-                // 네트워크 오류로 보인다. 실기기에서 걸리면 앱을 35초로 올리거나 피부를 28초로 줄인다.
+                // 음식·문장(25초)은 ≈27초, 피부(28초)는 ≈30.1초로 둘 다 앱 타임아웃(32초) 안에
+                // 들어온다. 피부를 30초로 두면 32.1초가 되어 앱이 먼저 끊고, 그러면 AI_TIMEOUT
+                // 분기가 도달 불가가 된다 — 재시도 버튼 UX 가 통째로 죽는 자리다.
                 // 예산과 처리량 상한은 다른 축이고, 429 는 재시도가 유일한 정답인 에러다. (PRD §17.2)
                 .retryWhen(Retry.fixedDelay(1, Duration.ofSeconds(2))
                         .filter(error -> error instanceof WebClientResponseException.TooManyRequests)
@@ -214,10 +218,24 @@ public class OpenAiVisionClient implements VisionClient {
         return error;
     }
 
-    /** Structured Outputs 라도 본문은 choices[0].message.content 안의 문자열이다. */
+    /**
+     * Structured Outputs 라도 본문은 choices[0].message.content 안의 문자열이다.
+     *
+     * finish_reason 을 먼저 본다. 상한에서 잘린 응답은 content 가 빈 문자열로 오는데,
+     * 그러면 isTextual() 이 true 라 가드를 통과하고 파싱 단계에서 "No content to map" 이
+     * 된다 — 로그에는 빈 본문만 남아 "상한을 올려라"라는 유일한 신호가 사라진다.
+     * gpt-5 계열은 reasoning 토큰이 같은 상한을 갉아먹어 이 경로가 더 잘 열린다.
+     */
     private String extractContent(JsonNode response) {
+        String finishReason = response.path("choices").path(0).path("finish_reason").asText("");
+        if ("length".equals(finishReason)) {
+            log.warn("OpenAI 응답이 출력 상한에서 잘렸다 — max_tokens 를 올려야 한다: {}",
+                    response.path("usage"));
+            throw new OpenAiClientException(ErrorCode.AI_ANALYSIS_FAILED, null, response.toString());
+        }
+
         JsonNode content = response.path("choices").path(0).path("message").path("content");
-        if (content.isMissingNode() || !content.isTextual()) {
+        if (content.isMissingNode() || !content.isTextual() || content.asText().isBlank()) {
             log.warn("OpenAI 응답에서 content 를 찾지 못했다: {}", response);
             throw new OpenAiClientException(ErrorCode.AI_ANALYSIS_FAILED, null, response.toString());
         }

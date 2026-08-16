@@ -332,6 +332,67 @@ class SkinAnalysisServiceTest {
     }
 
     @Test
+    @DisplayName("뱃지와 등급이 같은 방향을 쓴다 — 한쪽만 뒤집히면 같은 줄에서 색이 엇갈린다")
+    void analyze_badgeAndLevelAgreeOnDirection() {
+        // 방향은 SkinMetrics 임계값 · SkinHighlightBuilder · metricDetails 세 곳에 따로 있다.
+        // 한 곳에서 유분 방향을 뒤집어도 아무것도 안 깨지는 구조라, 여기서 묶어 둔다.
+        givenUser(null);
+
+        // 다섯 지표가 전부 "나쁜" 쪽 극단 — 뱃지는 셋 다 CAUTION, 등급은 전부 SEVERE 여야 한다
+        givenSkinResult(metricsOnly(10, 90, 90, 90, 10));
+        SkinAnalysisResponse worst = analyzeThreePhotos();
+
+        assertThat(worst.metricDetails()).extracting(ScoredItemDto::level)
+                .containsOnly(SkinLevel.SEVERE);
+        assertThat(worst.highlights()).extracting(HighlightDto::status)
+                .containsOnly(HighlightDto.HighlightStatus.CAUTION);
+
+        // 반대 극단 — 뱃지는 전부 GOOD, 등급은 전부 EXCELLENT
+        givenSkinResult(metricsOnly(90, 10, 10, 10, 90));
+        SkinAnalysisResponse best = analyzeThreePhotos();
+
+        assertThat(best.metricDetails()).extracting(ScoredItemDto::level)
+                .containsOnly(SkinLevel.EXCELLENT);
+        assertThat(best.highlights()).extracting(HighlightDto::status)
+                .containsOnly(HighlightDto.HighlightStatus.GOOD);
+    }
+
+    @Test
+    @DisplayName("AI 타입이 지표와 어긋나도 재분류하지 않는다 — 경고만 남기고 값은 그대로 내린다")
+    void analyze_contradictingSkinTypeIsKeptNotReclassified() {
+        givenUser(SkinType.OILY);
+        // 수분 90 · 유분 10 인데 AI 가 OILY 라고 한다. 명백한 모순이다.
+        givenSkinResult(new OpenAiSkinResult(true, 90, 10, 10, 10, 90, null,
+                new OpenAiSkinResult.SkinTypeResult("OILY", List.of()), null, "요약"));
+
+        SkinAnalysisResponse response = analyzeThreePhotos();
+
+        // 값을 고치지 않는다 — 고치기 시작하면 규칙이 두 벌이 된다
+        assertThat(response.skinType().primary()).isEqualTo(SkinType.OILY);
+        // 갭 카드는 여전히 규칙에서 나온다 (PRD §14.3)
+        assertThat(response.skinTypeGap().observed()).isEqualTo(SkinType.NORMAL);
+    }
+
+    @Test
+    @DisplayName("근거가 길어도 잘라서 내린다 — DB 에 안 닿아 500 도 안 나고 화면만 깨진다")
+    void analyze_trimsOverlongEvidenceAndAssessment() {
+        givenUser(null);
+        givenSkinResult(new OpenAiSkinResult(true, 38, 52, 64, 25, 78,
+                new OpenAiSkinResult.MetricEvidence(
+                        List.of("가".repeat(400)), List.of(), List.of(), List.of(), List.of()),
+                null,
+                new OpenAiSkinResult.SkinAgeAnalysis(29,
+                        axis(72), axis(76), axis(28), axis(58), axis(42), axis(35), axis(60), axis(30),
+                        "나".repeat(900)),
+                "요약"));
+
+        SkinAnalysisResponse response = analyzeThreePhotos();
+
+        assertThat(response.metricDetails().get(0).evidence().get(0)).hasSize(60);
+        assertThat(response.skinAge().assessment()).hasSize(300);
+    }
+
+    @Test
     @DisplayName("확장 필드가 없던 시절의 기록도 조회된다 — 점수·지표·뱃지는 그대로 나온다")
     void getLatest_readsAnalysisSavedBeforeTheseFields() {
         AppUser user = givenUser(null);
@@ -397,6 +458,13 @@ class SkinAnalysisServiceTest {
 
     private static OpenAiSkinResult.Axis axis(int score) {
         return new OpenAiSkinResult.Axis(score, List.of("관찰 근거"));
+    }
+
+    /** 방향 검증용 — 확장 필드 없이 다섯 지표만 바꾼다. */
+    private static OpenAiSkinResult metricsOnly(int hydration, int oil, int redness,
+                                                int trouble, int barrier) {
+        return new OpenAiSkinResult(true, hydration, oil, redness, trouble, barrier,
+                null, null, null, "요약");
     }
 
     private AppUser givenUser(SkinType declaredSkinType) {

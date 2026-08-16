@@ -3203,19 +3203,28 @@ import java.util.List;
 public record SkinAnalysisResponse(
         Long skinAnalysisId,
         int skinScore,
-        SkinMetricsDto metrics,
+        SkinMetricsDto metrics,               // 기존 계약 그대로. S05 의 지표 바가 읽는다
+        List<ScoredItemDto> metricDetails,    // 같은 5개에 등급과 관찰 근거를 붙인 것
+        SkinTypeDto skinType,                 // AI 가 읽은 타입. 없으면 null → 키 생략
+        SkinAgeDto skinAge,                   // 예전 분석이면 null → 키 생략
         String summary,
         List<HighlightDto> highlights,
-        SkinTypeGapDto skinTypeGap,       // 선언 타입이 없으면 null → 키 생략
+        SkinTypeGapDto skinTypeGap,           // 선언 타입이 없으면 null → 키 생략
         LocalDateTime analyzedAt
 ) {
     public static SkinAnalysisResponse from(SkinAnalysis entity,
+                                            List<ScoredItemDto> metricDetails,
+                                            SkinTypeDto skinType,
+                                            SkinAgeDto skinAge,
                                             List<HighlightDto> highlights,
                                             SkinTypeGapDto skinTypeGap) {
         return new SkinAnalysisResponse(
                 entity.getId(),
                 entity.getSkinScore(),
                 SkinMetricsDto.from(entity.getMetrics()),
+                metricDetails,
+                skinType,
+                skinAge,
                 entity.getSummary(),
                 highlights,
                 skinTypeGap,
@@ -3223,6 +3232,73 @@ public record SkinAnalysisResponse(
     }
 }
 ```
+
+**`domain/skin/dto/ScoredItemDto.java`**
+
+피부 상태 5지표와 피부 나이 7축이 화면에서 같은 모양(바 + 뱃지 + 한 줄)이라 DTO 를 하나만 둔다. 둘로 나누면 등급 계산이 두 벌이 되고 한쪽만 고쳐지는 날이 온다.
+
+```java
+public record ScoredItemDto(String key, int score, SkinLevel level, List<String> evidence) {
+
+    /**
+     * @param score         AI 원값. 화면 바는 이 값으로 그린다 — 방향을 뒤집지 않는다
+     * @param higherIsWorse oil·redness·trouble·wrinkles·pores·pigmentation·blemishMarks 면 true
+     * @param maxEvidence   상태 지표 2개 · 나이 축 1개
+     */
+    public static ScoredItemDto of(String key, int score, boolean higherIsWorse,
+                                   List<String> evidence, int maxEvidence) {
+        int clamped = Math.max(0, Math.min(100, score));
+        int aligned = higherIsWorse ? 100 - clamped : clamped;
+        return new ScoredItemDto(key, clamped, SkinLevel.of(aligned), trim(evidence, maxEvidence));
+    }
+}
+```
+
+> **evidence 는 개수와 길이를 여기서 자른다.** OpenAI Structured Outputs 의 strict 모드는 `maxItems` 를 지원하지 않아 배열 길이를 스키마로 강제할 수 없다. 프롬프트로 지시하고(지표당 2개 · 축당 1개 · 30자), 지켜지지 않으면 잘라낸다 — 안 자르면 토큰 예산과 S05 레이아웃이 같이 무너진다. 문장 상한은 60자, `assessment` 는 300자다(`global/common/Texts.truncate`).
+
+**`domain/skin/entity/SkinLevel.java`**
+
+```java
+public enum SkinLevel {
+    SEVERE, CAUTION, NORMAL, GOOD, EXCELLENT;
+
+    /** alignedScore 는 반드시 "높을수록 좋음"으로 방향을 맞춘 값이다 */
+    public static SkinLevel of(int alignedScore) {
+        if (alignedScore <= 20) return SEVERE;      // SeverityCalculator 의 SEVERE(severity 80) 를 뒤집은 값
+        if (alignedScore <= 40) return CAUTION;     // SkinMetrics.DRY_THRESHOLD · BARRIER_WEAK_THRESHOLD
+        if (alignedScore <= 60) return NORMAL;      // SkinHighlightBuilder 의 GOOD 경계
+        if (alignedScore <= 80) return GOOD;        // SeverityCalculator.SEVERE_THRESHOLD
+        return EXCELLENT;
+    }
+}
+```
+
+> **AI 에게 등급을 묻지 않는다.** 물으면 같은 점수에 다른 등급이 붙는 날이 오고, 그때 화면은 "38점인데 EXCELLENT"를 그대로 그린다. Backend 가 만들면 UI 기준을 바꿔도 과거 응답을 다시 받을 필요가 없다. 경계는 새로 만들지 않고 위 세 곳에 이미 있는 값을 쓴다.
+
+**`domain/skin/dto/SkinTypeDto.java` · `domain/skin/entity/SkinTrait.java`**
+
+```java
+/** primary 는 DRY · NORMAL · OILY · COMBINATION 만. SENSITIVE 는 traits 쪽이다 */
+public record SkinTypeDto(SkinType primary, List<SkinTrait> traits) {}
+
+public enum SkinTrait { DEHYDRATED, OILY_T_ZONE, SENSITIVE_TENDENCY, TROUBLE_TENDENCY }
+```
+
+> **`skinTypeGap.observed` 와는 다른 값이다.** 그쪽은 `SkinType.observe(metrics)` 규칙 도출값이고(§1.12.2 · PRD §14.3), 이쪽은 AI 관찰이다. 둘이 갈리는 것은 오류가 아니라 정보다 — **갭 카드는 계속 규칙값을 쓰고 재분류하지 않는다.** 백엔드는 명백한 모순(유분 임계 미달인데 OILY 등)일 때 경고 로그만 남긴다.
+>
+> "수부지"를 primary 로 만들지 않는다. `COMBINATION` + `DEHYDRATED` 로 표현하면 primary 목록이 늘어나지 않는다.
+
+**`domain/skin/dto/SkinAgeDto.java`**
+
+```java
+public record SkinAgeDto(int estimatedSkinAge, List<ScoredItemDto> axes, String assessment) {}
+```
+
+> **`axes` 는 7개다.** AI 는 8축(skinTexture · elasticity · wrinkles · skinTone · pores · pigmentation · **redness** · blemishMarks)을 평가하지만 `redness` 는 응답에 넣지 않는다 — `metricDetails` 에 이미 있어 둘 다 내리면 화면에 붉은기 숫자가 둘이 되고, 값이 다를 때 사용자가 어느 쪽을 믿을지 알 수 없다. AI 판단과 `assessment` 근거에는 그대로 반영되고 원본은 `raw_ai_response` 에 남는다.
+>
+> **`estimatedSkinAge` 는 Skin Score 계산에 들어가지 않는다** (18~80). 생물학적 나이의 측정값이 아니라 사진 기반 외관 추정이다.
+>
+> **마이그레이션은 없다.** 근거·타입·나이는 지표에서 재계산할 수 없지만 AI 원본이 이미 `raw_ai_response` 에 통째로 들어가 있어 조회할 때 되읽는다. 확장 필드가 없던 시절의 기록은 `skinType`·`skinAge` 키가 생략되고 `evidence` 가 빈 배열이 되며, 점수·지표·뱃지는 그대로 나온다.
 
 ---
 
@@ -6556,7 +6632,7 @@ if (_consecutiveFailures >= 3) {
 |---|---|---|---|
 | `POST /auth/signup`<br>`POST /auth/login`<br>`POST /auth/test-login` | `AuthResponse` | `accessToken` · `tokenType` · `expiresIn` · `user{userId,email,nickname}` | `AuthResponseDto` |
 | `GET /auth/me`<br>`PATCH /auth/me` | `MeResponse` | `userId` · `email` · `nickname` · **`declaredSkinType`**(미선택 시 키 생략) · `skinConcerns[]` · `sleepPattern` · `stressLevel` · `exerciseHabit` · **`waterIntake`**(습관 4종 모두 미선택 시 키 생략) · **`isTestAccount`** · `joinedAt` | `MeResponseDto` |
-| `POST /skin/analyses`<br>`GET /skin/analyses/latest`<br>`GET /skin/analyses/{id}` | `SkinAnalysisResponse` | `skinAnalysisId` · `skinScore` · `metrics{5}` · `summary` · `highlights[{label,status}]` · **`skinTypeGap{declared,observed,matched,message}`**(미선택 시 키 생략) · `analyzedAt` | `SkinAnalysisDto` |
+| `POST /skin/analyses`<br>`GET /skin/analyses/latest`<br>`GET /skin/analyses/{id}` | `SkinAnalysisResponse` | `skinAnalysisId` · `skinScore` · `metrics{5}` · **`metricDetails[{key,score,level,evidence[]}]`** · **`skinType{primary,traits[]}`**(예전 분석이면 키 생략) · **`skinAge{estimatedSkinAge,axes[7],assessment}`**(예전 분석이면 키 생략) · `summary` · `highlights[{label,status}]` · **`skinTypeGap{declared,observed,matched,message}`**(미선택 시 키 생략) · `analyzedAt` | `SkinAnalysisDto` |
 | `POST /plates/analyze` | `PlateAnalysisResponse` | **`analysisToken`** · `skinAnalysisId` · `plateScore` · `baseScore` · `summary` · `food{...}`(**`foodAnalysisId` 없음**) · `feedbacks{good,caution,action}` · `appliedRules[]` — **`plateId`·`createdAt` 없음(저장 전)** | `PlateAnalysisDto` |
 | `POST /plates/records`<br>`GET /plates/{id}` | `SkinPlateResponse` | `plateId` · **`skinAnalysisId`** · `plateScore` · **`baseScore`** · `summary` · `food{...}` · `feedbacks{good,caution,action}` · `appliedRules[]` · **`aiTip`**(생성 실패 시 키 생략) · `createdAt` | `SkinPlateDto` |
 | `DELETE /plates/{id}` | — | 본문 없음(`204`) | 앱이 확인 창 뒤에 부른다 |
@@ -6585,6 +6661,8 @@ if (_consecutiveFailures >= 3) {
 | 4 | `expectedGain` ≠ `scoreDelta.abs()` | 서버 엔티티에 별도 컬럼, 앱 `ActionDto`에 별도 필드. **합산으로 "실행 후 점수"를 만들지 말 것** |
 | 5 | `PlateActionCode` · `SkinType` 이름 | 서버 enum 이름(`HALVE_SOUP`, `OILY` 등)을 앱이 그대로 보낸다. 한쪽만 이름을 바꾸면 400이 난다 |
 | 6 | `declaredSkinType` · `skinTypeGap` 이 **없는 것**과 **`UNKNOWN`인 것** | 앱 파서에 기본값을 두지 않는다. `null`이면 선택 칩, 값이 있으면 갭 카드 |
+| 7 | `skinType`(AI 관찰) 과 `skinTypeGap.observed`(규칙 도출) | **다른 값이고 갈릴 수 있다.** 갭 카드는 `observed` 를, 타입 칩은 `skinType` 을 쓴다 |
+| 8 | `skinType` · `skinAge` 키가 **없는 것** | 이 기능 이전에 저장된 분석이다. 두 카드를 통째로 숨긴다 — 빈 값으로 그리지 않는다 |
 | 7 | `days[].skinScore`(그 날 분석이 없으면 그 날 첫 Plate 채점 당시 점수로 폴백돼 **항상 존재**) ↔ `skinScoreTrend[]`(분석이 있는 날짜만) | 히스토리엔 점수가 있는데 트렌드 그래프엔 그 날짜가 없는 게 정상이다. 앱은 history 의 skinScore 를 "그날의 측정"이 아니라 **기준(baseline) 점수**로 라벨링한다 |
 
 ---

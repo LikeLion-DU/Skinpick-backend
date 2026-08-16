@@ -63,7 +63,10 @@ app:
     # 상한을 다 같이 올리면 음식 호출의 출력 폭주 방어까지 헐거워진다.
     # 1400 은 상한이지 목표가 아니다 — 실제 출력은 600~900 토큰을 노린다.
     skin-max-tokens: ${SKIN_MAX_TOKENS:1400}
-    skin-timeout-seconds: ${SKIN_TIMEOUT_SECONDS:30}
+    # 30 이 아니라 28 이다. 429 가 한 번 끼면 최악이 0.1 + 2 + 이 값이라,
+    # 30 이면 32.1 초로 클라이언트 상한(32초)을 넘겨 AI_TIMEOUT 분기가 도달 불가가 된다.
+    # 실측 지연이 3.5초라 2초를 깎아도 잃는 게 없다.
+    skin-timeout-seconds: ${SKIN_TIMEOUT_SECONDS:28}
     mock: ${AI_MOCK:false}
 
 springdoc:

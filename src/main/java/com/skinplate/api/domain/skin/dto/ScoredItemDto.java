@@ -1,6 +1,7 @@
 package com.skinplate.api.domain.skin.dto;
 
 import com.skinplate.api.domain.skin.entity.SkinLevel;
+import com.skinplate.api.global.common.Texts;
 
 import java.util.List;
 
@@ -34,12 +35,20 @@ public record ScoredItemDto(String key, int score, SkinLevel level, List<String>
         return new ScoredItemDto(key, clamped, SkinLevel.of(aligned), trim(evidence, maxEvidence));
     }
 
+    /**
+     * 개수와 <b>길이</b>를 같이 자른다. 개수만 막고 길이는 프롬프트를 믿으면, 400자짜리
+     * 근거 한 줄이 S05 의 행 높이를 무너뜨린다 — DB 컬럼에 닿지 않아 500 도 안 나고
+     * 화면만 조용히 깨진다. 프롬프트 지시는 30자이고 60은 그 두 배의 여유다.
+     */
+    private static final int EVIDENCE_MAX_LENGTH = 60;
+
     private static List<String> trim(List<String> evidence, int max) {
         if (evidence == null) return List.of();
 
         return evidence.stream()
                 .filter(sentence -> sentence != null && !sentence.isBlank())
                 .limit(max)
+                .map(sentence -> Texts.truncate(sentence, EVIDENCE_MAX_LENGTH))
                 .toList();
     }
 }
