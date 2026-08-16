@@ -30,8 +30,10 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * 피부 분석 흐름 조율. 점수·요약 뱃지·갭 코멘트는 이미 완성된 세 컴포넌트가 계산하고,
@@ -57,6 +59,13 @@ public class SkinAnalysisService {
 
     private static final int MIN_SKIN_AGE = 18;
     private static final int MAX_SKIN_AGE = 80;
+
+    /** 경향은 최대 둘까지만 보여준다. 넷을 다 이어 붙이면 label 이 한 줄을 넘는다. */
+    private static final int TRAITS_MAX = 2;
+
+    /** SkinAnalysisPrompt.SCHEMA 의 skinType.primary enum 과 같아야 한다. */
+    private static final Set<SkinType> SCHEMA_PRIMARY_TYPES =
+            EnumSet.of(SkinType.DRY, SkinType.NORMAL, SkinType.OILY, SkinType.COMBINATION);
 
     private final AppUserRepository userRepository;
     private final SkinAnalysisRepository skinAnalysisRepository;
@@ -189,14 +198,26 @@ public class SkinAnalysisService {
     private SkinTypeDto skinType(OpenAiSkinResult detail) {
         if (detail == null || detail.skinType() == null) return null;
 
+        // enum 통과만 보면 안 된다. SkinType 에는 UNKNOWN("잘 모르겠어요")과 SENSITIVE 도
+        // 있는데 전자는 사용자 미선택 표식이고 후자는 traits 쪽 개념이다. 스키마가 허용한
+        // 넷인지까지 봐야 "AI 가 관찰한 피부 타입: 잘 모르겠어요" 가 화면에 안 뜬다.
         SkinType primary = parseEnum(SkinType.class, detail.skinType().primary());
         if (primary == null) return null;
+        if (!SCHEMA_PRIMARY_TYPES.contains(primary)) {
+            log.warn("AI 가 스키마에 없는 피부 타입을 보냈다: {}", primary);
+            return null;
+        }
 
+        // 중복을 걷고 개수를 자른다 — evidence 와 같은 이유다. strict 스키마에 maxItems 가
+        // 없어서 넷이 다 오거나 같은 값이 두 번 올 수 있고, 그 label 을 앱이 그대로
+        // 그리므로 S05 칩 줄이 무너진다.
         List<String> names = detail.skinType().traits();
         List<SkinTrait> traits = names == null ? List.of()
                 : names.stream()
                        .map(name -> parseEnum(SkinTrait.class, name))
                        .filter(Objects::nonNull)
+                       .distinct()
+                       .limit(TRAITS_MAX)
                        .toList();
 
         return SkinTypeDto.of(primary, traits);
@@ -220,11 +241,20 @@ public class SkinAnalysisService {
         addAxis(axes, "pigmentation", age.pigmentation(), true);
         addAxis(axes, "blemishMarks", age.blemishMarks(), true);
 
-        int estimated = Math.max(MIN_SKIN_AGE, Math.min(MAX_SKIN_AGE, age.estimatedSkinAge()));
+        // 축이 하나도 없거나 나이가 범위 밖이면 통째로 없는 것으로 본다.
+        // clamp 만 하면 estimatedSkinAge 가 빠진 응답(0)이 18 로 둔갑해서, 화면에
+        // "피부 나이 18세" 라는 없는 데이터가 그려진다. skinType() 도 같은 이유로
+        // 쓸 수 없으면 null 을 돌려준다.
+        if (axes.isEmpty()
+                || age.estimatedSkinAge() < MIN_SKIN_AGE || age.estimatedSkinAge() > MAX_SKIN_AGE) {
+            log.warn("피부 나이 분석이 비어 있다 — 나이 {} · 축 {}개",
+                    age.estimatedSkinAge(), axes.size());
+            return null;
+        }
 
         // 프롬프트는 1~3문장을 지시하지만 그건 권고다. DB 컬럼에 안 닿아 500 이 나지 않으므로
         // 폭주하면 화면만 조용히 깨진다 — summary 와 같은 상한으로 막는다.
-        return new SkinAgeDto(estimated, List.copyOf(axes),
+        return new SkinAgeDto(age.estimatedSkinAge(), List.copyOf(axes),
                 Texts.truncate(age.ageAssessment(), ASSESSMENT_MAX_LENGTH));
     }
 

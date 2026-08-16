@@ -3449,7 +3449,7 @@ public class MockOpenAiVisionClient implements VisionClient {
 | 항목 | 토큰 | 비용 |
 |---|---|---|
 | 피부 분석 (얼굴 크롭 `high` ×3방향 + 확장 스키마) | 5,643 in / 554 out | $0.0018 |
-| 음식 분석 (`low` = 85) | 785 in / 500 out | $0.0008 |
+| 음식 분석 (`low` = 85) | 785 in / 215 out | $0.0004 |
 | 추천 문장 생성 (텍스트) | 600 in / 400 out | $0.0006 |
 | **플로우 1회** | | **$0.0032 (약 4.4원)** |
 
@@ -4113,7 +4113,7 @@ app:
     model: ${OPENAI_MODEL:gpt-5.6-luna}
     timeout-seconds: 25
     skin-max-tokens: ${SKIN_MAX_TOKENS:1400}
-    skin-timeout-seconds: ${SKIN_TIMEOUT_SECONDS:30}
+    skin-timeout-seconds: ${SKIN_TIMEOUT_SECONDS:28}   # 30 이면 429 재시도 시 클라이언트 상한(32초) 초과
     mock: ${AI_MOCK:false}
 
 spring:

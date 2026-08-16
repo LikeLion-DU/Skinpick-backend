@@ -40,4 +40,16 @@ class SkinLevelTest {
         assertThat(SkinLevel.of(oil)).isEqualTo(SkinLevel.EXCELLENT);       // 잘못 쓴 경우
         assertThat(SkinLevel.of(100 - oil)).isEqualTo(SkinLevel.SEVERE);    // 올바른 사용
     }
+
+    @Test
+    @DisplayName("뱃지와 정확히 40·60 에서 한 칸 어긋난다 — 의도한 것이라 여기 못 박는다")
+    void badgeBoundariesDifferByOnePointOnPurpose() {
+        // 뱃지(SkinHighlightBuilder)는 3단이고 등급은 5단이라 경계가 완전히 겹칠 수 없다.
+        // 정확히 60 이면 뱃지는 GOOD("수분 충분"), 등급은 NORMAL 이다. 굵기가 다른 두 눈금이지
+        // 어느 한쪽이 틀린 게 아니다 — 누가 "버그"로 보고 한쪽만 옮기면 화면이 깨진다.
+        assertThat(SkinLevel.of(60)).isEqualTo(SkinLevel.NORMAL);   // 뱃지는 >= 60 → GOOD
+        assertThat(SkinLevel.of(61)).isEqualTo(SkinLevel.GOOD);
+        assertThat(SkinLevel.of(40)).isEqualTo(SkinLevel.CAUTION);  // 뱃지는 >= 40 → WARN
+        assertThat(SkinLevel.of(41)).isEqualTo(SkinLevel.NORMAL);
+    }
 }

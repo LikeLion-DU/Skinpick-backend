@@ -5,6 +5,7 @@ import com.skinplate.api.domain.skin.dto.HighlightDto;
 import com.skinplate.api.domain.skin.dto.ScoredItemDto;
 import com.skinplate.api.domain.skin.dto.SkinAgeDto;
 import com.skinplate.api.domain.skin.dto.SkinAnalysisResponse;
+import com.skinplate.api.domain.skin.dto.SkinTypeDto;
 import com.skinplate.api.domain.skin.entity.SkinAnalysis;
 import com.skinplate.api.domain.skin.entity.SkinLevel;
 import com.skinplate.api.domain.skin.entity.SkinMetrics;
@@ -297,12 +298,59 @@ class SkinAnalysisServiceTest {
     }
 
     @Test
-    @DisplayName("피부 나이는 18~80 밖으로 나가지 않는다 — 스키마 minimum 을 믿지 않는다")
-    void analyze_clampsSkinAge() {
+    @DisplayName("피부 나이가 18~80 밖이면 카드를 통째로 뺀다 — 80 으로 깎으면 없는 값을 만든 게 된다")
+    void analyze_dropsSkinAgeOutsideSchemaRange() {
         givenUser(null);
-        givenSkinResult(withSkinAge(120));
 
-        assertThat(analyzeThreePhotos().skinAge().estimatedSkinAge()).isEqualTo(80);
+        // 스키마가 18~80 을 강제하지만 그건 OpenAI 쪽 약속이다. 벗어난 값이 오면
+        // 못 믿는 응답이라는 뜻이므로 깎아서 살리지 않는다 — skinType 과 같은 규칙이다.
+        givenSkinResult(withSkinAge(120));
+        assertThat(analyzeThreePhotos().skinAge()).isNull();
+
+        // estimatedSkinAge 가 아예 빠진 응답은 0 으로 역직렬화된다. 이걸 clamp 하면
+        // 화면에 "피부 나이 18세" 라는 없는 데이터가 그려진다.
+        givenSkinResult(withSkinAge(0));
+        assertThat(analyzeThreePhotos().skinAge()).isNull();
+    }
+
+    @Test
+    @DisplayName("나이 축이 하나도 없으면 카드를 뺀다 — 나이만 덩그러니 남지 않는다")
+    void analyze_dropsSkinAgeWithoutAxes() {
+        givenUser(null);
+        givenSkinResult(new OpenAiSkinResult(true, 38, 52, 64, 25, 78, null, null,
+                new OpenAiSkinResult.SkinAgeAnalysis(29,
+                        null, null, null, null, null, null, null, null, "설명만 있다"),
+                "요약"));
+
+        assertThat(analyzeThreePhotos().skinAge()).isNull();
+    }
+
+    @Test
+    @DisplayName("스키마에 없는 피부 타입은 버린다 — UNKNOWN 은 사용자 미선택 표식이지 관찰값이 아니다")
+    void analyze_dropsSkinTypeOutsideSchema() {
+        givenUser(null);
+        givenSkinResult(new OpenAiSkinResult(true, 38, 52, 64, 25, 78, null,
+                new OpenAiSkinResult.SkinTypeResult("UNKNOWN", List.of()), null, "요약"));
+
+        // enum 에는 있지만 스키마가 허용한 넷이 아니다. 통과시키면 S05 에
+        // "AI 가 관찰한 피부 타입: 잘 모르겠어요" 가 뜬다.
+        assertThat(analyzeThreePhotos().skinType()).isNull();
+    }
+
+    @Test
+    @DisplayName("경향은 중복을 걷고 둘까지만 남긴다 — label 을 앱이 그대로 그린다")
+    void analyze_dedupesAndCapsTraits() {
+        givenUser(null);
+        givenSkinResult(new OpenAiSkinResult(true, 38, 52, 64, 25, 78, null,
+                new OpenAiSkinResult.SkinTypeResult("DRY",
+                        List.of("DEHYDRATED", "DEHYDRATED", "SENSITIVE_TENDENCY", "TROUBLE_TENDENCY")),
+                null, "요약"));
+
+        SkinTypeDto skinType = analyzeThreePhotos().skinType();
+
+        assertThat(skinType.traits())
+                .containsExactly(SkinTrait.DEHYDRATED, SkinTrait.SENSITIVE_TENDENCY);
+        assertThat(skinType.label()).isEqualTo("건성 · 수분 부족 경향 · 민감 경향");
     }
 
     @Test

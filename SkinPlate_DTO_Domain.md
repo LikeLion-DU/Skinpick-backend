@@ -244,7 +244,7 @@ app:
     model: ${OPENAI_MODEL:gpt-5.6-luna}
     timeout-seconds: 25            # 음식·문장용. 타임아웃은 재시도 없음. 429만 1회 재시도
     skin-max-tokens: ${SKIN_MAX_TOKENS:1400}      # 피부는 5지표+8축+근거라 출력이 크다
-    skin-timeout-seconds: ${SKIN_TIMEOUT_SECONDS:30}
+    skin-timeout-seconds: ${SKIN_TIMEOUT_SECONDS:28}   # 30 이면 429 재시도 시 클라이언트 상한(32초) 초과
     mock: ${AI_MOCK:false}
 
 springdoc:
@@ -6667,8 +6667,9 @@ if (_consecutiveFailures >= 3) {
 | 4 | `expectedGain` ≠ `scoreDelta.abs()` | 서버 엔티티에 별도 컬럼, 앱 `ActionDto`에 별도 필드. **합산으로 "실행 후 점수"를 만들지 말 것** |
 | 5 | `PlateActionCode` · `SkinType` 이름 | 서버 enum 이름(`HALVE_SOUP`, `OILY` 등)을 앱이 그대로 보낸다. 한쪽만 이름을 바꾸면 400이 난다 |
 | 6 | `declaredSkinType` · `skinTypeGap` 이 **없는 것**과 **`UNKNOWN`인 것** | 앱 파서에 기본값을 두지 않는다. `null`이면 선택 칩, 값이 있으면 갭 카드 |
-| 7 | `skinType`(AI 관찰) 과 `skinTypeGap.observed`(규칙 도출) | **다른 값이고 갈릴 수 있다.** 갭 카드는 `observed` 를, 타입 칩은 `skinType` 을 쓴다 |
-| 8 | `skinType` · `skinAge` 키가 **없는 것** | 이 기능 이전에 저장된 분석이다. 두 카드를 통째로 숨긴다 — 빈 값으로 그리지 않는다 |
+| 8 | `skinType`(AI 관찰) 과 `skinTypeGap.observed`(규칙 도출) | **다른 값이고 갈릴 수 있다.** 갭 카드는 `observed` 를, 타입 칩은 `skinType` 을 쓴다 |
+| 9 | `skinType` · `skinAge` 키가 **없는 것** | 이 기능 이전에 저장된 분석이거나 AI 응답이 쓸 수 없는 경우다. 두 카드를 통째로 숨긴다 — 빈 값으로 그리지 않는다 |
+| 10 | `metricDetails[].level` 과 `highlights[].status` | 같은 지표라도 <b>등급은 5단, 뱃지는 3단</b>이라 경계가 정확히 40·60 인 한 점에서 한 칸 어긋난다. 의도된 것이고, 앱은 둘을 각자 그리면 된다 |
 | 7 | `days[].skinScore`(그 날 분석이 없으면 그 날 첫 Plate 채점 당시 점수로 폴백돼 **항상 존재**) ↔ `skinScoreTrend[]`(분석이 있는 날짜만) | 히스토리엔 점수가 있는데 트렌드 그래프엔 그 날짜가 없는 게 정상이다. 앱은 history 의 skinScore 를 "그날의 측정"이 아니라 **기준(baseline) 점수**로 라벨링한다 |
 
 ---

@@ -18,25 +18,26 @@ gpt-5 계열은 temperature 를 고정할 수 없어 재현성 레버가 없으�
     (총점 5점은 SkinLevel 등급 구간 폭 20 안이라 화면 문구와 뱃지 색이 안 바뀐다)
 
 ★ 계정 일일 요청 한도를 먼저 확인한다. Free 티어는 모델당 하루 50회이고
-  이 스크립트는 사람수 × 반복 × 모델수 만큼 쓴다. 3세트 × 5회 × 2모델 = 30회다.
+  이 스크립트는 사람수 × 반복 만큼 쓴다. 3세트 × 5회 = 15회다.
 """
-import base64, json, os, re, statistics, sys, time, urllib.error, urllib.request
+import base64, json, os, re, statistics, sys, textwrap, time, urllib.error, urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROMPT = f"{ROOT}/src/main/java/com/skinplate/api/infra/openai/prompt/SkinAnalysisPrompt.java"
+PHOTO_TYPE = f"{ROOT}/src/main/java/com/skinplate/api/infra/openai/dto/FacePhotoType.java"
 
 FACES = sys.argv[1] if len(sys.argv) > 1 else f"{ROOT}/faces"
 RUNS = int(sys.argv[2]) if len(sys.argv) > 2 else 5
-MODELS = os.environ.get("MODELS", "gpt-5.6-luna,gpt-4o").split(",")
+# 배포에 나가는 모델만 잰다. 판정 기준이 "gpt-4o 보다 나은가"가 아니라 절대값이라
+# 비교군이 필요 없고, 하루 50회짜리 계정에서 요청이 두 배가 된다.
+# 굳이 비교하려면  MODELS=gpt-5.6-luna,gpt-4o  로 준다.
+MODELS = os.environ.get("MODELS", "gpt-5.6-luna").split(",")
 
 METRICS = ["hydration", "oil", "redness", "trouble", "barrier"]
 AGE_AXES = ["skinTexture", "elasticity", "wrinkles", "skinTone",
             "pores", "pigmentation", "redness", "blemishMarks"]
-LABELS = {"front": "정면",
-          "left": "고개를 왼쪽으로 돌린 측면 — 오른쪽 뺨이 보임",
-          "right": "고개를 오른쪽으로 돌린 측면 — 왼쪽 뺨이 보임"}
 # gpt-4o 는 이 조직에서 RPM 3 이다. 벌리지 않으면 429 로 표본이 깨진다.
-GAP_SECONDS = {"gpt-4o": 21, "gpt-5.6-terra": 21}
+GAP_SECONDS = {"gpt-4o": 21}
 
 PASS_SCORE_RANGE = 5
 PASS_AGE_RANGE = 3
@@ -50,8 +51,23 @@ def api_key():
 
 
 def block(name):
-    """SkinAnalysisPrompt.java 의 텍스트 블록을 그대로 읽는다 — 사본을 두면 곧 어긋난다."""
-    return re.search(rf'{name} = """\n(.*?)""";', open(PROMPT).read(), re.S).group(1)
+    """SkinAnalysisPrompt.java 의 텍스트 블록을 읽는다 — 사본을 두면 곧 어긋난다.
+
+    dedent 가 핵심이다. javac 는 텍스트 블록의 공통 들여쓰기를 벗겨서 보내는데,
+    소스를 그대로 읽으면 줄마다 12칸이 남아 프로덕션과 다른 프롬프트를 재게 된다.
+    """
+    raw = re.search(rf'{name} = """\n(.*?)""";', open(PROMPT).read(), re.S).group(1)
+    return textwrap.dedent(raw)
+
+
+def photo_labels():
+    """FacePhotoType 의 라벨을 그대로 읽는다. 손으로 옮겨 적으면 라벨을 고친 날
+    하네스만 옛 프롬프트를 재고, 그 측정이 모델 채택의 유일한 근거가 된다."""
+    src = open(PHOTO_TYPE).read()
+    found = dict(re.findall(r'(FRONT|LEFT|RIGHT)\("([^"]+)"', src))
+    if len(found) != 3:
+        sys.exit("FacePhotoType 에서 라벨 3개를 못 읽었다")
+    return {"front": found["FRONT"], "left": found["LEFT"], "right": found["RIGHT"]}
 
 
 def schema():
@@ -68,7 +84,7 @@ def skin_score(d):
                   + (100 - d["oil"]) + (100 - d["redness"]) + (100 - d["trouble"])) / 5)
 
 
-def content_for(folder, user_prompt):
+def content_for(folder, user_prompt, labels):
     parts = [{"type": "text", "text": user_prompt}]
     for slot in ["front", "left", "right"]:
         path = next((f"{folder}/{slot}{ext}" for ext in (".jpg", ".jpeg", ".png")
@@ -76,7 +92,7 @@ def content_for(folder, user_prompt):
         if path is None:
             sys.exit(f"{folder}/{slot}.jpg 가 없다")
         media = "image/png" if path.endswith(".png") else "image/jpeg"
-        parts.append({"type": "text", "text": f"[{LABELS[slot]}]"})
+        parts.append({"type": "text", "text": f"[{labels[slot]}]"})
         parts.append({"type": "image_url", "image_url": {
             "url": f"data:{media};base64," + base64.b64encode(open(path, "rb").read()).decode(),
             "detail": "high"}})
@@ -111,6 +127,11 @@ def call(key, model, system, content, sch):
         message = json.loads(e.read().decode()).get("error", {}).get("message", "")
         return {"ok": False, "latency": time.time() - started, "code": e.code,
                 "rate_limited": e.code == 429, "error": message[:160]}
+    except Exception as e:
+        # 연결이 한 번 끊겼다고 run 전체를 버리면, 이미 쓴 요청이 같이 날아간다.
+        # 하루 50회짜리 계정에서 그건 그날 예산의 일부다. 실패로 세고 계속한다.
+        return {"ok": False, "latency": time.time() - started, "code": type(e).__name__,
+                "rate_limited": False, "error": str(e)[:160]}
 
 
 def spread(values):
@@ -119,6 +140,7 @@ def spread(values):
 
 def main():
     key, system, user_prompt, sch = api_key(), block("SYSTEM"), block("USER"), schema()
+    labels = photo_labels()
 
     people = sorted(d for d in os.listdir(FACES) if os.path.isdir(f"{FACES}/{d}"))
     if not people:
@@ -131,7 +153,7 @@ def main():
         per_person, limited, failed = [], 0, 0
 
         for person in people:
-            content = content_for(f"{FACES}/{person}", user_prompt)
+            content = content_for(f"{FACES}/{person}", user_prompt, labels)
             data = []
             for i in range(RUNS):
                 result = call(key, model, system, content, sch)
@@ -169,12 +191,18 @@ def main():
 
         if per_person:
             summary[model] = {
+                # 평균은 표시용이다. 판정은 아래 worst_* 로 한다 — 세 명 중 한 명이
+                # 10점 흔들려도 평균 4.7 이면 통과로 찍히는데, 그게 이 게이트가
+                # 잡으라고 있는 상황이다.
                 key_: statistics.mean(p[key_] for p in per_person)
                 for key_ in ["score_range", "age_range", "axis_range",
                              "type_agree", "latency", "cost_tokens"]
             } | {
                 "metric_range": {k: statistics.mean(p["metric_range"][k] for p in per_person)
                                  for k in METRICS},
+                "worst_score_range": max(p["score_range"] for p in per_person),
+                "worst_age_range": max(p["age_range"] for p in per_person),
+                "worst_type_agree": min(p["type_agree"] for p in per_person),
                 "rate_limited": limited, "failed": failed,
             }
 
@@ -197,15 +225,17 @@ def main():
     for name, render in rows:
         print(f"{name:<26}" + "".join(f"{render(summary[m]):>18}" for m in models))
 
-    print()
+    print("\n판정 — 얼굴 세트 중 가장 나쁜 값으로 본다 (하나라도 벗어나면 미달)")
     for model, s in summary.items():
-        checks = [(f"Skin Score 폭 {s['score_range']:.1f} ≤ {PASS_SCORE_RANGE}",
-                   s["score_range"] <= PASS_SCORE_RANGE),
-                  (f"피부 나이 폭 {s['age_range']:.1f} ≤ {PASS_AGE_RANGE}",
-                   s["age_range"] <= PASS_AGE_RANGE),
-                  (f"타입 일치율 {s['type_agree'] * 100:.0f}% = 100%", s["type_agree"] == 1.0)]
+        checks = [(f"Skin Score 최대 폭 {s['worst_score_range']:.0f} ≤ {PASS_SCORE_RANGE}",
+                   s["worst_score_range"] <= PASS_SCORE_RANGE),
+                  (f"피부 나이 최대 폭 {s['worst_age_range']:.0f} ≤ {PASS_AGE_RANGE}",
+                   s["worst_age_range"] <= PASS_AGE_RANGE),
+                  (f"타입 최저 일치율 {s['worst_type_agree'] * 100:.0f}% = 100%",
+                   s["worst_type_agree"] == 1.0),
+                  (f"실패 {s['failed']}건 = 0", s["failed"] == 0)]
         ok = all(passed for _, passed in checks)
-        print(f"{model}: {'✓ 통과' if ok else '✗ 미달 — OPENAI_MODEL 을 되돌린다'}")
+        print(f"\n{model}: {'✓ 통과' if ok else '✗ 미달 — OPENAI_MODEL 을 되돌린다'}")
         for text, passed in checks:
             print(f"    {'✓' if passed else '✗'} {text}")
 
