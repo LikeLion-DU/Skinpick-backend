@@ -7,6 +7,8 @@ import com.skinplate.api.domain.food.service.StandardFoodTable;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -17,7 +19,8 @@ class StandardFoodTableTest {
     @Test
     @DisplayName("공공데이터가 실제로 적재된다")
     void loads() {
-        assertThat(StandardFoodTable.size()).isGreaterThan(1000);
+        // 여유를 크게 두면 파일이 잘려도 통과한다 — 실제 1,531 종에 붙여 둔다.
+        assertThat(StandardFoodTable.size()).isGreaterThan(1500);
     }
 
     @Test
@@ -36,9 +39,10 @@ class StandardFoodTableTest {
     @Test
     @DisplayName("낱말 중간에 걸친 이름은 잡지 않는다 — 부대찌개에 라면 값이 들어가면 안 된다")
     void doesNotMatchMidWord() {
-        // "라면사리" 는 라면으로 끝나지 않는다. 부대찌개가 테이블에 없으면 비어야 한다.
-        StandardFoodTable.find("라면사리 부대찌개")
-                .ifPresent(food -> assertThat(food.name()).doesNotContain("라면"));
+        // ifPresent 로 두면 테이블이 통째로 안 실려도 통과한다. 이 테스트의 목적은
+        // "엉뚱한 치환이 없다"이지 "비어 있다"가 아니므로 값을 받는 것까지 본다.
+        assertThat(StandardFoodTable.find("라면사리 부대찌개").orElseThrow().name())
+                .doesNotContain("라면");
     }
 
     @Test
@@ -74,6 +78,41 @@ class StandardFoodTableTest {
         StandardFood kimchiStew = StandardFoodTable.find("김치찌개").orElseThrow();
         assertThat(kimchiStew.spicy()).isTrue();
         assertThat(kimchiStew.tags()).contains(IngredientTag.PROBIOTIC);
+    }
+
+    @Test
+    @DisplayName("낱자 하나로 다른 음식을 끌고 오지 않는다 — 전골은 튀김이 아니다")
+    void singleSyllableDoesNotLeak() {
+        // '전' 을 부분일치로 두면 전골·전복탕·전어구이가 전부 FRIED 가 되고,
+        // AI 가 맞게 본 BOILED 를 덮어써 지성 피부에 없던 R07 감점이 붙는다.
+        assertThat(StandardFoodTable.find("곱창전골").orElseThrow().cookingMethod())
+                .isEqualTo(CookingMethod.BOILED);
+        assertThat(StandardFoodTable.find("전복탕").orElseThrow().cookingMethod())
+                .isEqualTo(CookingMethod.BOILED);
+        assertThat(StandardFoodTable.find("전어구이").orElseThrow().cookingMethod())
+                .isEqualTo(CookingMethod.GRILLED);
+        // 진짜 전은 그대로 기름이다.
+        assertThat(StandardFoodTable.find("김치전").orElseThrow().cookingMethod())
+                .isEqualTo(CookingMethod.FRIED);
+    }
+
+    @Test
+    @DisplayName("풋고추는 매운맛이 아니다 — 고명 이름으로 R02 가 확정 발동하면 안 된다")
+    void garnishPepperIsNotSpicy() {
+        StandardFood dish = StandardFoodTable.find("풋고추찜").orElseThrow();
+
+        assertThat(dish.spicy()).isFalse();
+        assertThat(dish.tags()).doesNotContain(IngredientTag.CAPSAICIN);
+    }
+
+    @Test
+    @DisplayName("시연 김치찌개는 돼지고기 쪽 값을 받는다 — 기본형에 얹히면 60점이 54점이 된다")
+    void demoStewKeepsItsProtein() {
+        StandardFood demo = StandardFoodTable.find("돼지고기 김치찌개").orElseThrow();
+
+        // 원본의 기본형 김치찌개는 단백질 15.1g 이라 R05(20g 이상 가점)가 안 걸린다.
+        assertThat(demo.proteinG()).isGreaterThanOrEqualTo(new BigDecimal("20"));
+        assertThat(demo.sodiumMg()).isEqualTo(1850);
     }
 
     @Test

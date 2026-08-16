@@ -69,7 +69,7 @@ skinplate-api/
     │   ├── food/
     │   │   ├── entity/      FoodAnalysis · Nutrition · FoodIngredient
     │   │   │                IngredientTag · CookingMethod
-    │   │   ├── service/     StandardNutrition
+    │   │   ├── service/     FoodAnalysisService · StandardFoodTable · StandardFood
     │   │   ├── repository/  FoodAnalysisRepository
     │   │   └── dto/         FoodAnalysisDto · NutritionDto · IngredientDto
     │   ├── plate/
@@ -4448,82 +4448,66 @@ class PlateRuleEngineTest {
 
 문서에 표로만 있고 "어느 클래스에 둘지"가 정해지지 않은 데이터가 둘 있다. Day 7에 그 자리에서 정하면 반나절이 설계에 쓰인다.
 
-### 1.22.1 시연용 표준 영양 테이블
+### 1.22.1 표준 음식 테이블
 
-**`domain/food/service/StandardNutrition.java`**
+**`domain/food/service/StandardFoodTable.java`** (조회) · **`StandardFood.java`** (한 건)
 
-```java
-package com.skinplate.api.domain.food.service;
+> **바뀐 이력** — 처음에는 시연 3종만 든 `StandardNutrition`(하드코딩 `LinkedHashMap`)이었다.
+> 지금은 공공데이터 **1,532종**이다. `StandardNutrition` 은 **삭제됐다** — 다시 만들지 마라.
 
-import com.skinplate.api.domain.food.entity.Nutrition;
+**왜 필요한가.** 룰 엔진은 `nutrition.sodiumMg` 를 1500과 비교한다. 그런데 그 1850mg 은
+AI가 사진을 보고 추정한 값이라 호출할 때마다 흔들린다.
 
-import java.math.BigDecimal;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import java.util.Optional;
+| AI 추정 나트륨 | 결과 |
+|---|---|
+| 1400 | R04 미발동 → 68점 |
+| 1850 | 60점 |
+| 2100 | 59점 |
 
-/**
- * AI가 사진에서 추정한 영양값을 표준값으로 덮어쓴다. (시연 음식 한정)
- *
- * 왜 필요한가:
- *   룰 엔진은 nutrition.sodiumMg 를 1500과 비교한다. 그런데 그 1850mg 은
- *   AI가 사진을 보고 추정한 값이라 호출할 때마다 흔들린다.
- *     1400 → R04 미발동 → 68점
- *     1850 → 60점
- *     2100 → 59점
- *   같은 사진, 같은 사람, 세 번 다른 점수다. 심사위원의 첫 질문이 이것이고,
- *   현장에서 두 번 찍으면 들킨다.
- *
- * 정직성:
- *   숨기지 않는다. 화면에 "표준 영양 DB 기준"이라고 표기하고,
- *   "AI는 무슨 음식인지 판단하고, 영양값은 표준 DB에서 가져옵니다"라고 설명한다.
- *   오히려 이게 강점이 된다 — 세 단계 모두 재현 가능해진다.
- */
-public final class StandardNutrition {
+같은 사진, 같은 사람, 세 번 다른 점수다. 심사위원의 첫 질문이 이것이고, 현장에서 두 번 찍으면 들킨다.
 
-    private StandardNutrition() {}
+**데이터.** 식품의약품안전처 「전국통합식품영양성분정보(음식)표준데이터」를
+`tools/build_standard_food.py` 로 변환해 `resources/food/standard-food.json` 에 둔다.
+원본은 100g 기준이라 `식품중량` 으로 1인분을 환산하고, 같은 이름은 **실측(분석·수집) 우선 ·
+중앙값**으로 접는다. 조리법·매운맛·재료 태그는 원본에 없어 **이름 규칙**으로 뽑는다.
 
-    /**
-     * LinkedHashMap 이어야 한다. Map.of 는 반복 순서가 JVM 실행마다 달라져서,
-     * "김치라면" 같은 이름이 오면 findFirst() 가 김치찌개를 잡을지 라면을 잡을지
-     * 실행할 때마다 바뀐다. 재현성을 위해 만든 테이블이 재현 불가가 되는 셈이다.
-     * 위에 있을수록 우선한다 — 더 구체적인 이름을 먼저 둔다.
-     */
-    private static final Map<String, Nutrition> TABLE = new LinkedHashMap<>() {{
-        put("김치찌개", n(520, "28.5", "24.0", "32.0", 1850, "6.2"));
-        put("연어구이", n(610, "32.0", "28.0", "45.0", 1600, "4.0"));
-        put("라면",     n(500, "10.0", "17.0", "73.0", 1800, "5.0"));
-    }};
+**조회는 2단계다.** AI 는 재료를 앞에 붙여 답한다(`"돼지고기 김치찌개"`).
 
-    /** 음식명에 표준 키가 포함되면 표준값을 반환한다. */
-    public static Optional<Nutrition> find(String foodName) {
-        if (foodName == null) return Optional.empty();
-        return TABLE.entrySet().stream()
-                .filter(e -> foodName.contains(e.getKey()))
-                .map(Map.Entry::getValue)
-                .findFirst();
-    }
+1. 정확한 이름 — `김치찌개_참치` 처럼 재료까지 맞는 항목
+2. 낱말의 **접미사를 긴 쪽부터** 해시 조회 — `"돼지고기 김치찌개"` → `김치찌개`
 
-    public static boolean isStandard(String foodName) {
-        return find(foodName).isPresent();
-    }
+낱말 단위로 끝을 보는 이유는 단순 포함(`contains`)이면 `"라면사리 부대찌개"` 가 라면으로 잡혀
+부대찌개에 라면 영양값이 들어가기 때문이다. 접미사를 긴 쪽부터 보므로 `Map` 순회 순서에
+기대지 않는다(구 N10 리스크 해소).
 
-    private static Nutrition n(int kcal, String protein, String fat,
-                               String carb, int sodium, String sugar) {
-        return Nutrition.of(kcal, new BigDecimal(protein), new BigDecimal(fat),
-                            new BigDecimal(carb), sodium, new BigDecimal(sugar));
-    }
-}
-```
+**AI 와 표준값 중 누가 이기는가 — 필드마다 다르다.**
 
-`FoodAnalysisService`에서 AI 응답을 받은 직후 한 줄로 적용한다.
+| 필드 | 이기는 쪽 | 왜 |
+|---|---|---|
+| 영양값 | **표준 DB 항상** | 룰이 비교하는 숫자가 그것뿐이다. 원본에 없는 항목만 AI 추정치로 남는다 |
+| 조리법 | 표준 DB — 단 `ETC` 면 AI | `ETC` 는 "아니다"가 아니라 "이름만 봐서는 모르겠다"다 |
+| 매운맛 | 둘의 OR | `spicy=false` 는 이름에 매운 낱말이 없다는 뜻이지 안 맵다는 증거가 아니다 |
+| 재료 태그 | 둘 다 — AI 먼저, 표준이 보탬 | 사진에는 이름에 없는 재료가 보이고(두부), 이름에는 AI 가 놓치는 태그가 있다(김치→발효) |
 
 ```java
-Nutrition nutrition = StandardNutrition.find(ai.foodName())
-                                       .orElseGet(() -> toNutrition(ai.nutrition()));
+// FoodAnalysisService.toEntity()
+Optional<StandardFood> standard = StandardFoodTable.find(foodName);
+
+Nutrition nutrition = standard.map(food -> food.toNutrition(aiNutrition)).orElse(aiNutrition);
+CookingMethod cookingMethod = standard.map(StandardFood::cookingMethod)
+        .filter(method -> method != CookingMethod.ETC)
+        .orElseGet(() -> toCookingMethod(aiResult.cookingMethod()));
+boolean spicy = standard.map(StandardFood::spicy).orElse(false) || aiResult.spicy();
 ```
 
-> **표준 음식 3종은 Day 5 이전에 확정하라.** Day 8 캘리브레이션과 발표 시연 음식이 이 목록에 달려 있다. 지금 정하면 둘 다 미리 준비된다.
+**정직성.** 숨기지 않는다. 화면에 "표준 영양 DB 기준"이라고 표기하고, "AI는 무슨 음식인지
+판단하고, 영양값은 표준 DB에서 가져옵니다"라고 설명한다. 오히려 이게 강점이 된다 —
+세 단계 모두 재현 가능해진다.
+
+> **시연 음식은 표준 DB 에 제 항목이 있어야 한다.** 공공데이터의 `김치찌개` 는 고기 없는
+> 기본형이라 단백질이 15.1g 이다 — 시연 음식인 돼지고기 김치찌개가 여기 얹히면
+> R05(단백질 20g 이상 가점)가 빠져 무대에서 말할 60점이 54점이 된다. 원본에 없거나
+> 원본 항목이 시연 음식과 다르면 스크립트의 `MANUAL_FOODS` 에 넣는다(원본에 생기면 그쪽이 이긴다).
 
 ### 1.22.2 추천 후보 매핑
 
@@ -6576,7 +6560,7 @@ if (_consecutiveFailures >= 3) {
 | `GET /recommendations` | `RecommendationResponse` | `skinAnalysisId` · `recommend[]` · `avoid[]` · `generatedAt` | `RecommendationDto` |
 | `GET /skin-insights` | `SkinInsightResponse` | `skinAnalysisId` · `summary` · **`changes{hydration,oil,redness,trouble,barrier,skinScore}`**(직전 분석 없으면 키 생략) · `insights[{category,**priority**,title,description}]` · `todayActions[{category,title}]` · `generatedAt` | *(앱 미구현)* |
 
-> **표준 영양값은 이제 공공데이터에서 온다.** 시연 음식 3종만 손으로 박아 두던 표를 `전국통합식품영양성분정보(음식)표준데이터`(식약처) 기반 1,530종 테이블로 교체했다. 원본은 그대로 못 쓴다 — 기준량이 100g 이라 `식품중량` 으로 1인분을 환산하고, 같은 음식이 여러 행이라 중앙값을 쓰며, 그중 '산출'(레시피 계산)은 나트륨이 실제의 1/4 까지 낮게 나와 '분석·수집'(실측)을 먼저 쓴다. **영양값만이 아니라 조리법·매운맛·재료 태그까지 덮어쓴다** — 영양만 고정하면 R02(매운맛)·R07(튀김)이 여전히 AI 추정에 흔들려 재현성이 반쪽이 된다. 조회는 2단계다: 정확한 이름(`김치찌개_참치`) → 없으면 **뒤 낱말부터** 기본명 매칭. 앞 낱말을 먼저 보면 "돼지고기 김치찌개" 가 돼지고기로 잡혀 찌개에 고기구이 영양값이 들어간다. 테이블을 다시 만들려면 `tools/build_standard_food.py` 를 돌린다.
+> **표준 영양값은 이제 공공데이터에서 온다.** 시연 음식 3종만 손으로 박아 두던 표를 `전국통합식품영양성분정보(음식)표준데이터`(식약처) 기반 1,532종 테이블로 교체했다. 원본은 그대로 못 쓴다 — 기준량이 100g 이라 `식품중량` 으로 1인분을 환산하고, 같은 음식이 여러 행이라 중앙값을 쓰며, 그중 '산출'(레시피 계산)은 나트륨이 실제의 1/4 까지 낮게 나와 '분석·수집'(실측)을 먼저 쓴다. **영양값만이 아니라 조리법·매운맛·재료 태그까지 고정한다** — 영양만 고정하면 R02(매운맛)·R07(튀김)이 여전히 AI 추정에 흔들려 재현성이 반쪽이 된다. 다만 **조리법·매운맛은 이름에서 뽑은 값이라 확실할 때만 AI 를 이긴다**: `ETC` 와 `spicy=false` 는 "아니다"가 아니라 "이름만 봐서는 모르겠다"이므로 사진을 본 AI 의 답을 지우지 않는다(§1.22.1 표). 조회는 2단계다: 정확한 이름(`김치찌개_참치`) → 없으면 **뒤 낱말부터** 기본명 매칭. 앞 낱말을 먼저 보면 "돼지고기 김치찌개" 가 돼지고기로 잡혀 찌개에 고기구이 영양값이 들어간다. 테이블을 다시 만들려면 `tools/build_standard_food.py` 를 돌린다.
 >
 > **히스토리의 `days[].plateScore` 는 그날 기록들의 평균이고, `mealType` 은 `recordedAt` 에서 파생한다.** **`days[]` 는 기록을 날짜로 `groupingBy` 한 결과라, 기록이 없는 날은 키가 생략되는 게 아니라 그 날짜 항목 자체가 배열에 없다.** 그래서 `plateScore` 는 primitive `int` 로 둘 수 있다 — 평균을 낼 대상이 없는 날은 애초에 이 DTO 가 만들어지지 않는다. 같은 이유로 `skinScore` 도 항상 채워진다: 그날 얼굴을 안 찍었어도 그날 첫 기록이 채점 기준으로 쓴 분석의 점수로 폴백하고, `skin_plate.skin_analysis_id` 가 NOT NULL 이라 기록이 있으면 그 값은 반드시 존재한다. **키가 실제로 빠질 수 있는 것은 `aiComment` 뿐이다**(AI 생성 실패). 확정 시안의 홈이 "오늘의 피부 식단 점수 / 목표 80점"을, 기록 카드가 "아침 8:20"을 보여주면서 생긴 필드다. 둘 다 새 컬럼 없이 만든다 — 평균은 저장할 값이 아니고(기록이 하나 추가되면 바뀐다), 끼니를 고르는 UI 가 시안에 없어 사용자가 값을 줄 방법이 없다. **끼니 라벨과 날짜 귀속은 별개다** — 일 경계는 캘린더일(00:00)이고 `mealType` 은 표시 라벨만 정하므로, 8/14 02:00 의 야식은 8/14 카드에 "저녁"으로 뜬다. 사용자 인지(전날 야식)와 어긋날 수 있음을 알고 택한 단순화다: 일 경계를 옮기면 이미 쌓인 기록의 날짜가 바뀌면서 히스토리·리포트·일 평균이 함께 흔들린다. **앱에서 평균을 내지 않는 이유는 반올림 때문이다.** 76.5 를 서버는 올리고 앱은 내리면 같은 날에 두 숫자가 뜬다. `targetScore` 를 매번 실어 보내는 것도 같은 이유다 — 앱에 80 을 박으면 사용자별 목표를 줄 때 앱 배포가 필요해진다.
 >
@@ -6608,7 +6592,7 @@ if (_consecutiveFailures >= 3) {
 | 3 | `OpenAiVisionClient` + 프롬프트 · JSON Schema | `infra/openai/` | 3~4 | 피부는 `detail:"high"` 3장 1회, 음식은 `"low"`. 25초 단발, 재시도 없음 |
 | 4 | `MockOpenAiVisionClient` | `infra/openai/` | 3 | `@ConditionalOnProperty("app.ai.mock")`. **3번과 같은 날 만든다** — 발표 백업 플랜은 나중에 붙이면 안 붙는다 |
 | 5 | `SkinAnalysisService` | `domain/skin/` | 4 | `SkinScoreCalculator`·`SkinHighlightBuilder`(§1.12.1)·`SkinTypeGapAnalyzer`(§1.12.2)는 완성돼 있다. 조립만. **AI 호출은 트랜잭션 밖** |
-| 6 | `FoodAnalysisService` · `SkinPlateService` | `domain/food/` · `domain/plate/` | 5~6 | 엔진은 이미 있으므로 조립만. `StandardNutrition.find()` 한 줄 적용 |
+| 6 | `FoodAnalysisService` · `SkinPlateService` | `domain/food/` · `domain/plate/` | 5~6 | 엔진은 이미 있으므로 조립만. `StandardFoodTable.find()` 로 표준값 적용(§1.22.1) |
 | 7 | `SkinPlateService.simulate()` | `domain/plate/` | 6 | 엔진 재호출만. **저장하지 않는다** |
 | 8 | `RecommendationService` | `domain/recommendation/` | 7 | `RecommendationCandidates` 사용. **lazy 동기 생성** (비동기 아님) |
 | 9 | Flutter `DataSource` · `RepositoryImpl` · `UseCase` | 각 feature `data/` | 3~7 | 인터페이스가 이미 있으므로 채우기만 |

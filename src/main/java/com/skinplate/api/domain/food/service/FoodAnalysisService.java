@@ -87,18 +87,22 @@ public class FoodAnalysisService {
         Nutrition aiNutrition = toNutrition(aiResult.nutrition());
         Optional<StandardFood> standard = StandardFoodTable.find(foodName);
 
-        // 표준 DB 에 있으면 영양값뿐 아니라 조리법·매운맛까지 덮어쓴다.
+        // 표준 DB 에 있으면 영양값뿐 아니라 조리법·매운맛까지 고정한다.
         // 영양값만 고정하면 R02(매운맛)·R07(튀김)이 여전히 AI 추정에 흔들려
         // 같은 사진에서 점수가 갈린다 — 재현성이 반쪽이 된다.
+        //
+        // 다만 셋의 확신도가 다르다. 영양값은 표준 DB 가 항상 이긴다(룰이 비교하는
+        // 숫자가 그것뿐이다). 조리법·매운맛은 이름에서 뽑은 값이라 사진을 본 AI 보다
+        // 확실할 때만 이긴다 — ETC 와 spicy=false 는 "아니다"가 아니라 "이름만 봐서는
+        // 모르겠다"는 뜻이므로 AI 의 답을 지우지 않는다.
         Nutrition nutrition = standard
                 .map(food -> food.toNutrition(aiNutrition))
                 .orElse(aiNutrition);
         CookingMethod cookingMethod = standard
                 .map(StandardFood::cookingMethod)
+                .filter(method -> method != CookingMethod.ETC)
                 .orElseGet(() -> toCookingMethod(aiResult.cookingMethod()));
-        boolean spicy = standard
-                .map(StandardFood::spicy)
-                .orElseGet(aiResult::spicy);
+        boolean spicy = standard.map(StandardFood::spicy).orElse(false) || aiResult.spicy();
 
         standard.ifPresent(food -> log.debug(
                 "표준 음식 적용: {} → {} ({}, 표본 {}건)",
@@ -145,7 +149,9 @@ public class FoodAnalysisService {
                 // ETC 는 "모르겠다"는 뜻이라 보탤 값이 없다.
                 if (tag == IngredientTag.ETC || !seen.add(tag)) continue;
                 if (result.size() >= INGREDIENT_MAX_COUNT) break;
-                result.add(FoodIngredient.of(standard.name(), tag));
+                // 위 AI 경로와 같은 이유로 자른다 — food_ingredient.name 은 VARCHAR(50) 이고,
+                // 표준 DB 이름은 스크립트가 만든다(`곱창전골_간편조리세트_…`).
+                result.add(FoodIngredient.of(trim(standard.name(), 50), tag));
             }
         }
         return result;

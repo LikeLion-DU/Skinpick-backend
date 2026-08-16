@@ -1,10 +1,8 @@
 package com.skinplate.api.infra.openai;
 
-import com.skinplate.api.domain.food.entity.CookingMethod;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.skinplate.api.domain.food.entity.FoodAnalysis;
-import com.skinplate.api.domain.food.entity.FoodIngredient;
-import com.skinplate.api.domain.food.entity.IngredientTag;
-import com.skinplate.api.domain.food.entity.Nutrition;
+import com.skinplate.api.domain.food.service.FoodAnalysisService;
 import com.skinplate.api.domain.insight.entity.InsightCategory;
 import com.skinplate.api.domain.plate.engine.PlateContext;
 import com.skinplate.api.domain.plate.engine.PlateRuleEngine;
@@ -36,6 +34,9 @@ class MockOpenAiVisionClientTest {
 
     private final MockOpenAiVisionClient client = new MockOpenAiVisionClient();
 
+    private final FoodAnalysisService foodAnalysisService =
+            new FoodAnalysisService(client, new ObjectMapper());
+
     private final PlateRuleEngine engine = new PlateRuleEngine(List.of(
             new SodiumRule(), new SpicyRednessRule(), new SugarTroubleRule(),
             new FriedOilRule(), new HydrationFoodRule(), new Omega3BarrierRule(),
@@ -61,14 +62,10 @@ class MockOpenAiVisionClientTest {
         SkinMetrics metrics = SkinMetrics.of(skin.hydration(), skin.oil(),
                 skin.redness(), skin.trouble(), skin.barrier());
 
-        FoodAnalysis analysis = FoodAnalysis.create(null, food.foodName(),
-                food.foodCategory(),
-                Nutrition.of(food.nutrition().caloriesKcal(), food.nutrition().proteinG(),
-                        food.nutrition().fatG(), food.nutrition().carbG(),
-                        food.nutrition().sodiumMg(), food.nutrition().sugarG()),
-                CookingMethod.valueOf(food.cookingMethod()), food.spicy(), "{}");
-        food.ingredients().forEach(ingredient -> analysis.addIngredient(
-                FoodIngredient.of(ingredient.name(), IngredientTag.valueOf(ingredient.tag()))));
+        // 서비스를 통해 만든다. 손으로 Nutrition 을 조립하면 표준 음식 테이블을 건너뛰어,
+        // 표준값이 시연 음식을 다른 값으로 덮어써도 이 테스트가 모른 채 통과한다.
+        // 실제 무대는 이 경로로 흐른다.
+        FoodAnalysis analysis = foodAnalysisService.toEntity(null, food);
 
         assertThat(engine.evaluate(new PlateContext(metrics, analysis)).score()).isEqualTo(60);
     }

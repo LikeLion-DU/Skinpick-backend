@@ -46,8 +46,12 @@ DISH_CATEGORIES = {
 # 룰 엔진이 실제로 보는 건 둘뿐이다. FRIED(R07 피지)와 BOILED(국물 절반 남기기).
 # 나머지는 화면 표기용이라 대충 맞으면 된다. 그래서 애매한 것은 FRIED 로
 # 올리지 않는다 — 잘못 올리면 지성 피부에 없던 감점이 생긴다.
+#
+# `$` 로 끝나는 낱말은 **기본명의 끝에서만** 본다. 부분일치로 두면 낱자 하나가
+# 다른 음식을 통째로 끌고 온다 — '전' 을 그냥 두면 전골·전복탕·전어구이가 전부
+# FRIED 가 되어, AI 가 맞게 본 BOILED 를 덮어쓰고 없던 R07 감점이 생긴다.
 COOKING_RULES = [
-    ('FRIED', ['튀김', '까스', '가스', '강정', '탕수', '프라이', '후라이', '전']),
+    ('FRIED', ['튀김', '까스', '가스', '강정', '탕수', '프라이', '후라이', '전$']),
     ('BOILED', ['국', '탕', '찌개', '전골', '죽', '면', '스프', '수프', '조림', '라면']),
     ('STEAMED', ['찜', '수육', '만두']),
     ('GRILLED', ['구이', '볶', '부침', '적', '갈비', '스테이크']),
@@ -61,13 +65,23 @@ SPICY_WORDS = ['매운', '매콤', '불닭', '고추', '청양', '떡볶이', '�
                '아귀찜', '짬뽕', '육개장', '김치찌개', '김치볶음', '닭갈비',
                '쭈꾸미', '주꾸미', '낙지볶음', '비빔']
 
-# 공공데이터에 없는 시연 음식. 발표 시연 3종(김치찌개·연어구이·라면) 중
-# 연어구이만 원본에 없다(음식 DB 에는 연어롤뿐이다). 시연 음식이 AI 추정치로
-# 떨어지면 같은 사진에 점수가 흔들리는 문제가 그 음식에서만 되살아나므로,
-# 구 수기 표의 값을 그대로 남긴다. 조리법·매운맛·태그는 같은 이름 규칙으로 뽑는다.
+# '고추' 가 들어가도 맵지 않은 것들. 매운맛·CAPSAICIN 판정 전에 이름에서 지운다.
+# 풋고추는 고명이지 매운맛이 아닌데, 부분일치라 풋고추찜·김밥_풋고추까지 매운 음식이
+# 된다 — 홍조가 높은 사용자에게 없던 R02 감점이 확정으로 붙는다.
+MILD_WORDS = ['풋고추', '고추냉이']
+
+# 공공데이터에 없거나, 원본 항목이 시연에서 말하는 음식과 다른 시연 음식.
+# 시연 3종(김치찌개·연어구이·라면) 중 둘이 여기 걸린다 —
+#   연어구이: 원본에 없다(음식 DB 에는 연어롤뿐이다).
+#   돼지고기 김치찌개: 원본의 `김치찌개` 는 고기 없는 기본형이라 단백질 15.1g 이다.
+#     시연 음식은 돼지고기가 들어간 쪽이고, 그 차이가 R05(단백질 20g 이상 가점)를
+#     가른다. 기본형에 얹혀 가면 무대에서 말할 60점이 54점이 된다.
+# 조리법·매운맛·태그는 같은 이름 규칙으로 뽑는다.
 MANUAL_FOODS = [
     {'name': '연어구이', 'caloriesKcal': 610, 'proteinG': 32.0, 'fatG': 28.0,
      'carbG': 45.0, 'sodiumMg': 1600, 'sugarG': 4.0},
+    {'name': '돼지고기 김치찌개', 'caloriesKcal': 520, 'proteinG': 28.5, 'fatG': 24.0,
+     'carbG': 32.0, 'sodiumMg': 1850, 'sugarG': 6.2},
 ]
 
 # 재료 태그. 이름에 등장하면 붙인다.
@@ -150,18 +164,35 @@ def base_name(name):
 
 
 def cooking_method(name):
+    # 끝 낱말 판정은 기본명에서 본다 — `해물파전_오징어` 의 정체는 파전이다.
+    base = base_name(name)
     for method, words in COOKING_RULES:
-        if any(word in name for word in words):
-            return method
+        for word in words:
+            if word.endswith('$'):
+                if base.endswith(word[:-1]):
+                    return method
+            elif word in name:
+                return method
     return 'ETC'
 
 
+def spice_name(name):
+    """매운맛 판정용 이름. 안 매운 '고추'(풋고추 등)를 지운 뒤에 본다."""
+    for word in MILD_WORDS:
+        name = name.replace(word, '')
+    return name
+
+
 def is_spicy(name):
-    return any(word in name for word in SPICY_WORDS)
+    return any(word in spice_name(name) for word in SPICY_WORDS)
 
 
 def tags(name):
-    found = [tag for tag, words in TAG_RULES if any(word in name for word in words)]
+    # CAPSAICIN 도 '고추' 부분일치라 매운맛과 같은 이름으로 봐야 한다. 한쪽만 고치면
+    # 서버의 `spicy || CAPSAICIN` 판정에서 풋고추가 여전히 매운 음식이 된다.
+    spiced = spice_name(name)
+    found = [tag for tag, words in TAG_RULES
+             if any(word in (spiced if tag == 'CAPSAICIN' else name) for word in words)]
     return found or ['ETC']
 
 

@@ -7,18 +7,16 @@ import com.skinplate.api.domain.food.entity.IngredientTag;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.io.ClassPathResource;
 
-import java.io.IOException;
 import java.io.InputStream;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
 /**
- * 공공데이터 기반 표준 음식 테이블. 조회 전용이고 기동 때 한 번 읽는다.
+ * 공공데이터 기반 표준 음식 테이블. 조회 전용이고 첫 조회 때 한 번 읽는다.
  *
  * <p><b>왜 필요한가.</b> 룰 엔진은 `sodiumMg` 를 1500 과 비교하는데, 그 값이 AI 가
  * 사진을 보고 추정한 숫자면 같은 사진에서도 1400~2100 사이로 흔들린다. 경계를
@@ -50,12 +48,8 @@ public final class StandardFoodTable {
     /** 정확한 이름 → 항목. 완전 일치만 본다. */
     private static final Map<String, StandardFood> EXACT = new HashMap<>();
 
-    /**
-     * 기본명 → 항목. 낱말 끝 매칭으로 훑기 때문에 순서가 결과를 바꾼다.
-     * <b>긴 이름이 앞에 온다</b> — "김치찌개"와 "찌개"가 둘 다 있을 때 짧은 쪽이
-     * 먼저 걸리면 모든 찌개가 같은 값을 받는다.
-     */
-    private static final Map<String, StandardFood> BASE = new LinkedHashMap<>();
+    /** 이름 → 항목. 낱말의 접미사를 긴 쪽부터 조회하므로 순서에 기대지 않는다. */
+    private static final Map<String, StandardFood> BASE = new HashMap<>();
 
     static {
         load();
@@ -67,38 +61,43 @@ public final class StandardFoodTable {
             JsonNode root = mapper.readTree(stream);
 
             for (JsonNode node : root.path("exact")) {
-                StandardFood food = parse(node);
-                EXACT.put(food.name(), food);
+                parse(node).ifPresent(food -> EXACT.put(food.name(), food));
             }
-
-            List<StandardFood> bases = new ArrayList<>();
             for (JsonNode node : root.path("base")) {
-                bases.add(parse(node));
+                parse(node).ifPresent(food -> BASE.put(food.name(), food));
             }
-            // exact 에만 있는 이름도 기본명으로 쓸 수 있어야 한다. "김치찌개" 가
+            // exact 에만 있는 이름도 낱말 매칭 대상이어야 한다. "김치찌개" 가
             // exact 에 있으면 base 에서는 빠져 있는데(중복 제거), 그러면
             // "돼지고기 김치찌개" 가 낱말 매칭에서 갈 곳을 잃는다.
-            bases.addAll(EXACT.values());
-            bases.sort((left, right) -> right.name().length() - left.name().length());
-            for (StandardFood food : bases) {
-                BASE.putIfAbsent(food.name(), food);
-            }
+            BASE.putAll(EXACT);
 
-            log.info("표준 음식 테이블 적재: 정확 {}종 · 기본명 {}종", EXACT.size(), BASE.size());
-        } catch (IOException e) {
+            log.info("표준 음식 테이블 적재: 정확 {}종 · 전체 {}종", EXACT.size(), BASE.size());
+        } catch (Exception e) {
             // 테이블이 없어도 앱은 떠야 한다. AI 추정치로 떨어질 뿐이다.
+            // IOException 만 잡으면 나머지는 ExceptionInInitializerError 로 올라가고,
+            // 그다음부터는 이 클래스를 건드릴 때마다 NoClassDefFoundError 가 난다.
             log.error("표준 음식 테이블을 읽지 못했다 — AI 추정 영양값으로 동작한다", e);
         }
     }
 
-    private static StandardFood parse(JsonNode node) {
+    /**
+     * 이름 없는 행은 버린다. 빈 이름이 키로 들어가면 조회가 그 행으로 흘러가
+     * 모르는 음식 전부가 남의 영양값을 받는다 — 화면에도 로그에도 안 드러난다.
+     */
+    private static Optional<StandardFood> parse(JsonNode node) {
+        String name = node.path("name").asText("").trim();
+        if (name.isEmpty()) {
+            log.warn("이름 없는 표준 음식 행을 건너뛴다: {}", node);
+            return Optional.empty();
+        }
+
         List<IngredientTag> tags = new ArrayList<>();
         for (JsonNode tag : node.path("tags")) {
             toTag(tag.asText()).ifPresent(tags::add);
         }
 
-        return new StandardFood(
-                node.path("name").asText(),
+        return Optional.of(new StandardFood(
+                name,
                 intOrNull(node, "caloriesKcal"),
                 decimalOrNull(node, "proteinG"),
                 decimalOrNull(node, "fatG"),
@@ -109,24 +108,31 @@ public final class StandardFoodTable {
                 node.path("spicy").asBoolean(false),
                 List.copyOf(tags),
                 node.path("measured").asBoolean(false),
-                node.path("sampleCount").asInt(0));
+                node.path("sampleCount").asInt(0)));
     }
 
+    /**
+     * 숫자가 아니면 없는 것으로 본다. `"N/A"` 같은 값에 asInt() 를 물리면 조용히 0 이
+     * 되는데, 나트륨 0 은 "짜지 않다"는 뜻이라 R04 가 안 걸리고 점수가 8점 올라간다.
+     * 비어 있으면 AI 추정치를 쓰는 편이 낫다({@link StandardFood#toNutrition}).
+     */
     private static Integer intOrNull(JsonNode node, String field) {
         JsonNode value = node.path(field);
-        return value.isMissingNode() || value.isNull() ? null : value.asInt();
+        return value.isNumber() ? value.asInt() : null;
     }
 
     private static BigDecimal decimalOrNull(JsonNode node, String field) {
         JsonNode value = node.path(field);
-        return value.isMissingNode() || value.isNull()
-                ? null : BigDecimal.valueOf(value.asDouble());
+        return value.isNumber() ? BigDecimal.valueOf(value.asDouble()) : null;
     }
 
+    // 조용히 삼키면 안 된다. enum 에 값을 하나 더하면서 스크립트를 안 고치면
+    // 1,500 행이 통째로 ETC 가 되는데, 로그가 없으면 점수가 왜 바뀌었는지 알 수 없다.
     private static CookingMethod toCookingMethod(String value) {
         try {
             return CookingMethod.valueOf(value);
         } catch (IllegalArgumentException | NullPointerException e) {
+            log.warn("표준 음식 테이블에 모르는 조리 방식: {}", value);
             return CookingMethod.ETC;
         }
     }
@@ -135,6 +141,7 @@ public final class StandardFoodTable {
         try {
             return Optional.of(IngredientTag.valueOf(value));
         } catch (IllegalArgumentException | NullPointerException e) {
+            log.warn("표준 음식 테이블에 모르는 재료 태그: {}", value);
             return Optional.empty();
         }
     }
@@ -162,17 +169,19 @@ public final class StandardFoodTable {
         // 영양값이 들어간다(650kcal·나트륨 334mg). 화면에도 로그에도 안 드러난다.
         String[] words = trimmed.split("\\s+");
         for (int i = words.length - 1; i >= 0; i--) {
-            // BASE 는 긴 이름부터라 이 낱말에 걸리는 가장 구체적인 항목이 먼저 나온다.
-            for (Map.Entry<String, StandardFood> entry : BASE.entrySet()) {
-                if (words[i].endsWith(entry.getKey())) {
-                    return Optional.of(entry.getValue());
-                }
+            // 접미사를 긴 쪽부터 찍어 본다. "김치찌개"와 "찌개"가 둘 다 있으면 긴 쪽이
+            // 먼저 나오므로, 모든 찌개가 같은 값을 받는 일이 없다.
+            String word = words[i];
+            for (int start = 0; start < word.length(); start++) {
+                StandardFood hit = BASE.get(word.substring(start));
+                if (hit != null) return Optional.of(hit);
             }
         }
         return Optional.empty();
     }
 
+    /** 조회 가능한 이름의 수. BASE 가 EXACT 를 포함하므로 이쪽이 전부다. */
     public static int size() {
-        return EXACT.size() + BASE.size();
+        return BASE.size();
     }
 }
