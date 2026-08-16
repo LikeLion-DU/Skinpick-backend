@@ -3321,44 +3321,27 @@ public class OpenAiVisionClient {
 
 ### 17.3 프롬프트 설계
 
-**피부 분석 System Prompt**
+**피부 분석 System Prompt · JSON Schema**
 
-```
-당신은 피부 이미지 분석 어시스턴트입니다.
-얼굴 사진을 보고 아래 5개 지표를 0~100 정수로 평가하세요.
-
-- hydration : 피부 수분감. 높을수록 촉촉함
-- oil       : 유분기. 높을수록 번들거림
-- redness   : 홍조. 높을수록 붉고 자극된 상태
-- trouble   : 여드름/뾰루지/염증. 높을수록 심함
-- barrier   : 피부 장벽 건강. 높을수록 매끄럽고 안정적
-
-규칙
-1. 반드시 주어진 JSON 스키마로만 응답한다.
-2. 의학적 진단이나 질환명을 언급하지 않는다.
-3. 얼굴이 인식되지 않으면 faceDetected를 false로 한다.
-4. summary는 한국어 1문장, 40자 이내로 작성한다.
-5. 판단 근거가 부족한 지표는 50에 가깝게 평가한다.
-```
-
-**JSON Schema**
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "faceDetected": { "type": "boolean" },
-    "hydration": { "type": "integer", "minimum": 0, "maximum": 100 },
-    "oil":       { "type": "integer", "minimum": 0, "maximum": 100 },
-    "redness":   { "type": "integer", "minimum": 0, "maximum": 100 },
-    "trouble":   { "type": "integer", "minimum": 0, "maximum": 100 },
-    "barrier":   { "type": "integer", "minimum": 0, "maximum": 100 },
-    "summary":   { "type": "string" }
-  },
-  "required": ["faceDetected","hydration","oil","redness","trouble","barrier","summary"],
-  "additionalProperties": false
-}
-```
+> **원본은 `SkinAnalysisPrompt.java` 다.** 프롬프트가 4,800자에 스키마가 12개 오브젝트라
+> 여기 복사해 두면 한쪽만 고쳐지고, 문서에서 재생성한 사람이 피부 나이와 피부 타입을
+> 통째로 되돌린다. 실제로 v1.4 → 이번 확장에서 그럴 뻔했다.
+>
+> 구조만 적는다 — 한 번의 호출로 아래를 모두 받는다.
+>
+> | 블록 | 내용 |
+> |---|---|
+> | [A] 피부 상태 | 5개 지표 0~100 + 지표별 `metricEvidence` 최대 2개 |
+> | [B] 피부 타입 | `primary` DRY·NORMAL·OILY·COMBINATION 중 하나 + `traits` 4종 중 관찰된 것 |
+> | [C] 피부 나이 | 8개 축 0~100 + 축별 evidence 1개 (구간 정의는 소스의 rubric) |
+> | [D] `estimatedSkinAge` | 18~80 정수. 8축을 종합하되 평균을 나이로 환산하지 않는다 |
+> | [E] `ageAssessment` | 1~3문장, '~보여요' 체 |
+> | [F] `summary` | 1~3문장 200자 이내, '~합니다' 체 |
+>
+> **AI 는 점수만 낸다.** 등급(`level`)도 Skin Score 도 Backend 가 계산한다(§4.1 · §14.3).
+> 스키마 strict 모드는 모든 오브젝트에 `additionalProperties:false` 와 전 필드 `required` 를
+> 요구하며, `maxItems` 를 지원하지 않아 evidence 개수·길이는 Backend 가 자른다.
+> 이 불변식은 `SkinAnalysisPromptTest` 가 구조적으로 검증한다.
 
 **음식 분석 JSON Schema**
 

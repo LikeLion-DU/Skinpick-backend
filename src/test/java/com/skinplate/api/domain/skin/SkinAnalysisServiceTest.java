@@ -354,6 +354,22 @@ class SkinAnalysisServiceTest {
     }
 
     @Test
+    @DisplayName("경향을 자를 때 수부지가 살아남는다 — AI 순서대로 자르면 별칭이 영영 안 뜬다")
+    void analyze_keepsDehydratedWhenTruncatingTraits() {
+        givenUser(null);
+        // DEHYDRATED 가 맨 뒤에 왔다. 스키마는 순서를 보장하지 않는다.
+        givenSkinResult(new OpenAiSkinResult(true, 38, 52, 64, 25, 78, null,
+                new OpenAiSkinResult.SkinTypeResult("COMBINATION",
+                        List.of("OILY_T_ZONE", "SENSITIVE_TENDENCY", "DEHYDRATED")),
+                null, "요약"));
+
+        // 순서대로 둘만 남기면 DEHYDRATED 가 잘려 "수부지" 가 안 뜬다.
+        // 그 별칭 하나 때문에 primary/traits 를 나눈 것이라 순서에 맡길 수 없다.
+        assertThat(analyzeThreePhotos().skinType().label())
+                .isEqualTo("복합성 · 수분 부족 경향 · T존 유분 경향(수부지)");
+    }
+
+    @Test
     @DisplayName("AI 피부 타입은 갭 카드를 건드리지 않는다 — observed 는 계속 규칙에서 나온다")
     void analyze_aiSkinTypeDoesNotReplaceGapCard() {
         givenUser(SkinType.OILY);

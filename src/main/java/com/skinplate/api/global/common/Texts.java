@@ -3,9 +3,12 @@ package com.skinplate.api.global.common;
 /**
  * AI 가 돌려준 문자열을 상한에 맞춰 자른다.
  *
- * 프롬프트가 길이를 지시해도 그건 권고일 뿐이다. 상한을 넘긴 문장이 오는 곳이 셋
- * (summary · evidence · ageAssessment)인데, 자르는 로직을 셋으로 복사하면
- * 아래 서로게이트 처리가 한 곳에서만 고쳐지는 날이 온다.
+ * 프롬프트가 길이를 지시해도 그건 권고일 뿐이다. 피부 분석에서 상한을 넘긴 문장이
+ * 오는 곳이 셋(summary · evidence · ageAssessment)이라 여기로 모았다.
+ *
+ * 다른 도메인에도 같은 모양의 코드가 남아 있다 — {@code SkinInsight.clamp} ·
+ * {@code SkinPlate.clamp} · {@code FoodAnalysisService.trim}. 손대지 않은 것은
+ * 기능 동결 직전이라 범위를 넓히지 않으려는 것이지, 저쪽이 옳아서가 아니다.
  */
 public final class Texts {
 

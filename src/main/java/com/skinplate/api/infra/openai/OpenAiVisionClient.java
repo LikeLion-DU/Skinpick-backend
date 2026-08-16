@@ -41,7 +41,12 @@ public class OpenAiVisionClient implements VisionClient {
     private static final String SKIN_DETAIL = "high";
     private static final String FOOD_DETAIL = "low";
     private static final double TEMPERATURE = 0.2;      // 재현성 확보
-    private static final int MAX_TOKENS = 800;          // 출력 폭주 방지
+    /**
+     * 음식·문장 생성용. gpt-5 계열에서는 reasoning 토큰이 이 상한을 같이 먹는다 —
+     * 실측(effort=low)은 음식 215(reasoning 29) · 문장 202(reasoning 125)이고,
+     * 한 단계 높은 medium 에서도 음식 289 라 여유가 500 이상 남는다. 그래서 안 올렸다.
+     */
+    private static final int MAX_TOKENS = 800;
 
     /**
      * 인사이트는 한국어 문장이 넷(summary + description ×3)이라 800 이 상한에 닿는다.
@@ -79,6 +84,9 @@ public class OpenAiVisionClient implements VisionClient {
     /** gpt-5 계열에서 reasoning 토큰은 출력 상한을 같이 갉아먹는다. 낮게 물려 상한을 지킨다. */
     private static final String REASONING_EFFORT = "low";
 
+    /** 0.1(429) + 2(재시도 대기) + 이 값 ≤ 클라이언트 상한 32초. */
+    private static final long MAX_SKIN_TIMEOUT_SECONDS = 28;
+
     public OpenAiVisionClient(WebClient openAiWebClient,
                               ObjectMapper objectMapper,
                               @Value("${app.ai.model}") String model,
@@ -90,8 +98,17 @@ public class OpenAiVisionClient implements VisionClient {
         this.model = model;
         this.timeout = Duration.ofSeconds(timeoutSeconds);
         this.skinMaxTokens = skinMaxTokens;
-        this.skinTimeout = Duration.ofSeconds(skinTimeoutSeconds);
+        this.skinTimeout = Duration.ofSeconds(Math.min(skinTimeoutSeconds, MAX_SKIN_TIMEOUT_SECONDS));
         this.reasoningModel = model.contains("gpt-5");
+
+        // 주석 넷이 지키라고 적어 둔 값을 여기서 한 번 강제한다. 느린 네트워크를 쫓다
+        // 40 을 넣으면 429 재시도가 낀 최악이 42초가 되고, 앱이 32초에 먼저 끊어
+        // AI_TIMEOUT 분기 — 재시도 버튼 UX 자체 — 가 도달 불가가 된다.
+        if (skinTimeoutSeconds > MAX_SKIN_TIMEOUT_SECONDS) {
+            log.warn("app.ai.skin-timeout-seconds={} 는 상한 {}초를 넘어 무시한다 — "
+                            + "429 재시도(2초)가 끼면 클라이언트 상한(32초)을 넘긴다",
+                    skinTimeoutSeconds, MAX_SKIN_TIMEOUT_SECONDS);
+        }
     }
 
     /**
@@ -155,19 +172,19 @@ public class OpenAiVisionClient implements VisionClient {
                        List<Map<String, Object>> userContent, int maxTokens,
                        Duration callTimeout, Class<T> type) {
 
-        // HashMap 이다. Map.of 는 JVM 마다 순회 순서가 달라 LinkedHashMap 에 담아도
-        // 키 순서가 고정되지 않는다 — 보장하지 못하는 것을 보장하는 척하지 않는다.
-        Map<String, Object> body = new HashMap<>(Map.of(
-                "model", model,
-                "messages", List.of(
-                        Map.of("role", "system", "content", system),
-                        Map.of("role", "user", "content", userContent)),
-                "response_format", Map.of(
-                        "type", "json_schema",
-                        "json_schema", Map.of(
-                                "name", schemaName,
-                                "strict", true,
-                                "schema", schema))));
+        // JSON 오브젝트는 키 순서에 의미가 없으므로 HashMap 이면 충분하다.
+        // Map.of 로 만들어 복사하면 매 호출마다 버릴 맵을 하나 더 만드는 셈이라 직접 담는다.
+        Map<String, Object> body = new HashMap<>();
+        body.put("model", model);
+        body.put("messages", List.of(
+                Map.of("role", "system", "content", system),
+                Map.of("role", "user", "content", userContent)));
+        body.put("response_format", Map.of(
+                "type", "json_schema",
+                "json_schema", Map.of(
+                        "name", schemaName,
+                        "strict", true,
+                        "schema", schema)));
 
         if (reasoningModel) {
             body.put("max_completion_tokens", maxTokens);

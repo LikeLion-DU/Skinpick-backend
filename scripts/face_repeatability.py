@@ -14,8 +14,12 @@ gpt-5 계열은 temperature 를 고정할 수 없어 재현성 레버가 없으�
       personC/...
 
 판정 기준 — 하나라도 벗어나면 OPENAI_MODEL=gpt-4o 로 되돌린다
-    Skin Score 폭 ≤ 5 · 피부 나이 폭 ≤ 3 · 피부 타입 일치율 100%
-    (총점 5점은 SkinLevel 등급 구간 폭 20 안이라 화면 문구와 뱃지 색이 안 바뀐다)
+    지표 등급이 회차마다 같을 것 · Skin Score 폭 ≤ 5 · 피부 나이 폭 ≤ 3 · 타입 일치율 100%
+
+    등급 안정성이 핵심이다. 총점만 보면 화면 흔들림을 못 잡는다 — SkinLevel 은
+    총점이 아니라 지표마다 따로 계산되므로, 수분이 45→25 로 흔들려도 총점은 4밖에
+    안 움직이는데(게이트 통과) 그 지표의 등급은 NORMAL→CAUTION 으로, 뱃지는
+    WARN→CAUTION 으로 바뀐다. 사용자가 보는 것은 총점이 아니라 그 칸이다.
 
 ★ 계정 일일 요청 한도를 먼저 확인한다. Free 티어는 모델당 하루 50회이고
   이 스크립트는 사람수 × 반복 만큼 쓴다. 3세트 × 5회 = 15회다.
@@ -33,9 +37,15 @@ RUNS = int(sys.argv[2]) if len(sys.argv) > 2 else 5
 # 굳이 비교하려면  MODELS=gpt-5.6-luna,gpt-4o  로 준다.
 MODELS = os.environ.get("MODELS", "gpt-5.6-luna").split(",")
 
-METRICS = ["hydration", "oil", "redness", "trouble", "barrier"]
-AGE_AXES = ["skinTexture", "elasticity", "wrinkles", "skinTone",
-            "pores", "pigmentation", "redness", "blemishMarks"]
+# True 면 "높을수록 나쁨" — SkinLevel 을 매기기 전에 방향을 뒤집는다.
+# SkinAnalysisService.metricDetails / skinAge 의 인자와 같아야 한다.
+METRIC_DIRECTION = {"hydration": False, "oil": True, "redness": True,
+                    "trouble": True, "barrier": False}
+AGE_DIRECTION = {"skinTexture": False, "elasticity": False, "wrinkles": True,
+                 "skinTone": False, "pores": True, "pigmentation": True,
+                 "redness": True, "blemishMarks": True}
+METRICS = list(METRIC_DIRECTION)
+AGE_AXES = list(AGE_DIRECTION)
 # gpt-4o 는 이 조직에서 RPM 3 이다. 벌리지 않으면 429 로 표본이 깨진다.
 GAP_SECONDS = {"gpt-4o": 21}
 
@@ -70,6 +80,18 @@ def photo_labels():
     return {"front": found["FRONT"], "left": found["LEFT"], "right": found["RIGHT"]}
 
 
+def skin_detail():
+    """OpenAiVisionClient.SKIN_DETAIL. detail 이 바뀌면 입력 토큰도 판정도 달라진다."""
+    src = open(f"{ROOT}/src/main/java/com/skinplate/api/infra/openai/OpenAiVisionClient.java").read()
+    return re.search(r'SKIN_DETAIL\s*=\s*"([^"]+)"', src).group(1)
+
+
+def skin_max_tokens():
+    """application.yml 의 skin-max-tokens 기본값."""
+    src = open(f"{ROOT}/src/main/resources/application.yml").read()
+    return int(re.search(r"skin-max-tokens:\s*\$\{SKIN_MAX_TOKENS:(\d+)\}", src).group(1))
+
+
 def schema():
     """SCHEMA_JSON 은 나이 축 8개를 %1$s 로 끼워 넣으므로 같은 치환을 여기서도 한다."""
     src = open(PROMPT).read()
@@ -79,12 +101,33 @@ def schema():
 
 
 def skin_score(d):
-    """SkinScoreCalculator 와 같은 산식."""
+    """SkinScoreCalculator.calculate 와 같은 산식. 저쪽을 바꾸면 여기도 바꾼다."""
     return round((d["hydration"] + d["barrier"]
                   + (100 - d["oil"]) + (100 - d["redness"]) + (100 - d["trouble"])) / 5)
 
 
-def content_for(folder, user_prompt, labels):
+def skin_level(score, higher_is_worse):
+    """SkinLevel.of 와 같은 구간. 화면에 뜨는 등급이 흔들리는지가 이 게이트의 본론이다."""
+    aligned = 100 - score if higher_is_worse else score
+    for bound, name in ((20, "SEVERE"), (40, "CAUTION"), (60, "NORMAL"), (80, "GOOD")):
+        if aligned <= bound:
+            return name
+    return "EXCELLENT"
+
+
+def levels_of(result):
+    """한 응답의 지표 5개 + 나이 축 7개(redness 는 응답에서 빠진다) 등급."""
+    levels = {k: skin_level(result[k], worse) for k, worse in METRIC_DIRECTION.items()}
+    age = result.get("skinAgeAnalysis") or {}
+    for axis, worse in AGE_DIRECTION.items():
+        if axis == "redness":
+            continue        # SkinAnalysisService.skinAge 가 응답에서 뺀다
+        if axis in age:
+            levels[f"age.{axis}"] = skin_level(age[axis]["score"], worse)
+    return levels
+
+
+def content_for(folder, user_prompt, labels, detail):
     parts = [{"type": "text", "text": user_prompt}]
     for slot in ["front", "left", "right"]:
         path = next((f"{folder}/{slot}{ext}" for ext in (".jpg", ".jpeg", ".png")
@@ -95,11 +138,11 @@ def content_for(folder, user_prompt, labels):
         parts.append({"type": "text", "text": f"[{labels[slot]}]"})
         parts.append({"type": "image_url", "image_url": {
             "url": f"data:{media};base64," + base64.b64encode(open(path, "rb").read()).decode(),
-            "detail": "high"}})
+            "detail": detail}})
     return parts
 
 
-def call(key, model, system, content, sch):
+def call(key, model, system, content, sch, max_tokens):
     """OpenAiVisionClient.call() 과 같은 본문. 모델별 규약 분기도 같다."""
     body = {"model": model,
             "messages": [{"role": "system", "content": system},
@@ -107,10 +150,10 @@ def call(key, model, system, content, sch):
             "response_format": {"type": "json_schema", "json_schema": {
                 "name": "skin_analysis", "strict": True, "schema": sch}}}
     if "gpt-5" in model:
-        body["max_completion_tokens"] = 1400
+        body["max_completion_tokens"] = max_tokens
         body["reasoning_effort"] = "low"
     else:
-        body["max_tokens"] = 1400
+        body["max_tokens"] = max_tokens
         body["temperature"] = 0.2
 
     request = urllib.request.Request(
@@ -124,7 +167,13 @@ def call(key, model, system, content, sch):
         return {"ok": True, "latency": time.time() - started, "usage": payload["usage"],
                 "data": json.loads(payload["choices"][0]["message"]["content"])}
     except urllib.error.HTTPError as e:
-        message = json.loads(e.read().decode()).get("error", {}).get("message", "")
+        # 502·503 은 게이트웨이가 HTML 을 돌려준다. 여기서 json.loads 가 터지면
+        # 아래 except Exception 이 못 잡는다 — 같은 try 의 형제 절이라서다.
+        raw = e.read().decode(errors="replace")
+        try:
+            message = json.loads(raw).get("error", {}).get("message", "")
+        except ValueError:
+            message = raw
         return {"ok": False, "latency": time.time() - started, "code": e.code,
                 "rate_limited": e.code == 429, "error": message[:160]}
     except Exception as e:
@@ -140,7 +189,7 @@ def spread(values):
 
 def main():
     key, system, user_prompt, sch = api_key(), block("SYSTEM"), block("USER"), schema()
-    labels = photo_labels()
+    labels, detail, max_tokens = photo_labels(), skin_detail(), skin_max_tokens()
 
     people = sorted(d for d in os.listdir(FACES) if os.path.isdir(f"{FACES}/{d}"))
     if not people:
@@ -153,10 +202,10 @@ def main():
         per_person, limited, failed = [], 0, 0
 
         for person in people:
-            content = content_for(f"{FACES}/{person}", user_prompt, labels)
+            content = content_for(f"{FACES}/{person}", user_prompt, labels, detail)
             data = []
             for i in range(RUNS):
-                result = call(key, model, system, content, sch)
+                result = call(key, model, system, content, sch, max_tokens)
                 if result["ok"]:
                     d = result["data"]
                     data.append((d, result))
@@ -177,8 +226,14 @@ def main():
             scores = [skin_score(d) for d in results]
             ages = [d["skinAgeAnalysis"]["estimatedSkinAge"] for d in results]
             types = [d["skinType"]["primary"] for d in results]
+            # 회차마다 등급이 흔들린 칸을 모은다. 이게 화면에서 실제로 바뀌는 것이다.
+            per_run_levels = [levels_of(d) for d in results]
+            unstable = sorted({key for key in per_run_levels[0]
+                               if len({lv.get(key) for lv in per_run_levels}) > 1})
+
             per_person.append({
                 "metric_range": {k: spread([d[k] for d in results]) for k in METRICS},
+                "unstable_levels": unstable,
                 "score_range": spread(scores),
                 "age_range": spread(ages),
                 "axis_range": statistics.mean(
@@ -203,6 +258,7 @@ def main():
                 "worst_score_range": max(p["score_range"] for p in per_person),
                 "worst_age_range": max(p["age_range"] for p in per_person),
                 "worst_type_agree": min(p["type_agree"] for p in per_person),
+                "unstable_levels": sorted({k for p in per_person for k in p["unstable_levels"]}),
                 "rate_limited": limited, "failed": failed,
             }
 
@@ -227,7 +283,10 @@ def main():
 
     print("\n판정 — 얼굴 세트 중 가장 나쁜 값으로 본다 (하나라도 벗어나면 미달)")
     for model, s in summary.items():
-        checks = [(f"Skin Score 최대 폭 {s['worst_score_range']:.0f} ≤ {PASS_SCORE_RANGE}",
+        unstable = s["unstable_levels"]
+        checks = [(f"등급이 흔들린 칸 {len(unstable)}개"
+                   + (f" — {', '.join(unstable)}" if unstable else ""), not unstable),
+                  (f"Skin Score 최대 폭 {s['worst_score_range']:.0f} ≤ {PASS_SCORE_RANGE}",
                    s["worst_score_range"] <= PASS_SCORE_RANGE),
                   (f"피부 나이 최대 폭 {s['worst_age_range']:.0f} ≤ {PASS_AGE_RANGE}",
                    s["worst_age_range"] <= PASS_AGE_RANGE),

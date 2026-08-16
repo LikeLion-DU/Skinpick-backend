@@ -60,6 +60,9 @@ public class SkinAnalysisService {
     private static final int MIN_SKIN_AGE = 18;
     private static final int MAX_SKIN_AGE = 80;
 
+    /** 응답에 실리는 나이 축 개수. AI 는 8개를 내지만 redness 는 빼고 내린다. */
+    private static final int AGE_AXIS_COUNT = 7;
+
     /** 경향은 최대 둘까지만 보여준다. 넷을 다 이어 붙이면 label 이 한 줄을 넘는다. */
     private static final int TRAITS_MAX = 2;
 
@@ -211,12 +214,17 @@ public class SkinAnalysisService {
         // 중복을 걷고 개수를 자른다 — evidence 와 같은 이유다. strict 스키마에 maxItems 가
         // 없어서 넷이 다 오거나 같은 값이 두 번 올 수 있고, 그 label 을 앱이 그대로
         // 그리므로 S05 칩 줄이 무너진다.
+        // 자르기 전에 enum 선언 순서로 정렬한다. AI 가 준 순서대로 자르면 DEHYDRATED 가
+        // 뒤에 왔을 때 잘려 나가고, 그러면 '수부지' 별칭이 영영 안 뜬다 — 그 별칭 하나
+        // 때문에 primary/traits 를 나눈 것이라 순서에 맡길 수 없다. 정렬은 label 을
+        // 결정적으로 만드는 효과도 같이 낸다.
         List<String> names = detail.skinType().traits();
         List<SkinTrait> traits = names == null ? List.of()
                 : names.stream()
                        .map(name -> parseEnum(SkinTrait.class, name))
                        .filter(Objects::nonNull)
                        .distinct()
+                       .sorted()
                        .limit(TRAITS_MAX)
                        .toList();
 
@@ -241,14 +249,16 @@ public class SkinAnalysisService {
         addAxis(axes, "pigmentation", age.pigmentation(), true);
         addAxis(axes, "blemishMarks", age.blemishMarks(), true);
 
-        // 축이 하나도 없거나 나이가 범위 밖이면 통째로 없는 것으로 본다.
-        // clamp 만 하면 estimatedSkinAge 가 빠진 응답(0)이 18 로 둔갑해서, 화면에
-        // "피부 나이 18세" 라는 없는 데이터가 그려진다. skinType() 도 같은 이유로
-        // 쓸 수 없으면 null 을 돌려준다.
-        if (axes.isEmpty()
+        // 축이 하나라도 빠지거나 나이가 범위 밖이면 통째로 없는 것으로 본다.
+        //
+        // 일부만 채워 내보내면 안 된다 — 계약이 axes[7] 이라 앱이 인덱스로 그리면
+        // 피부톤 라벨 밑에 모공 숫자가 찍힌다. clamp 로 살리는 것도 안 된다.
+        // estimatedSkinAge 가 빠진 응답(0)이 18 로 둔갑해서 화면에 "피부 나이 18세"
+        // 라는 없는 데이터가 그려진다. skinType() 과 같은 규칙이다 — 의심스러우면 뺀다.
+        if (axes.size() != AGE_AXIS_COUNT
                 || age.estimatedSkinAge() < MIN_SKIN_AGE || age.estimatedSkinAge() > MAX_SKIN_AGE) {
-            log.warn("피부 나이 분석이 비어 있다 — 나이 {} · 축 {}개",
-                    age.estimatedSkinAge(), axes.size());
+            log.warn("피부 나이 분석을 쓸 수 없다 — 나이 {} · 축 {}/{}개",
+                    age.estimatedSkinAge(), axes.size(), AGE_AXIS_COUNT);
             return null;
         }
 

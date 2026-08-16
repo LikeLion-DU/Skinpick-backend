@@ -85,6 +85,21 @@ class SkinAnalysisPromptTest {
     }
 
     @Test
+    @DisplayName("primary enum 이 서버 화이트리스트와 같다 — 어긋나면 그 타입만 응답에서 통째로 사라진다")
+    @SuppressWarnings("unchecked")
+    void primaryEnumMatchesServerWhitelist() {
+        Map<String, Object> properties = (Map<String, Object>) SkinAnalysisPrompt.SCHEMA.get("properties");
+        Map<String, Object> skinType = (Map<String, Object>) properties.get("skinType");
+        Map<String, Object> primary = (Map<String, Object>) ((Map<String, Object>) skinType.get("properties")).get("primary");
+
+        // SkinAnalysisService.SCHEMA_PRIMARY_TYPES 는 이 목록을 손으로 옮겨 적은 것이다.
+        // 스키마에 SENSITIVE 를 넣고 저쪽을 안 고치면, 그 값이 온 사용자만 타입 칩이
+        // 통째로 사라지고 근거는 WARN 로그 한 줄뿐이다.
+        assertThat((List<String>) primary.get("enum"))
+                .containsExactlyInAnyOrder("DRY", "NORMAL", "OILY", "COMBINATION");
+    }
+
+    @Test
     @DisplayName("프롬프트가 나이 8축과 등급 없음을 말한다 — 축 이름이 빠지면 그 축만 조용히 비어 온다")
     void systemDescribesEveryAgeAxis() {
         assertThat(SkinAnalysisPrompt.SYSTEM).contains(
