@@ -5694,12 +5694,56 @@ class SkinTypeGapDto with _$SkinTypeGapDto {
       _$SkinTypeGapDtoFromJson(json);
 }
 
+/// 점수 하나 + 서버 등급 + 관찰 근거. 지표 5개와 나이 축 7개가 같은 모양으로 온다.
+@freezed
+class ScoredItemDto with _$ScoredItemDto {
+  const factory ScoredItemDto({
+    required String key,
+    required int score,
+    @Default('') String level,          // SEVERE / CAUTION / NORMAL / GOOD / EXCELLENT
+    @Default(<String>[]) List<String> evidence,
+  }) = _ScoredItemDto;
+
+  factory ScoredItemDto.fromJson(Map<String, dynamic> json) =>
+      _$ScoredItemDtoFromJson(json);
+}
+
+/// AI 가 사진에서 읽은 피부 타입. `skinTypeGap.observed`(규칙 도출)와 다른 값이다.
+/// traits 를 enum 으로 올리지 않는다 — 화면 문구는 서버가 조합해 준 label 을 쓴다.
+@freezed
+class AiSkinTypeDto with _$AiSkinTypeDto {
+  const factory AiSkinTypeDto({
+    String? primary,
+    @Default(<String>[]) List<String> traits,
+    @Default('') String label,          // "건성 · 민감 경향"
+  }) = _AiSkinTypeDto;
+
+  factory AiSkinTypeDto.fromJson(Map<String, dynamic> json) =>
+      _$AiSkinTypeDtoFromJson(json);
+}
+
+/// AI 추정 피부 나이. 서버가 쓸 수 없다고 판단하면 키 자체를 생략한다.
+@freezed
+class SkinAgeDto with _$SkinAgeDto {
+  const factory SkinAgeDto({
+    required int estimatedSkinAge,
+    @Default(<ScoredItemDto>[]) List<ScoredItemDto> axes,   // 7개 (붉은기 제외)
+    @Default('') String assessment,
+  }) = _SkinAgeDto;
+
+  factory SkinAgeDto.fromJson(Map<String, dynamic> json) =>
+      _$SkinAgeDtoFromJson(json);
+}
+
 @freezed
 class SkinAnalysisDto with _$SkinAnalysisDto {
   const factory SkinAnalysisDto({
     required int skinAnalysisId,
     required int skinScore,
     required SkinMetricsDto metrics,
+    @Default(<ScoredItemDto>[]) List<ScoredItemDto> metricDetails,
+    AiSkinTypeDto? skinType,            // 예전 분석이면 서버가 키를 생략한다
+    SkinAgeDto? skinAge,                // 예전 분석이면 서버가 키를 생략한다
     @Default('') String summary,
     @Default(<HighlightDto>[]) List<HighlightDto> highlights,
     SkinTypeGapDto? skinTypeGap,        // 미선택이면 서버가 키를 생략한다
@@ -5709,6 +5753,17 @@ class SkinAnalysisDto with _$SkinAnalysisDto {
   factory SkinAnalysisDto.fromJson(Map<String, dynamic> json) =>
       _$SkinAnalysisDtoFromJson(json);
 }
+```
+
+> **세 필드에 `required` 를 쓰지 않는다.** 서버가 `non_null` 이라 예전 분석에서는 키가
+> 통째로 없다. `required` 를 걸면 옛 기록을 여는 순간 앱이 멎는다.
+>
+> **지표 색은 아직 `MetricBand`(60/40) 가 그린다.** 서버 `level` 은 DTO 까지만 올라와 있다 —
+> 여러 화면이 이미 `MetricBand` 를 쓰므로, 갈아끼우는 것은 그 화면들을 같이 손볼 때 한 번에 한다.
+>
+> **화면 문구는 `skinType.label` 을 그대로 쓴다.** 앱이 타입과 경향을 이어 붙이면
+> 조합 규칙이 서버와 앱 두 곳에 생긴다 — '수부지' 별칭이 서버에만 있는 이유이기도 하다.
+```dart
 
 extension SkinAnalysisDtoX on SkinAnalysisDto {
   SkinAnalysis toEntity() => SkinAnalysis(
