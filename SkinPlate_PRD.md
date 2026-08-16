@@ -2598,6 +2598,7 @@ int after = engine.evaluate(new PlateContext(skin, copy)).score();
 |---|---|---|---|
 | `GET /skin/analyses/{id}` | path `id` | ⑤와 동일 구조 | **`findByIdAndUserId`** — 타인의 id면 404 |
 | `GET /plates/{id}` | path `id` | ⑦과 동일 구조 | **`findByIdAndUserId`** — 타인의 id면 404 |
+| `DELETE /plates/{id}` | path `id` | `204 No Content` | **`findByIdAndUserId`** — 타인의 id면 404. 피드백은 cascade 로 함께 삭제, `food_analysis` 는 남긴다(저장 안 한 분석과 같은 상태) |
 | `GET /health` | — | `{"status":"UP"}` | 인증 불필요 |
 
 > **`findByIdAndUserId`를 쓰지 않고 `findById`로 조회하면, 인증을 붙여놓고도 `/plates/1`부터 순서대로 호출해 남의 피부 분석 결과를 전부 읽을 수 있다.** 인증이 있는 시스템에서 가장 흔한 사고 형태이며, 조건 하나로 막힌다.
