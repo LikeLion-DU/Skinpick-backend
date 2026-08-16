@@ -180,8 +180,8 @@ def call(key, model, system, content, sch, max_tokens):
         if choice.get("finish_reason") == "length":
             return {"ok": False, "latency": time.time() - started, "code": "length",
                     "rate_limited": False,
-                    "error": f"출력 상한에서 잘렸다 — SKIN_MAX_TOKENS 를 올려야 한다 "
-                             f"(사용 {payload['usage']['completion_tokens']})"}
+                    "error": "출력 상한에서 잘렸다 — SKIN_MAX_TOKENS 를 올려야 한다 "
+                             f"(사용 {payload.get('usage', {}).get('completion_tokens', '?')})"}
         return {"ok": True, "latency": time.time() - started, "usage": payload["usage"],
                 "data": json.loads(choice["message"]["content"])}
     except urllib.error.HTTPError as e:

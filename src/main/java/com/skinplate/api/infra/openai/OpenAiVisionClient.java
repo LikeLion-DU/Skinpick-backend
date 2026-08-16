@@ -84,11 +84,25 @@ public class OpenAiVisionClient implements VisionClient {
     /** gpt-5 계열에서 reasoning 토큰은 출력 상한을 같이 갉아먹는다. 낮게 물려 상한을 지킨다. */
     private static final String REASONING_EFFORT = "low";
 
+    /**
+     * 네 호출 경로가 같은 규칙을 쓴다. 피부만 막아 두면 음식·문장·인사이트에 0 이
+     * 들어갔을 때 그쪽만 조용히 죽는다 — 위쪽 상한보다 이 아래쪽이 나쁘다.
+     * 아무 로그 없이 기능만 사라지기 때문이다.
+     */
+    private static long clampTimeout(long seconds, String property) {
+        long clamped = Math.max(MIN_TIMEOUT_SECONDS, Math.min(seconds, MAX_TIMEOUT_SECONDS));
+        if (clamped != seconds) {
+            log.warn("{}={} 는 허용 범위({}~{}초) 밖이라 {} 로 조정한다",
+                    property, seconds, MIN_TIMEOUT_SECONDS, MAX_TIMEOUT_SECONDS, clamped);
+        }
+        return clamped;
+    }
+
     /** 429 재시도 대기. 전체 데드라인 계산에도 쓰인다. */
     private static final long RETRY_DELAY_SECONDS = 2;
 
-    /** 이 값 + 재시도 대기 2초 ≤ 클라이언트 상한 32초. */
-    private static final long MAX_SKIN_TIMEOUT_SECONDS = 28;
+    /** 이 값 + 재시도 대기 2초 ≤ 클라이언트 상한 32초. 네 호출 경로에 모두 적용된다. */
+    private static final long MAX_TIMEOUT_SECONDS = 28;
     private static final long MIN_TIMEOUT_SECONDS = 1;
 
     public OpenAiVisionClient(WebClient openAiWebClient,
@@ -100,7 +114,7 @@ public class OpenAiVisionClient implements VisionClient {
         this.openAiWebClient = openAiWebClient;
         this.objectMapper = objectMapper;
         this.model = model;
-        this.timeout = Duration.ofSeconds(timeoutSeconds);
+        this.timeout = Duration.ofSeconds(clampTimeout(timeoutSeconds, "app.ai.timeout-seconds"));
         this.skinMaxTokens = skinMaxTokens;
         this.reasoningModel = model.contains("gpt-5");
 
@@ -108,13 +122,8 @@ public class OpenAiVisionClient implements VisionClient {
         // 앱(32초)이 먼저 끊어 AI_TIMEOUT 분기 — 재시도 버튼 UX 자체 — 가 도달 불가가
         // 되고, 아래로는 0 이 Duration.ZERO 가 되어 모든 분석이 즉시 타임아웃으로 죽는다.
         // 후자가 더 나쁘다. 아무 로그 없이 기능만 사라지기 때문이다.
-        long clamped = Math.max(MIN_TIMEOUT_SECONDS,
-                Math.min(skinTimeoutSeconds, MAX_SKIN_TIMEOUT_SECONDS));
-        if (clamped != skinTimeoutSeconds) {
-            log.warn("app.ai.skin-timeout-seconds={} 는 허용 범위({}~{}초) 밖이라 {} 로 조정한다",
-                    skinTimeoutSeconds, MIN_TIMEOUT_SECONDS, MAX_SKIN_TIMEOUT_SECONDS, clamped);
-        }
-        this.skinTimeout = Duration.ofSeconds(clamped);
+        this.skinTimeout = Duration.ofSeconds(
+                clampTimeout(skinTimeoutSeconds, "app.ai.skin-timeout-seconds"));
 
         // 재현성 레버가 사라진 것을 기동 로그에 남긴다. 모델 이름 한 줄로 조용히
         // 꺼지는 스위치라, 발표 전에 눈에 띄어야 한다. (CLAUDE.md — 재현성이 이 제품의 주장)
@@ -215,7 +224,8 @@ public class OpenAiVisionClient implements VisionClient {
                 .bodyToMono(JsonNode.class)
                 // 타임아웃은 재시도하지 않는다. 재시도까지 하면 앱 타임아웃(32초)을 넘긴다.
                 .timeout(callTimeout)
-                // 429 만 재시도한다. 429 응답은 즉시 오므로 최악은 0.1 + 2 + callTimeout 이다.
+                // 429 만 재시도한다. 429 가 언제 오든 위 전체 데드라인이 총 시간을 묶는다 —
+                // 예전에는 "429 는 즉시 온다"는 가정 위에 계산이 서 있었고, 그건 보장이 아니었다.
                 // 음식·문장(25초)은 ≈27초, 피부(28초)는 ≈30.1초로 둘 다 앱 타임아웃(32초) 안에
                 // 들어온다. 피부를 30초로 두면 32.1초가 되어 앱이 먼저 끊고, 그러면 AI_TIMEOUT
                 // 분기가 도달 불가가 된다 — 재시도 버튼 UX 가 통째로 죽는 자리다.

@@ -245,7 +245,7 @@ class OpenAiVisionClientTest {
     }
 
     @Test
-    @DisplayName("타임아웃은 시도마다 새로 걸린다 — 전체에 한 번이 아니다")
+    @DisplayName("시도마다 타임아웃이 새로 걸린다 — 재시도 대기가 첫 시도 몫을 깎지 않는다")
     void timeoutAppliesPerAttempt() {
         // PRD §17.2 의 "최악 0.1+2+25 ≈ 27초" 계산이 이 전제 위에 서 있다.
         // 전체에 한 번이라면 재시도 대기 2초만으로도 1초 제한을 넘겨 실패해야 한다.
@@ -254,7 +254,9 @@ class OpenAiVisionClientTest {
         OpenAiSkinResult result = clientOf(request -> Mono.delay(Duration.ofMillis(300))
                 .then(Mono.just(calls.incrementAndGet() == 1
                         ? json(HttpStatus.TOO_MANY_REQUESTS, "{}")
-                        : json(HttpStatus.OK, ENVELOPE))), 1).analyzeSkin(PHOTOS);
+                        // 5초로 준다. 시도별 타임아웃만 보려는 테스트인데 1초면 전체
+                        // 데드라인(1+2=3초)이 재시도 도중에 먼저 걸려 CI 에서 흔들린다.
+                        : json(HttpStatus.OK, ENVELOPE))), 5).analyzeSkin(PHOTOS);
 
         assertThat(result.hydration()).isEqualTo(38);
         assertThat(calls.get()).isEqualTo(2);

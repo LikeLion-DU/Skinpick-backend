@@ -35,6 +35,8 @@ public final class Texts {
      */
     public static String ellipsize(String value, int maxLength) {
         if (value == null || value.length() <= maxLength) return value;
+        // maxLength 가 1 이하면 truncate 가 charAt(-1) 로 터진다. 공유 유틸이라 막아 둔다.
+        if (maxLength <= 1) return "…";
 
         return truncate(value, maxLength - 1) + "…";
     }
