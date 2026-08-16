@@ -170,6 +170,31 @@ class SkinPlateServiceTest {
     }
 
     @Test
+    @DisplayName("기록 삭제 — 내 것이면 지운다")
+    void delete_removesOwnPlate() {
+        SkinPlate plate = givenPlate();
+        given(skinPlateRepository.findByIdAndUserId(PLATE_ID, USER_ID))
+                .willReturn(Optional.of(plate));
+
+        skinPlateService.delete(USER_ID, PLATE_ID);
+
+        verify(skinPlateRepository).delete(plate);
+    }
+
+    @Test
+    @DisplayName("남의 기록은 지워지지 않는다 — 403 이 아니라 404 다")
+    void delete_otherUsersPlate_returns404() {
+        given(skinPlateRepository.findByIdAndUserId(PLATE_ID, USER_ID)).willReturn(Optional.empty());
+
+        assertThatThrownBy(() -> skinPlateService.delete(USER_ID, PLATE_ID))
+                .isInstanceOf(BusinessException.class)
+                .extracting(exception -> ((BusinessException) exception).getErrorCode())
+                .isEqualTo(ErrorCode.PLATE_NOT_FOUND);
+
+        verify(skinPlateRepository, never()).delete(any(SkinPlate.class));
+    }
+
+    @Test
     @DisplayName("analyze 는 아무것도 저장하지 않는다 — foodAnalysisRepository·skinPlateRepository 둘 다 save 가 안 불린다")
     void analyze_savesNothing() {
         givenSkinAnalysis();

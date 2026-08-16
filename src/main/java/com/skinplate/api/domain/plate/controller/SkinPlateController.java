@@ -65,6 +65,14 @@ public class SkinPlateController {
         return ApiResponse.ok(skinPlateService.get(userId, plateId));
     }
 
+    /** 기록 삭제. 되돌릴 수 없다 — 앱이 확인 창을 한 번 띄운 뒤 부른다. */
+    @DeleteMapping("/{plateId}")
+    public ResponseEntity<Void> delete(@CurrentUser Long userId,
+                                       @PathVariable Long plateId) {
+        skinPlateService.delete(userId, plateId);
+        return ResponseEntity.noContent().build();
+    }
+
     /**
      * analyze() 의 토큰으로 저장 전에 시뮬레이션한다. 결과 화면에는 아직 plateId 가 없으므로
      * 토큰이 대상을 지목한다 — /plates/records 와 나란한 형태다. 저장하지 않으므로 200 이다.

@@ -226,6 +226,26 @@ public class SkinPlateService {
     }
 
     /**
+     * 기록 하나를 지운다. 되돌릴 수 없으므로 앱이 확인 창을 한 번 띄운다.
+     *
+     * 피드백은 cascade + orphanRemoval 로 함께 지워진다. 반면 FoodAnalysis 는 남긴다 —
+     * 분석만 하고 저장하지 않은 사진도 같은 상태로 남으므로, 여기서만 지우면
+     * "저장했다 지운 것"과 "저장한 적 없는 것"이 다른 취급을 받게 된다.
+     *
+     * 그날의 마지막 기록을 지우면 aiDailyComment 도 함께 사라진다 — 그 문장은
+     * 기록에 딸린 값이지 날짜에 딸린 값이 아니다. 홈은 남은 최신 기록의 문장을 쓴다.
+     *
+     * 타인의 id 면 403 이 아니라 404 다. 존재 여부 자체를 알려주지 않는다.
+     */
+    @Transactional
+    public void delete(Long userId, Long plateId) {
+        SkinPlate plate = skinPlateRepository.findByIdAndUserId(plateId, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.PLATE_NOT_FOUND));
+
+        skinPlateRepository.delete(plate);
+    }
+
+    /**
      * 추천 행동을 실행했다고 가정하고 다시 계산한다. **저장하지 않는다.**
      *
      * readOnly = true 가 핵심 안전망이다. 누군가 실수로 원본을 건드려도 Hibernate 가
