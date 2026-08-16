@@ -6329,7 +6329,7 @@ class MlKitFaceGate implements FaceGate {
   final FaceDetector _detector;
 
   // ---- 게이트 기준 (PRD §9.5) ----
-  static const double _minFaceHeightRatio = 0.40;  // 프레임 높이의 40% 이상
+  static const double _minFaceHeightRatio = 0.34;  // 프레임 높이의 34% 이상
   static const double _maxHeadAngleDeg    = 15.0;  // 정면 허용 범위
   static const int    _minLuminance       = 60;    // 0~255
 
