@@ -55,7 +55,8 @@ public class SkinAnalysisService {
 
     /**
      * evidence 개수 상한. 스키마로는 못 막는다 — strict 모드에 maxItems 가 없다.
-     * 프롬프트가 지시하고 여기서 자른다. 안 자르면 토큰 예산과 S05 레이아웃이 같이 무너진다.
+     * 프롬프트가 지시하고 여기서 자른다. 막는 것은 화면이지 토큰이 아니다 —
+     * 절삭은 응답을 다 받은 뒤라 그 토큰은 이미 생성됐고 과금도 끝났다.
      */
     private static final int METRIC_EVIDENCE_MAX = 2;
     private static final int AGE_EVIDENCE_MAX = 1;
@@ -206,7 +207,8 @@ public class SkinAnalysisService {
 
     /**
      * 점수는 저장된 {@link SkinMetrics} 에서 가져온다. AI 원본이 아니라 clamp 를 거친 값이라
-     * metrics 필드와 metricDetails 가 서로 다른 숫자를 말할 일이 없다.
+     * metrics 필드와 metricDetails 가 서로 다른 숫자를 말할 일이 없고, 0~100 도 보장된다 —
+     * 나이 축과 달리 여기서 범위를 다시 볼 필요가 없는 이유다.
      */
     private List<ScoredItemDto> metricDetails(SkinMetrics metrics, OpenAiSkinResult detail) {
         OpenAiSkinResult.MetricEvidence found = detail == null ? null : detail.metricEvidence();
@@ -296,9 +298,14 @@ public class SkinAnalysisService {
         return new SkinAgeDto(age.estimatedSkinAge(), List.copyOf(axes), assessment);
     }
 
+    /**
+     * 점수가 0~100 밖이면 축을 넣지 않는다. 그러면 아래 개수 검사에서 걸려 카드가
+     * 통째로 빠진다 — clamp 로 살리면 score 키가 빠진 응답(0)이 "피부결 0점 · SEVERE"
+     * 라는 없는 등급으로 화면에 그려진다. estimatedSkinAge 를 clamp 하지 않는 것과 같다.
+     */
     private static void addAxis(List<ScoredItemDto> axes, String key,
                                 OpenAiSkinResult.Axis axis, boolean higherIsWorse) {
-        if (axis == null) return;
+        if (axis == null || !ScoredItemDto.isUsableScore(axis.score())) return;
         axes.add(ScoredItemDto.of(key, axis.score(), higherIsWorse, axis.evidence(), AGE_EVIDENCE_MAX));
     }
 

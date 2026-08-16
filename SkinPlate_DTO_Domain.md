@@ -3744,7 +3744,10 @@ package com.skinplate.api.infra.openai.dto;
 
 /**
  * OpenAI Structured Outputs(json_schema) 응답을 그대로 받는 DTO.
- * 필드명이 skin-analysis-schema.json과 1:1로 일치해야 한다.
+ * 필드명이 SkinAnalysisPrompt.SCHEMA 와 1:1로 일치해야 한다.
+ *
+ * 확장 필드 셋은 null 일 수 있다 — 이 필드들이 생기기 전에 저장된
+ * raw_ai_response 를 다시 읽을 때 그렇다. 그 행도 점수·지표·뱃지는 나와야 한다.
  */
 public record OpenAiSkinResult(
         boolean faceDetected,
@@ -3753,9 +3756,36 @@ public record OpenAiSkinResult(
         int redness,
         int trouble,
         int barrier,
+        MetricEvidence metricEvidence,
+        SkinTypeResult skinType,
+        SkinAgeAnalysis skinAgeAnalysis,
         String summary
-) {}
+) {
+    public record MetricEvidence(List<String> hydration, List<String> oil,
+                                 List<String> redness, List<String> trouble,
+                                 List<String> barrier) {
+        static final MetricEvidence EMPTY = new MetricEvidence(null, null, null, null, null);
+    }
+
+    /** enum 이 아니라 String 이다 — 모르는 값 하나에 역직렬화가 통째로 실패하면 유료 호출이 날아간다. */
+    public record SkinTypeResult(String primary, List<String> traits) {}
+
+    public record Axis(int score, List<String> evidence) {}
+
+    /** estimatedSkinAge 는 AI 가 8축을 종합해 직접 낸다 — 기계적 공식을 두지 않는다. */
+    public record SkinAgeAnalysis(int estimatedSkinAge,
+                                  Axis skinTexture, Axis elasticity, Axis wrinkles, Axis skinTone,
+                                  Axis pores, Axis pigmentation, Axis redness, Axis blemishMarks,
+                                  String ageAssessment) {}
+}
 ```
+
+> **스키마는 파일이 아니라 `SkinAnalysisPrompt.SCHEMA` 다.** `skin-analysis-schema.json` 은
+> 저장소에 존재한 적이 없다 — 프롬프트 클래스 안 텍스트 블록이 원본이다.
+>
+> **점수는 clamp 하지 않는다.** 0~100 밖이면 못 믿는 값이라는 뜻이고, 깎아서 살리면
+> `score` 키가 빠진 응답(0)이 "피부결 0점 · SEVERE" 라는 없는 등급으로 화면에 그려진다.
+> 나이 축은 그 축을 빼고, 7개가 안 되면 카드가 통째로 빠진다.
 
 **`infra/openai/dto/OpenAiFoodResult.java`**
 
