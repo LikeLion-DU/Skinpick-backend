@@ -32,10 +32,17 @@ PHOTO_TYPE = f"{ROOT}/src/main/java/com/skinplate/api/infra/openai/dto/FacePhoto
 
 FACES = sys.argv[1] if len(sys.argv) > 1 else f"{ROOT}/faces"
 RUNS = int(sys.argv[2]) if len(sys.argv) > 2 else 5
+def deployed_model():
+    """application.yml 의 OPENAI_MODEL 기본값. 손으로 적어 두면 모델을 바꾼 날
+    게이트만 배포되지 않은 모델을 재고, 그 측정이 배포 근거로 쓰인다."""
+    src = open(f"{ROOT}/src/main/resources/application.yml").read()
+    return re.search(r"model:\s*\$\{OPENAI_MODEL:([^}]+)\}", src).group(1).strip()
+
+
 # 배포에 나가는 모델만 잰다. 판정 기준이 "gpt-4o 보다 나은가"가 아니라 절대값이라
 # 비교군이 필요 없고, 하루 50회짜리 계정에서 요청이 두 배가 된다.
 # 굳이 비교하려면  MODELS=gpt-5.6-luna,gpt-4o  로 준다.
-MODELS = os.environ.get("MODELS", "gpt-5.6-luna").split(",")
+MODELS = os.environ.get("MODELS", "").split(",") if os.environ.get("MODELS") else None
 
 # True 면 "높을수록 나쁨" — SkinLevel 을 매기기 전에 방향을 뒤집는다.
 # SkinAnalysisService.metricDetails / skinAge 의 인자와 같아야 한다.
@@ -208,6 +215,7 @@ def spread(values):
 def main():
     key, system, user_prompt, sch = api_key(), block("SYSTEM"), block("USER"), schema()
     labels, detail, max_tokens = photo_labels(), skin_detail(), skin_max_tokens()
+    models = MODELS or [deployed_model()]
 
     # os.listdir 을 먼저 부르면 FileNotFoundError 가 나서, 바로 아래 안내가 안 보인다.
     # faces/ 는 .gitignore 대상이라 클론 직후에는 항상 없는 상태다.
@@ -216,10 +224,10 @@ def main():
     if not people:
         sys.exit(f"{FACES} 안에 사람별 폴더가 없다. front/left/right 3장씩 넣어라.")
     print(f"얼굴 {len(people)}세트 · 모델당 세트당 {RUNS}회 "
-          f"→ 총 {len(people) * RUNS * len(MODELS)} 요청\n")
+          f"→ 총 {len(people) * RUNS * len(models)} 요청  ({', '.join(models)})\n")
 
     summary = {}
-    for model in MODELS:
+    for model in models:
         per_person, limited, failed = [], 0, 0
 
         for person in people:

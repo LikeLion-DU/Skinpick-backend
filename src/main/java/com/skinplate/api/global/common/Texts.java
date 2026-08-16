@@ -22,6 +22,9 @@ public final class Texts {
      */
     public static String truncate(String value, int maxLength) {
         if (value == null || value.length() <= maxLength) return value;
+        // 가드를 호출자가 아니라 여기 둔다. charAt(-1) 로 터지는 것은 이 메서드지,
+        // ellipsize 가 아니다 — 다른 곳에서 계산된 길이 0 이 들어와도 500 이 나면 안 된다.
+        if (maxLength <= 0) return "";
 
         int end = Character.isHighSurrogate(value.charAt(maxLength - 1)) ? maxLength - 1 : maxLength;
         return value.substring(0, end);
@@ -35,7 +38,6 @@ public final class Texts {
      */
     public static String ellipsize(String value, int maxLength) {
         if (value == null || value.length() <= maxLength) return value;
-        // maxLength 가 1 이하면 truncate 가 charAt(-1) 로 터진다. 공유 유틸이라 막아 둔다.
         if (maxLength <= 1) return "…";
 
         return truncate(value, maxLength - 1) + "…";

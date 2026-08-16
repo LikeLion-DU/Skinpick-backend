@@ -29,16 +29,30 @@ public record ScoredItemDto(String key, int score, SkinLevel level, List<String>
     public static ScoredItemDto of(String key, int score, boolean higherIsWorse,
                                    List<String> evidence, int maxEvidence) {
 
-        int clamped = Math.max(0, Math.min(100, score));
-        int aligned = higherIsWorse ? 100 - clamped : clamped;
+        int aligned = higherIsWorse ? 100 - score : score;
 
-        return new ScoredItemDto(key, clamped, SkinLevel.of(aligned), trim(evidence, maxEvidence));
+        return new ScoredItemDto(key, score, SkinLevel.of(aligned), trim(evidence, maxEvidence));
+    }
+
+    /**
+     * 0~100 밖이면 못 믿는 값이라는 뜻이다. clamp 로 살리지 않는다 —
+     * {@code score} 키가 빠진 응답은 Jackson 이 0 으로 채우는데, 그걸 깎아 두면
+     * "피부결 0점 · SEVERE" 라는 없는 등급이 화면에 그려진다.
+     * {@code SkinAnalysisService.skinAge} 가 estimatedSkinAge 를 clamp 하지 않는 것과 같은 규칙이다.
+     */
+    public static boolean isUsableScore(int score) {
+        return score >= 0 && score <= 100;
     }
 
     /**
      * 개수와 <b>길이</b>를 같이 자른다. 개수만 막고 길이는 프롬프트를 믿으면, 400자짜리
      * 근거 한 줄이 S05 의 행 높이를 무너뜨린다 — DB 컬럼에 닿지 않아 500 도 안 나고
      * 화면만 조용히 깨진다. 프롬프트 지시는 30자이고 60은 그 두 배의 여유다.
+     *
+     * 이 절삭이 토큰을 아끼지는 않는다. 응답을 다 받은 뒤라 이미 생성·과금된 것을
+     * 버리는 것뿐이다. 토큰까지 아끼려면 스키마의 maxItems 로 막아야 하는데,
+     * strict 모드가 그 키워드를 받는지는 확인하지 않았다 — 같은 스키마가 쓰는
+     * minimum/maximum 이 통과하므로 될 가능성이 높다. 확인은 마감 뒤로 미룬다.
      */
     private static final int EVIDENCE_MAX_LENGTH = 60;
 

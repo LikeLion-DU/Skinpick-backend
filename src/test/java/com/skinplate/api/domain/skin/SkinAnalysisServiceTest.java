@@ -298,6 +298,47 @@ class SkinAnalysisServiceTest {
     }
 
     @Test
+    @DisplayName("나이 축 7개의 방향이 전부 맞다 — 한 축만 뒤집혀도 등급이 반대로 나온다")
+    void analyze_everyAgeAxisUsesTheRightDirection() {
+        givenUser(null);
+        // 모든 축을 80 으로 준다. 높을수록 좋은 축은 GOOD(80), 나쁜 축은 정렬 20 이라
+        // SEVERE 다 — 같은 숫자가 방향에 따라 정반대 등급으로 갈린다.
+        // 방향 표가 오타 하나로 어긋나도 개수는 7 이라 통과하므로 값으로 잡는다.
+        givenSkinResult(new OpenAiSkinResult(true, 38, 52, 64, 25, 78, null, null,
+                new OpenAiSkinResult.SkinAgeAnalysis(29,
+                        axis(80), axis(80), axis(80), axis(80),
+                        axis(80), axis(80), axis(80), axis(80), "설명"),
+                "요약"));
+
+        assertThat(analyzeThreePhotos().skinAge().axes())
+                .extracting(ScoredItemDto::key, ScoredItemDto::level)
+                .containsExactly(
+                        tuple("skinTexture",  SkinLevel.GOOD),      // 높을수록 좋음
+                        tuple("elasticity",   SkinLevel.GOOD),      // 높을수록 좋음
+                        tuple("wrinkles",     SkinLevel.SEVERE),   // 높을수록 나쁨 → 정렬 20
+                        tuple("skinTone",     SkinLevel.GOOD),      // 높을수록 좋음
+                        tuple("pores",        SkinLevel.SEVERE),    // 높을수록 나쁨
+                        tuple("pigmentation", SkinLevel.SEVERE),    // 높을수록 나쁨
+                        tuple("blemishMarks", SkinLevel.SEVERE));   // 높을수록 나쁨
+    }
+
+    @Test
+    @DisplayName("축 점수가 0~100 밖이면 카드를 뺀다 — 깎아서 살리면 없는 등급이 그려진다")
+    void analyze_dropsSkinAgeWhenAnAxisScoreIsOutOfRange() {
+        givenUser(null);
+        // score 키가 빠진 응답을 Jackson 이 0 으로 채운 상황. 깎아 두면
+        // "피부결 0점 · SEVERE" 라는 없는 등급이 화면에 그려진다.
+        givenSkinResult(new OpenAiSkinResult(true, 38, 52, 64, 25, 78, null, null,
+                new OpenAiSkinResult.SkinAgeAnalysis(29,
+                        new OpenAiSkinResult.Axis(-1, List.of()),
+                        axis(76), axis(28), axis(58), axis(42), axis(35), axis(60), axis(30),
+                        "설명"),
+                "요약"));
+
+        assertThat(analyzeThreePhotos().skinAge()).isNull();
+    }
+
+    @Test
     @DisplayName("피부 나이가 18~80 밖이면 카드를 통째로 뺀다 — 80 으로 깎으면 없는 값을 만든 게 된다")
     void analyze_dropsSkinAgeOutsideSchemaRange() {
         givenUser(null);

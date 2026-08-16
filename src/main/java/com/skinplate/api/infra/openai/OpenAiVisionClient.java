@@ -105,6 +105,9 @@ public class OpenAiVisionClient implements VisionClient {
     private static final long MAX_TIMEOUT_SECONDS = 28;
     private static final long MIN_TIMEOUT_SECONDS = 1;
 
+    /** 실측 출력이 442~554 토큰이다. 그 아래로 내려가면 전부 잘린다. */
+    private static final int MIN_SKIN_MAX_TOKENS = 800;
+
     public OpenAiVisionClient(WebClient openAiWebClient,
                               ObjectMapper objectMapper,
                               @Value("${app.ai.model}") String model,
@@ -115,7 +118,14 @@ public class OpenAiVisionClient implements VisionClient {
         this.objectMapper = objectMapper;
         this.model = model;
         this.timeout = Duration.ofSeconds(clampTimeout(timeoutSeconds, "app.ai.timeout-seconds"));
-        this.skinMaxTokens = skinMaxTokens;
+        // 타임아웃과 같은 이유로 상한도 아래를 막는다. SKIN_MAX_TOKENS=100 (1000 오타)이면
+        // reasoning 토큰이 예산을 다 먹어 모든 피부 분석이 finish_reason=length 로 죽는다.
+        this.skinMaxTokens = Math.max(MIN_SKIN_MAX_TOKENS, skinMaxTokens);
+        if (skinMaxTokens < MIN_SKIN_MAX_TOKENS) {
+            log.warn("app.ai.skin-max-tokens={} 는 하한 {} 보다 작아 {} 로 올린다 — "
+                            + "reasoning 토큰이 같은 예산을 쓴다",
+                    skinMaxTokens, MIN_SKIN_MAX_TOKENS, MIN_SKIN_MAX_TOKENS);
+        }
         this.reasoningModel = model.contains("gpt-5");
 
         // 주석 넷이 지키라고 적어 둔 값을 여기서 한 번 강제한다. 위로는 40 을 넣으면

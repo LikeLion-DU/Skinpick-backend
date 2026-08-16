@@ -29,8 +29,10 @@ public record SkinTypeDto(SkinType primary, List<SkinTrait> traits, String label
      */
     private static final String DEHYDRATED_COMBINATION_ALIAS = "수부지";
 
+    /// 형제 DTO(ScoredItemDto)가 null 리스트를 견디므로 여기도 같은 계약을 지킨다.
     public static SkinTypeDto of(SkinType primary, List<SkinTrait> traits) {
-        return new SkinTypeDto(primary, traits, label(primary, traits));
+        List<SkinTrait> safe = traits == null ? List.of() : traits;
+        return new SkinTypeDto(primary, safe, label(primary, safe));
     }
 
     private static String label(SkinType primary, List<SkinTrait> traits) {

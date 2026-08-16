@@ -254,9 +254,12 @@ class OpenAiVisionClientTest {
         OpenAiSkinResult result = clientOf(request -> Mono.delay(Duration.ofMillis(300))
                 .then(Mono.just(calls.incrementAndGet() == 1
                         ? json(HttpStatus.TOO_MANY_REQUESTS, "{}")
-                        // 5초로 준다. 시도별 타임아웃만 보려는 테스트인데 1초면 전체
-                        // 데드라인(1+2=3초)이 재시도 도중에 먼저 걸려 CI 에서 흔들린다.
-                        : json(HttpStatus.OK, ENVELOPE))), 5).analyzeSkin(PHOTOS);
+                        // 2초다. 시나리오가 0.3 + 2(재시도 대기) + 0.3 ≈ 2.6초라,
+                        // 전체 한 번짜리 타임아웃이었다면 2초에서 먼저 끊겨 실패한다 —
+                        // 그게 이 테스트가 증명하려는 것이다. 전체 데드라인은 2+2=4초라
+                        // 여유 1.4초가 남아 CI 에서도 흔들리지 않는다.
+                        // 5초로 두면 전체 예산 안에도 2.6초가 들어가 변별력이 사라진다.
+                        : json(HttpStatus.OK, ENVELOPE))), 2).analyzeSkin(PHOTOS);
 
         assertThat(result.hydration()).isEqualTo(38);
         assertThat(calls.get()).isEqualTo(2);
