@@ -2,12 +2,18 @@ package com.skinplate.api.domain.skin.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.skinplate.api.domain.skin.dto.ScoredItemDto;
+import com.skinplate.api.domain.skin.dto.SkinAgeDto;
 import com.skinplate.api.domain.skin.dto.SkinAnalysisResponse;
+import com.skinplate.api.domain.skin.dto.SkinTypeDto;
 import com.skinplate.api.domain.skin.entity.SkinAnalysis;
 import com.skinplate.api.domain.skin.entity.SkinMetrics;
+import com.skinplate.api.domain.skin.entity.SkinTrait;
 import com.skinplate.api.domain.skin.repository.SkinAnalysisRepository;
 import com.skinplate.api.domain.user.entity.AppUser;
+import com.skinplate.api.domain.user.entity.SkinType;
 import com.skinplate.api.domain.user.repository.AppUserRepository;
+import com.skinplate.api.global.common.Texts;
 import com.skinplate.api.global.exception.BusinessException;
 import com.skinplate.api.global.exception.ErrorCode;
 import com.skinplate.api.global.image.ImageEncoder;
@@ -17,23 +23,52 @@ import com.skinplate.api.infra.openai.dto.FacePhoto;
 import com.skinplate.api.infra.openai.dto.FacePhotoType;
 import com.skinplate.api.infra.openai.dto.OpenAiSkinResult;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 
 /**
  * 피부 분석 흐름 조율. 점수·요약 뱃지·갭 코멘트는 이미 완성된 세 컴포넌트가 계산하고,
  * 이 클래스는 순서와 트랜잭션 경계만 책임진다. (설계서 Part 4 #5)
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class SkinAnalysisService {
 
     /** summary 컬럼이 VARCHAR(300) 이다. */
     private static final int SUMMARY_MAX_LENGTH = 300;
+
+    /** ageAssessment 는 DB 컬럼이 아니라 화면 상한이다. summary 와 같은 값으로 맞춘다. */
+    private static final int ASSESSMENT_MAX_LENGTH = 300;
+
+    /**
+     * evidence 개수 상한. 스키마로는 못 막는다 — strict 모드에 maxItems 가 없다.
+     * 프롬프트가 지시하고 여기서 자른다. 안 자르면 토큰 예산과 S05 레이아웃이 같이 무너진다.
+     */
+    private static final int METRIC_EVIDENCE_MAX = 2;
+    private static final int AGE_EVIDENCE_MAX = 1;
+
+    private static final int MIN_SKIN_AGE = 18;
+    private static final int MAX_SKIN_AGE = 80;
+
+    /** 응답에 실리는 나이 축 개수. AI 는 8개를 내지만 redness 는 빼고 내린다. */
+    private static final int AGE_AXIS_COUNT = 7;
+
+    /** 경향은 최대 둘까지만 보여준다. 넷을 다 이어 붙이면 label 이 한 줄을 넘는다. */
+    private static final int TRAITS_MAX = 2;
+
+    /** SkinAnalysisPrompt.SCHEMA 의 skinType.primary enum 과 같아야 한다. */
+    private static final Set<SkinType> SCHEMA_PRIMARY_TYPES =
+            EnumSet.of(SkinType.DRY, SkinType.NORMAL, SkinType.OILY, SkinType.COMBINATION);
 
     private final AppUserRepository userRepository;
     private final SkinAnalysisRepository skinAnalysisRepository;
@@ -97,25 +132,182 @@ public class SkinAnalysisService {
                 aiResult.hydration(), aiResult.oil(), aiResult.redness(),
                 aiResult.trouble(), aiResult.barrier());
 
+        warnIfSkinTypeContradicts(aiResult.skinType(), metrics);
+
         SkinAnalysis analysis = skinAnalysisRepository.save(SkinAnalysis.create(
                 user, metrics, scoreCalculator.calculate(metrics),
                 trimSummary(aiResult.summary()), toJson(aiResult)));
 
-        return SkinAnalysisResponse.from(analysis,
-                highlightBuilder.build(metrics),
-                skinTypeGapAnalyzer.analyze(user.getDeclaredSkinType(), metrics));
+        return toResponse(analysis, aiResult);
     }
 
     /**
      * highlights 와 skinTypeGap 은 저장하지 않고 조회할 때마다 지표에서 다시 만든다.
      * 파생값을 저장해두면 판정 규칙을 바꿨을 때 과거 기록과 어긋난다. (PRD §14.3 ⑤)
+     *
+     * 근거·피부 타입·피부 나이는 사정이 다르다 — 지표에서 다시 만들 수 없고, AI 를
+     * 한 번 더 부르지 않는 한 복원되지 않는다. 그래서 이미 통째로 저장해 둔 원본 응답을
+     * 되읽는다. 전용 컬럼을 따로 두면 같은 JSON 이 두 벌이 되고 마이그레이션이 하나 는다.
      */
     private SkinAnalysisResponse toResponse(SkinAnalysis analysis) {
+        return toResponse(analysis, parseDetail(analysis.getRawAiResponse()));
+    }
+
+    private SkinAnalysisResponse toResponse(SkinAnalysis analysis, OpenAiSkinResult detail) {
         SkinMetrics metrics = analysis.getMetrics();
 
         return SkinAnalysisResponse.from(analysis,
+                metricDetails(metrics, detail),
+                skinType(detail),
+                skinAge(detail),
                 highlightBuilder.build(metrics),
                 skinTypeGapAnalyzer.analyze(analysis.getUser().getDeclaredSkinType(), metrics));
+    }
+
+    /**
+     * 확장 필드가 생기기 전에 저장된 행은 그 필드들이 null 인 채로 파싱된다 — 그 행도
+     * 점수·지표·뱃지는 그대로 나와야 한다. 스키마를 또 바꿔서 아예 못 읽게 되면 null 이고,
+     * 그때도 조회는 실패하지 않는다. 저장된 값을 못 읽는다고 화면이 죽을 이유가 없다.
+     */
+    private OpenAiSkinResult parseDetail(String rawAiResponse) {
+        if (rawAiResponse == null || rawAiResponse.isBlank()) return null;
+
+        try {
+            return objectMapper.readValue(rawAiResponse, OpenAiSkinResult.class);
+        } catch (Exception e) {
+            log.warn("저장된 AI 응답을 읽지 못했다 — 상세 없이 응답한다: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 점수는 저장된 {@link SkinMetrics} 에서 가져온다. AI 원본이 아니라 clamp 를 거친 값이라
+     * metrics 필드와 metricDetails 가 서로 다른 숫자를 말할 일이 없다.
+     */
+    private List<ScoredItemDto> metricDetails(SkinMetrics metrics, OpenAiSkinResult detail) {
+        OpenAiSkinResult.MetricEvidence found = detail == null ? null : detail.metricEvidence();
+        OpenAiSkinResult.MetricEvidence evidence =
+                found != null ? found : OpenAiSkinResult.MetricEvidence.EMPTY;
+
+        return List.of(
+                ScoredItemDto.of("hydration", metrics.getHydration(), false, evidence.hydration(), METRIC_EVIDENCE_MAX),
+                ScoredItemDto.of("oil",       metrics.getOil(),       true,  evidence.oil(),       METRIC_EVIDENCE_MAX),
+                ScoredItemDto.of("redness",   metrics.getRedness(),   true,  evidence.redness(),   METRIC_EVIDENCE_MAX),
+                ScoredItemDto.of("trouble",   metrics.getTrouble(),   true,  evidence.trouble(),   METRIC_EVIDENCE_MAX),
+                ScoredItemDto.of("barrier",   metrics.getBarrier(),   false, evidence.barrier(),   METRIC_EVIDENCE_MAX));
+    }
+
+    /** 스키마가 enum 을 강제하지만 그건 OpenAI 쪽 약속이다. 모르는 값이 오면 버린다. */
+    private SkinTypeDto skinType(OpenAiSkinResult detail) {
+        if (detail == null || detail.skinType() == null) return null;
+
+        // enum 통과만 보면 안 된다. SkinType 에는 UNKNOWN("잘 모르겠어요")과 SENSITIVE 도
+        // 있는데 전자는 사용자 미선택 표식이고 후자는 traits 쪽 개념이다. 스키마가 허용한
+        // 넷인지까지 봐야 "AI 가 관찰한 피부 타입: 잘 모르겠어요" 가 화면에 안 뜬다.
+        SkinType primary = parseEnum(SkinType.class, detail.skinType().primary());
+        if (primary == null) return null;
+        if (!SCHEMA_PRIMARY_TYPES.contains(primary)) {
+            log.warn("AI 가 스키마에 없는 피부 타입을 보냈다: {}", primary);
+            return null;
+        }
+
+        // 중복을 걷고 개수를 자른다 — evidence 와 같은 이유다. strict 스키마에 maxItems 가
+        // 없어서 넷이 다 오거나 같은 값이 두 번 올 수 있고, 그 label 을 앱이 그대로
+        // 그리므로 S05 칩 줄이 무너진다.
+        // 자르기 전에 enum 선언 순서로 정렬한다. AI 가 준 순서대로 자르면 DEHYDRATED 가
+        // 뒤에 왔을 때 잘려 나가고, 그러면 '수부지' 별칭이 영영 안 뜬다 — 그 별칭 하나
+        // 때문에 primary/traits 를 나눈 것이라 순서에 맡길 수 없다. 정렬은 label 을
+        // 결정적으로 만드는 효과도 같이 낸다.
+        List<String> names = detail.skinType().traits();
+        List<SkinTrait> traits = names == null ? List.of()
+                : names.stream()
+                       .map(name -> parseEnum(SkinTrait.class, name))
+                       .filter(Objects::nonNull)
+                       .distinct()
+                       .sorted()
+                       .limit(TRAITS_MAX)
+                       .toList();
+
+        return SkinTypeDto.of(primary, traits);
+    }
+
+    /**
+     * 나이 축 redness 는 응답에 넣지 않는다. 상태 지표에 이미 redness 가 있어서 둘 다
+     * 내리면 화면에 붉은기 숫자가 둘이 되고, 값이 다를 때 사용자가 어느 쪽을 믿을지 알 수 없다.
+     * AI 판단과 ageAssessment 근거에는 그대로 반영되고 원본은 raw_ai_response 에 남는다.
+     */
+    private SkinAgeDto skinAge(OpenAiSkinResult detail) {
+        if (detail == null || detail.skinAgeAnalysis() == null) return null;
+        OpenAiSkinResult.SkinAgeAnalysis age = detail.skinAgeAnalysis();
+
+        List<ScoredItemDto> axes = new ArrayList<>();
+        addAxis(axes, "skinTexture",  age.skinTexture(),  false);
+        addAxis(axes, "elasticity",   age.elasticity(),   false);
+        addAxis(axes, "wrinkles",     age.wrinkles(),     true);
+        addAxis(axes, "skinTone",     age.skinTone(),     false);
+        addAxis(axes, "pores",        age.pores(),        true);
+        addAxis(axes, "pigmentation", age.pigmentation(), true);
+        addAxis(axes, "blemishMarks", age.blemishMarks(), true);
+
+        // 축이 하나라도 빠지거나 나이가 범위 밖이면 통째로 없는 것으로 본다.
+        //
+        // 일부만 채워 내보내면 안 된다 — 계약이 axes[7] 이라 앱이 인덱스로 그리면
+        // 피부톤 라벨 밑에 모공 숫자가 찍힌다. clamp 로 살리는 것도 안 된다.
+        // estimatedSkinAge 가 빠진 응답(0)이 18 로 둔갑해서 화면에 "피부 나이 18세"
+        // 라는 없는 데이터가 그려진다. skinType() 과 같은 규칙이다 — 의심스러우면 뺀다.
+        if (axes.size() != AGE_AXIS_COUNT
+                || age.estimatedSkinAge() < MIN_SKIN_AGE || age.estimatedSkinAge() > MAX_SKIN_AGE) {
+            log.warn("피부 나이 분석을 쓸 수 없다 — 나이 {} · 축 {}/{}개",
+                    age.estimatedSkinAge(), axes.size(), AGE_AXIS_COUNT);
+            return null;
+        }
+
+        // 프롬프트는 1~3문장을 지시하지만 그건 권고다. DB 컬럼에 안 닿아 500 이 나지 않으므로
+        // 폭주하면 화면만 조용히 깨진다 — summary 와 같은 상한으로 막는다.
+        return new SkinAgeDto(age.estimatedSkinAge(), List.copyOf(axes),
+                Texts.truncate(age.ageAssessment(), ASSESSMENT_MAX_LENGTH));
+    }
+
+    private static void addAxis(List<ScoredItemDto> axes, String key,
+                                OpenAiSkinResult.Axis axis, boolean higherIsWorse) {
+        if (axis == null) return;
+        axes.add(ScoredItemDto.of(key, axis.score(), higherIsWorse, axis.evidence(), AGE_EVIDENCE_MAX));
+    }
+
+    /**
+     * 로그를 남기는 이유 — 프롬프트나 enum 이름을 바꾸면 그 값만 조용히 사라지고
+     * S05 의 칩이 통째로 안 그려진다. 그때 원인을 알 방법이 이 한 줄뿐이다.
+     * {@code FoodAnalysisService.toIngredientTag} · {@code StandardFoodTable.toCookingMethod}
+     * 도 같은 상황에서 같은 이유로 로그를 남긴다.
+     */
+    private static <E extends Enum<E>> E parseEnum(Class<E> type, String name) {
+        if (name == null) return null;
+        try {
+            return Enum.valueOf(type, name);
+        } catch (IllegalArgumentException e) {
+            log.warn("AI 가 모르는 {} 값을 보냈다: {}", type.getSimpleName(), name);
+            return null;
+        }
+    }
+
+    /**
+     * 명백한 모순만 로그로 남긴다. <b>재분류는 하지 않는다</b> — 갭 카드가 쓰는 observed 는
+     * 여전히 규칙에서 나오므로(PRD §14.3), AI 가 틀려도 화면은 흔들리지 않는다.
+     * 그래도 남기는 이유는 프롬프트가 언제부터 어긋났는지 알 방법이 이것뿐이라서다.
+     */
+    private void warnIfSkinTypeContradicts(OpenAiSkinResult.SkinTypeResult skinType, SkinMetrics metrics) {
+        if (skinType == null || skinType.primary() == null) return;
+
+        boolean contradicts = switch (skinType.primary()) {
+            case "OILY" -> !metrics.isOily();     // 유분 임계(70)를 못 넘겼는데 지성이라 함
+            case "DRY"  -> !metrics.isDry();      // 수분 임계(40) 이상인데 건성이라 함
+            default     -> false;
+        };
+
+        if (contradicts) {
+            log.warn("AI 피부 타입 {} 이 지표와 어긋난다 — 수분 {} 유분 {}",
+                    skinType.primary(), metrics.getHydration(), metrics.getOil());
+        }
     }
 
     /**
@@ -133,20 +325,12 @@ public class SkinAnalysisService {
     }
 
     /**
-     * 프롬프트의 "40자 이내"는 권고일 뿐이라 AI 가 길게 답할 수 있다.
-     * 300자를 넘기면 저장에서 터지는데, 그 시점엔 25초짜리 유료 호출이 이미 끝나 있어
-     * 되돌릴 방법이 없다. 잘라서라도 결과를 돌려준다.
+     * 프롬프트의 "1~3문장, 200자 이내"는 권고일 뿐이라 AI 가 길게 답할 수 있다.
+     * 300자를 넘기면 저장에서 터지는데(summary 컬럼이 VARCHAR(300)), 그 시점엔
+     * 유료 호출이 이미 끝나 있어 되돌릴 방법이 없다. 잘라서라도 결과를 돌려준다.
      */
     private String trimSummary(String summary) {
-        if (summary == null || summary.length() <= SUMMARY_MAX_LENGTH) return summary;
-
-        // 경계가 이모지 한가운데면 반쪽짜리 문자가 남고, Postgres 가 UTF-8 인코딩에서 거절한다.
-        // 막으려던 그 500 이 그대로 난다.
-        int end = Character.isHighSurrogate(summary.charAt(SUMMARY_MAX_LENGTH - 1))
-                ? SUMMARY_MAX_LENGTH - 1
-                : SUMMARY_MAX_LENGTH;
-
-        return summary.substring(0, end);
+        return Texts.truncate(summary, SUMMARY_MAX_LENGTH);
     }
 
     /** raw_ai_response 는 jsonb 다. 파싱된 결과를 다시 직렬화해 원본 형태로 남긴다. */

@@ -100,8 +100,8 @@ class SkinAnalysisControllerTest {
     }
 
     private static SkinAnalysisResponse response() {
-        return new SkinAnalysisResponse(101L, 55, null, "요약", List.of(), null,
-                LocalDateTime.of(2026, 8, 13, 12, 30));
+        return new SkinAnalysisResponse(101L, 55, null, List.of(), null, null,
+                "요약", List.of(), null, LocalDateTime.of(2026, 8, 13, 12, 30));
     }
 
     /** 인증은 이 테스트의 관심사가 아니다. 필터가 넣어 주는 값만 흉내 낸다. */

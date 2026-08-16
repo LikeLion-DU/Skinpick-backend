@@ -552,7 +552,7 @@ flowchart TB
     end
 
     subgraph Infra["🔌 Infrastructure"]
-        OPENAI[OpenAI Vision API<br/>gpt-4o]
+        OPENAI[OpenAI Vision API<br/>gpt-5.6-luna]
     end
 
     DB[(PostgreSQL<br/>로컬 Docker 16 · 배포 Supabase 17)]
@@ -593,7 +593,7 @@ flowchart TB
 | **인증** | **Spring Security + jjwt** | **6.3 / 0.12.x** | **JWT 검증 필터, BCrypt 해싱** |
 | ORM | Spring Data JPA | - | 빠른 CRUD |
 | DB | PostgreSQL | 16 | JSONB로 AI 원본 응답 저장 |
-| AI | OpenAI | gpt-4o | Vision + Structured Outputs 지원 |
+| AI | OpenAI | gpt-5.6-luna | Vision + Structured Outputs 지원. gpt-4o 대비 TPM 6배·비용 1/8 (§17.2) |
 | 문서화 | springdoc-openapi | 2.x | Swagger UI 자동 생성 |
 | 로컬 DB | Docker Compose | - | 개발 중 Postgres만 컨테이너로 |
 | **배포 · 백엔드** | **가비아 VM** (멋사 제공) | 2 vCore · 4GB · 1TB | **확정.** Docker 로 띄운다. HTTPS·본문 상한은 리버스 프록시 몫 (§9.6) |
@@ -2255,6 +2255,31 @@ public class Recommendation extends BaseTimeEntity {
       "trouble": 25,
       "barrier": 78
     },
+    "metricDetails": [
+      { "key": "hydration", "score": 38, "level": "CAUTION", "evidence": ["볼과 입가에 부분적인 각질이 보임"] },
+      { "key": "oil",       "score": 52, "level": "NORMAL",  "evidence": ["T존에 중간 정도의 광택이 보임"] },
+      { "key": "redness",   "score": 64, "level": "CAUTION", "evidence": ["코와 볼 주변에 붉은기가 뚜렷함"] },
+      { "key": "trouble",   "score": 25, "level": "GOOD",    "evidence": ["작은 융기가 소수만 보임"] },
+      { "key": "barrier",   "score": 78, "level": "GOOD",    "evidence": ["전반적인 피부결이 균일한 편임"] }
+    ],
+    "skinType": {
+      "primary": "DRY",
+      "traits": ["SENSITIVE_TENDENCY"],
+      "label": "건성 · 민감 경향"
+    },
+    "skinAge": {
+      "estimatedSkinAge": 29,
+      "axes": [
+        { "key": "skinTexture",  "score": 72, "level": "GOOD",   "evidence": ["볼과 이마의 피부결이 균일한 편임"] },
+        { "key": "elasticity",   "score": 76, "level": "GOOD",   "evidence": ["턱선의 처짐이 뚜렷하지 않음"] },
+        { "key": "wrinkles",     "score": 28, "level": "GOOD",   "evidence": ["이마에 얕은 선이 일부 보임"] },
+        { "key": "skinTone",     "score": 58, "level": "NORMAL", "evidence": ["볼 주변 톤이 다소 고르지 않음"] },
+        { "key": "pores",        "score": 42, "level": "NORMAL", "evidence": ["코 주변 모공이 일부 보임"] },
+        { "key": "pigmentation", "score": 35, "level": "GOOD",   "evidence": ["볼에 작은 색소가 일부 보임"] },
+        { "key": "blemishMarks", "score": 30, "level": "GOOD",   "evidence": ["작은 트러블 흔적이 일부 보임"] }
+      ],
+      "assessment": "피부결과 탄력이 좋은 편이고 눈에 띄는 주름도 많지 않아 비교적 젊은 피부 외관으로 보여요."
+    },
     "summary": "피부 장벽은 양호하지만 건조하고 홍조가 관찰됩니다.",
     "highlights": [
       { "label": "피부 장벽 양호", "status": "GOOD" },
@@ -2277,13 +2302,27 @@ public class Recommendation extends BaseTimeEntity {
 >
 > `observed`는 AI에게 묻지 않는다. 5개 지표에서 **규칙으로 도출**한다(§4.4.1). 같은 지표면 항상 같은 타입이 나와야 갭 코멘트도 재현 가능하다. **이 값은 DB에 저장하지 않는다** — 지표에서 언제든 다시 계산되는 파생값이라 저장하면 규칙을 바꿨을 때 과거 데이터와 어긋난다.
 
+> **`skinType` 과 `skinTypeGap.observed` 는 서로 다른 값이다.** `skinType` 은 AI 가 사진에서 읽은 것이고, `observed` 는 위 규칙 도출값이다. 둘이 갈리는 것은 오류가 아니다 — 갭 카드는 계속 규칙값을 쓰고, 백엔드는 명백한 모순일 때 경고 로그만 남긴다. **재분류하지 않는다.**
+>
+> **`level` 은 AI 가 아니라 Backend 가 만든다.** 방향을 "높을수록 좋음"으로 맞춘 점수에 `SEVERE(0~20) · CAUTION(21~40) · NORMAL(41~60) · GOOD(61~80) · EXCELLENT(81~100)` 를 적용한다. 그래서 `oil: 52` 가 `NORMAL`(정렬 48)이고 `trouble: 25` 가 `GOOD`(정렬 75)이다. **`score` 는 뒤집지 않은 원값이므로 바 길이는 이 값으로 그린다.**
+>
+> **`skinAge.axes` 는 7개다.** AI 는 8축(+`redness`)을 평가하지만 응답에는 넣지 않는다 — `metricDetails` 에 이미 `redness` 가 있어 둘 다 내리면 화면에 붉은기 숫자가 둘이 되고, 값이 다를 때 사용자가 어느 쪽을 믿을지 알 수 없다. AI 판단과 `assessment` 근거에는 그대로 반영되고 원본은 `raw_ai_response` 에 남는다.
+>
+> **`estimatedSkinAge` 는 Skin Score 계산에 들어가지 않는다.** 실제 생물학적 나이의 측정값이 아니라 사진 기반 외관 추정이며, 앱은 "사진 속 피부결, 주름, 탄력, 피부톤 등을 종합한 AI 추정값입니다"를 함께 띄운다.
+>
+> **`metricDetails` 는 `metrics` 를 대체하지 않는다.** `metrics` 는 기존 계약 그대로 남는다. `skinType` · `skinAge` 는 이 기능 이전에 저장된 분석에서는 키가 생략되고, `metricDetails[].evidence` 는 빈 배열이 된다.
+
 **처리 흐름**
 
 ```
 세 장 각각 검증(매직바이트) → 각각 Base64 → OpenAI Vision 1회 (Structured Output)
-     → 5개 지표 수신 → SkinScoreCalculator로 종합 점수 산출
-     → highlights 생성 → (선언 타입이 있으면) skinTypeGap 생성
-     → DB 저장 → 응답
+     → 5개 지표 · 지표별 근거 · 피부 타입 · 피부 나이 8축 수신
+     → SkinScoreCalculator로 종합 점수 산출 (나이는 여기 안 들어간다)
+     → level 산출 · highlights 생성 · (선언 타입이 있으면) skinTypeGap 생성
+     → DB 저장 (AI 원본은 raw_ai_response 에 통째로) → 응답
+
+GET /latest · GET /{id} 는 raw_ai_response 를 되읽어 근거·타입·나이를 복원한다.
+지표에서 재계산할 수 없는 값이라 파생값 재계산 규칙(§14.3 ⑤)의 예외다.
 ```
 
 ---
@@ -2715,25 +2754,21 @@ public record MeResponse(
 public record SkinAnalysisResponse(
         Long skinAnalysisId,
         int skinScore,
-        SkinMetricsDto metrics,
+        SkinMetricsDto metrics,               // 기존 계약 그대로. S05 의 지표 바가 읽는다
+        List<ScoredItemDto> metricDetails,    // 같은 5개에 등급과 관찰 근거를 붙인 것
+        SkinTypeDto skinType,                 // AI 가 읽은 타입. 없으면 null → 키 생략
+        SkinAgeDto skinAge,                   // 예전 분석이면 null → 키 생략
         String summary,
         List<HighlightDto> highlights,
-        SkinTypeGapDto skinTypeGap,      // 선언 타입이 없으면 null → 키 생략
+        SkinTypeGapDto skinTypeGap,           // 선언 타입이 없으면 null → 키 생략
         LocalDateTime analyzedAt
 ) {
     public static SkinAnalysisResponse from(SkinAnalysis e,
+                                            List<ScoredItemDto> metricDetails,
+                                            SkinTypeDto skinType,
+                                            SkinAgeDto skinAge,
                                             List<HighlightDto> highlights,
-                                            SkinTypeGapDto gap) {
-        return new SkinAnalysisResponse(
-                e.getId(),
-                e.getSkinScore(),
-                SkinMetricsDto.from(e.getMetrics()),
-                e.getSummary(),
-                highlights,
-                gap,
-                e.getCreatedAt()
-        );
-    }
+                                            SkinTypeGapDto gap) { ... }
 }
 
 public record SkinMetricsDto(int hydration, int oil, int redness, int trouble, int barrier) {
@@ -2744,7 +2779,31 @@ public record SkinMetricsDto(int hydration, int oil, int redness, int trouble, i
 }
 
 public record HighlightDto(String label, String status) {}   // GOOD / WARN / CAUTION
+
+/**
+ * 점수 하나 + 등급 + 관찰 근거. 피부 상태 5지표와 피부 나이 7축이 화면에서 같은
+ * 모양(바 + 뱃지 + 한 줄)이라 DTO 를 하나만 둔다.
+ *
+ * score 는 뒤집지 않은 원값이다 — 바 길이는 이 값으로 그린다.
+ * level 은 방향을 맞춘 뒤 Backend 가 계산한다. AI 는 등급을 반환하지 않는다.
+ */
+public record ScoredItemDto(String key, int score, SkinLevel level, List<String> evidence) {}
+
+/** 0~20 SEVERE · 21~40 CAUTION · 41~60 NORMAL · 61~80 GOOD · 81~100 EXCELLENT */
+public enum SkinLevel { SEVERE, CAUTION, NORMAL, GOOD, EXCELLENT }
+
+/** primary 는 DRY · NORMAL · OILY · COMBINATION 만. SENSITIVE 는 traits 쪽이다 */
+public record SkinTypeDto(SkinType primary, List<SkinTrait> traits, String label) {}
+
+public enum SkinTrait { DEHYDRATED, OILY_T_ZONE, SENSITIVE_TENDENCY, TROUBLE_TENDENCY }
+
+/** axes 는 7개다 — AI 는 redness 도 평가하지만 응답에는 넣지 않는다(§14.3) */
+public record SkinAgeDto(int estimatedSkinAge, List<ScoredItemDto> axes, String assessment) {}
 ```
+
+> **`ScoredItemDto` 를 5지표와 나이 축이 공유한다.** 둘로 나누면 등급 계산이 두 벌이 되고, 한쪽만 고쳐지는 날이 온다.
+>
+> **`evidence` 는 개수와 길이를 Backend 가 자른다** — 지표당 2개 · 나이 축당 1개 · 문장당 60자. OpenAI strict 스키마가 `maxItems` 를 지원하지 않아 프롬프트로만 지시되기 때문이다. `assessment` 도 300자에서 자른다.
 
 ### 15.5 Skin Plate DTO
 
@@ -3162,7 +3221,7 @@ sequenceDiagram
     participant C as Controller
     participant S as SkinAnalysisService
     participant O as OpenAiVisionClient
-    participant AI as OpenAI gpt-4o
+    participant AI as OpenAI gpt-5.6-luna
     participant D as PostgreSQL
 
     F->>C: POST /skin/analyses (multipart)<br/>front · left · right<br/>Authorization: Bearer …
@@ -3191,7 +3250,9 @@ public class OpenAiVisionClient {
     private final WebClient openAiWebClient;
     private final ObjectMapper objectMapper;
 
-    private static final String MODEL = "gpt-4o";
+    // 모델은 app.ai.model 에서 주입된다. gpt-5 계열이면 요청 규약이 갈린다
+    //   max_completion_tokens + reasoning_effort · temperature 미전송(1 고정)
+    private final String model;
 
     public OpenAiSkinResult analyzeSkin(List<FacePhoto> photos) {
         // 사진마다 앞에 방향 라벨을 끼운다. 순서로만 구분하면 한 장이 밀려도 드러나지 않는다.
@@ -3260,44 +3321,27 @@ public class OpenAiVisionClient {
 
 ### 17.3 프롬프트 설계
 
-**피부 분석 System Prompt**
+**피부 분석 System Prompt · JSON Schema**
 
-```
-당신은 피부 이미지 분석 어시스턴트입니다.
-얼굴 사진을 보고 아래 5개 지표를 0~100 정수로 평가하세요.
-
-- hydration : 피부 수분감. 높을수록 촉촉함
-- oil       : 유분기. 높을수록 번들거림
-- redness   : 홍조. 높을수록 붉고 자극된 상태
-- trouble   : 여드름/뾰루지/염증. 높을수록 심함
-- barrier   : 피부 장벽 건강. 높을수록 매끄럽고 안정적
-
-규칙
-1. 반드시 주어진 JSON 스키마로만 응답한다.
-2. 의학적 진단이나 질환명을 언급하지 않는다.
-3. 얼굴이 인식되지 않으면 faceDetected를 false로 한다.
-4. summary는 한국어 1문장, 40자 이내로 작성한다.
-5. 판단 근거가 부족한 지표는 50에 가깝게 평가한다.
-```
-
-**JSON Schema**
-
-```json
-{
-  "type": "object",
-  "properties": {
-    "faceDetected": { "type": "boolean" },
-    "hydration": { "type": "integer", "minimum": 0, "maximum": 100 },
-    "oil":       { "type": "integer", "minimum": 0, "maximum": 100 },
-    "redness":   { "type": "integer", "minimum": 0, "maximum": 100 },
-    "trouble":   { "type": "integer", "minimum": 0, "maximum": 100 },
-    "barrier":   { "type": "integer", "minimum": 0, "maximum": 100 },
-    "summary":   { "type": "string" }
-  },
-  "required": ["faceDetected","hydration","oil","redness","trouble","barrier","summary"],
-  "additionalProperties": false
-}
-```
+> **원본은 `SkinAnalysisPrompt.java` 다.** 프롬프트가 4,800자에 스키마가 12개 오브젝트라
+> 여기 복사해 두면 한쪽만 고쳐지고, 문서에서 재생성한 사람이 피부 나이와 피부 타입을
+> 통째로 되돌린다. 실제로 v1.4 → 이번 확장에서 그럴 뻔했다.
+>
+> 구조만 적는다 — 한 번의 호출로 아래를 모두 받는다.
+>
+> | 블록 | 내용 |
+> |---|---|
+> | [A] 피부 상태 | 5개 지표 0~100 + 지표별 `metricEvidence` 최대 2개 |
+> | [B] 피부 타입 | `primary` DRY·NORMAL·OILY·COMBINATION 중 하나 + `traits` 4종 중 관찰된 것 |
+> | [C] 피부 나이 | 8개 축 0~100 + 축별 evidence 1개 (구간 정의는 소스의 rubric) |
+> | [D] `estimatedSkinAge` | 18~80 정수. 8축을 종합하되 평균을 나이로 환산하지 않는다 |
+> | [E] `ageAssessment` | 1~3문장, '~보여요' 체 |
+> | [F] `summary` | 1~3문장 200자 이내, '~합니다' 체 |
+>
+> **AI 는 점수만 낸다.** 등급(`level`)도 Skin Score 도 Backend 가 계산한다(§4.1 · §14.3).
+> 스키마 strict 모드는 모든 오브젝트에 `additionalProperties:false` 와 전 필드 `required` 를
+> 요구하며, `maxItems` 를 지원하지 않아 evidence 개수·길이는 Backend 가 자른다.
+> 이 불변식은 `SkinAnalysisPromptTest` 가 구조적으로 검증한다.
 
 **음식 분석 JSON Schema**
 
@@ -3381,20 +3425,71 @@ public class MockOpenAiVisionClient implements VisionClient {
 |---|---|---|
 | 이미지 detail | 음식 `low` / 피부 `high` | 음식은 고정 85토큰. 피부는 얼굴 크롭 후 전송해 타일 수를 줄인다 |
 | 클라이언트 리사이즈 | 1024px / q80 | 업로드 트래픽 1/5 |
-| max_tokens | 800 | 출력 폭주 방지 |
+| max_tokens | 음식·문장 800 / **피부 1,400** | 출력 폭주 방지. 피부만 5지표 + 8축 + 근거라 따로 둔다 |
 
-**실제 비용 산정 (gpt-4o · $2.50 / $10 per 1M)**
+**실제 비용 산정 (gpt-5.6-luna · $0.20 / $1.20 per 1M — 실측)**
 
 | 항목 | 토큰 | 비용 |
 |---|---|---|
-| 피부 분석 (얼굴 크롭 `high` = 85 + 170×4타일, **×3방향**) | 3,395 in / 250 out | $0.0110 |
-| 음식 분석 (`low` = 85) | 785 in / 500 out | $0.0070 |
-| 추천 문장 생성 (텍스트) | 600 in / 400 out | $0.0055 |
-| **플로우 1회** | | **$0.024 (약 33원)** |
+| 피부 분석 (얼굴 크롭 `high` ×3방향 + 확장 스키마) | 5,643 in / 554 out | $0.0018 |
+| 음식 분석 (`low` = 85) | 785 in / 215 out | $0.0004 |
+| 추천 문장 생성 (텍스트) | 600 in / 400 out | $0.0006 |
+| **플로우 1회** | | **$0.0032 (약 4.4원)** |
 
-조직 크레딧 **$100 기준 약 4,200회**를 돌릴 수 있다. 개발 10일간 하루 80회(800회) + 리허설 50회 + 심사위원 체험 30회를 다 합쳐도 **$21, 예산의 21%**다.
+조직 크레딧 **$100 기준 약 31,000회**를 돌릴 수 있다. **예산은 더 이상 어떤 결정에도 개입하지 않는다.**
 
-> 3방향 촬영으로 피부 분석 입력이 1,265 → 3,395 토큰이 됐다. 회당 5.7원이 늘었고 예산 비중은 16% → 21%다. **여전히 제약이 아니다** — 세 각도를 종합한다는 것이 이 분석의 근거이므로 여기서 아끼면 아낄 대상을 잘못 고른 것이다.
+> gpt-4o 시절 플로우 1회가 $0.024(약 33원)였고, 피부 나이 8축이 붙어 출력이 250 → 554 토큰으로 늘었는데도 회당 비용은 **1/7.6**이 됐다. 모델을 바꾼 이유는 비용이 아니라 아래 처리량이다.
+
+**모델 선정 근거 (2026-08-17 실측)**
+
+| | gpt-4o | **gpt-5.6-luna** | gpt-5.6-terra |
+|---|---|---|---|
+| TPM | 10,000 | **60,000** | 10,000 |
+| RPM (조직 실측) | **3** | ≥5 | **3** |
+| 동시 3건 | **3/3 429** | 0/3 429 | — |
+| 비용/건 | $0.0177 | **$0.0021** | $0.0176 |
+| 사진 3장 지연 | 3.1초 | **2.5초** | 2.6초 |
+| `temperature=0.2` | ✓ | ✗ (1 고정) | ✗ |
+
+> **결정은 처리량이 갈랐다.** gpt-4o 는 이 조직에서 **RPM 3**이라 심사위원 두 명이 연달아 촬영하면 네 번째 요청부터 429다. 429 재시도는 2초 뒤인데 한도 창은 60초라 재시도로도 회복되지 않는다. 흔들리는 점수는 설명할 수 있지만 "분석 실패"는 못 한다.
+>
+> **대가는 `temperature=0.2` 다.** gpt-5 계열은 temperature 가 1로 고정이라 재현성 레버를 잃는다. synthetic 입력 반복 측정에서 Skin Score 변동 폭이 2 → 4 였다. 다만 **총점이 4점 흔들려도 `SkinLevel` 등급 구간 폭이 20이라 화면 문구와 뱃지 색은 바뀌지 않는다.**
+>
+> **미검증으로 남긴 것** — 실제 얼굴 사진 반복성은 아직 측정하지 못했다(테스트용 얼굴 세트 없음). 하네스는 준비돼 있고, 실기기 QA 때 세트당 5회씩 돌려 Skin Score 폭 ≤ 5 · 나이 폭 ≤ 3 · 타입 일치율 100% 를 확인한다. 여기서 벗어나면 `OPENAI_MODEL=gpt-4o` 환경변수 한 줄로 되돌린다.
+>
+> terra 는 후보에서 뺐다 — luna 보다 나은 항목이 하나도 없다. 나이 변동 폭 7 대 2, 비용 9.8배, TPM 1/6, RPM 3.
+
+**🚨 모델보다 먼저 풀어야 할 것 — 계정 일일 한도 (2026-08-17 실측)**
+
+| | 요청/일(RPD) | TPM | RPM |
+|---|---|---|---|
+| gpt-4o | **50** | 10,000 | 3 |
+| gpt-5.6-luna | **50** | 60,000 | — |
+
+**두 모델 모두 하루 50회다.** 모델을 무엇으로 고르든 이 벽이 먼저 온다.
+
+```
+전체 플로우 1회 = 피부 분석 1 + 음식 분석 1 + 문장 생성 1 + 인사이트 1 = 4 요청
+50 ÷ 4 = 하루 12.5 회
+```
+
+§17.1 이 잡아 둔 "리허설 50회 + 심사위원 체험 30회"는 **하루 320 요청**이라 한도의 6배가 넘는다. 예산(크레딧)은 남는데 **요청 수에서 먼저 막힌다** — §17.1 의 "예산은 제약이 아니다"는 여전히 맞지만, 제약이 다른 축에 있었다.
+
+**원인은 크레딧이 아니라 결제 이력이다.** 티어는 *"$X paid"* — 지금까지 **결제한 누적 금액**으로 오른다. 크레딧을 아무리 써도 결제 이력이 0이면 Free 에 머문다. 429 본문이 그대로 말한다 — *"You can increase your rate limit by adding a payment method to your account."*
+
+| | 조건 | gpt-5.6-luna 한도 |
+|---|---|---|
+| Free (현재) | — | RPM ? · TPM 60,000 · **RPD 50** |
+| **Tier 1** | **$5 결제** | RPM 500 · TPM 500,000 · **RPD 표에 없음** |
+| Tier 2 | $50 결제 | RPM 5,000 · TPM 2,000,000 |
+
+**$5 한 번 결제하면 TPM 8배에 일일 한도가 사라진다.** 공식 모델 문서의 Tier 1~5 표에는 RPD 항목 자체가 없다 — 일일 한도는 Free 전용 제약으로 보인다. 크레딧은 그대로 남아 먼저 소진되므로 $5 는 사실상 티어 해제 비용이다.
+
+> 결제 수단을 이미 걸어 뒀는데도 이 에러가 난다면 **대시보드의 프로젝트 단위 rate limit** 을 확인한다(Settings → Limits). 손으로 걸어 둔 상한도 같은 429 를 만든다.
+
+> **최우선 조치.** 08-21 업로드 마감 전에 결제 수단을 등록하고 한도를 다시 잰다. 이걸 안 하면 발표 당일 리허설만으로 그날 몫을 다 쓰고, 심사위원 앞에서 "분석에 실패했습니다"가 뜬다. `AI_MOCK=true` 백업 플랜(§17.4)이 있지만 그건 고정 응답이라 심사위원이 자기 얼굴을 찍는 순간 무너진다.
+>
+> **롤백 경로도 이 한도를 공유한다.** `OPENAI_MODEL=gpt-4o` 로 되돌려도 gpt-4o 의 50회를 이미 썼다면 그날은 못 쓴다 — 두 모델의 한도가 따로 세어지므로 하루 최대 100회이긴 하지만, 되돌리는 상황이라면 이미 급한 상황이다.
 
 > **예산은 제약이 아니다.** 그래서 피부 분석을 `detail:"high"`로 올리는 결정에 비용 부담이 없고, 일일 호출 제한(30회)도 개발을 방해하기만 한다. 제한 로직을 만드는 데 쓸 반나절을 다른 데 쓰는 편이 낫다.
 | ~~호출 제한~~ | — | **만들지 않는다.** 아래 산정대로 예산의 16%만 쓴다. 제한 로직은 개발만 방해한다 |
@@ -3998,8 +4093,10 @@ app:
       password: ${TEST_ACCOUNT_PASSWORD:test1234!}
   ai:
     api-key: ${OPENAI_API_KEY}
-    model: gpt-4o
+    model: ${OPENAI_MODEL:gpt-5.6-luna}
     timeout-seconds: 25
+    skin-max-tokens: ${SKIN_MAX_TOKENS:1400}
+    skin-timeout-seconds: ${SKIN_TIMEOUT_SECONDS:28}   # 30 이면 429 재시도 시 클라이언트 상한(32초) 초과
     mock: ${AI_MOCK:false}
 
 spring:

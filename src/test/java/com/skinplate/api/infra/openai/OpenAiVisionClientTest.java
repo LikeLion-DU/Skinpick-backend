@@ -38,6 +38,10 @@ import static org.assertj.core.api.Assertions.catchThrowable;
  */
 class OpenAiVisionClientTest {
 
+    /**
+     * 확장 필드(metricEvidence · skinType · skinAgeAnalysis)가 없는 <b>예전 응답 모양</b>이다.
+     * 이게 그대로 파싱돼야 조회 경로가 과거에 저장된 raw_ai_response 를 읽을 수 있다.
+     */
     private static final String CONTENT = """
             {"faceDetected":true,"hydration":38,"oil":52,"redness":64,
              "trouble":25,"barrier":78,"summary":"건조하고 홍조가 관찰됩니다."}""";
@@ -52,10 +56,21 @@ class OpenAiVisionClientTest {
             new FacePhoto(FacePhotoType.LEFT, "TEVGVA==", "image/png"),
             new FacePhoto(FacePhotoType.RIGHT, "UklHSFQ=", "image/jpeg"));
 
+    /**
+     * <b>기본 모델은 배포에 나가는 것과 같아야 한다.</b> 아래 타임아웃·429 재시도·5xx·파싱
+     * 실패 검증이 전부 이 클라이언트를 쓰는데, 여기가 gpt-4o 면 정작 프로덕션이 타는
+     * gpt-5 분기는 요청 모양 테스트 하나만 덮게 된다 — 실제로 그런 상태였다.
+     *
+     * 피부 타임아웃도 같은 값으로 준다 — 타임아웃 분기 테스트가 피부 호출로 돌아간다.
+     */
     private OpenAiVisionClient clientOf(ExchangeFunction exchange, long timeoutSeconds) {
+        return clientOf(exchange, timeoutSeconds, "gpt-5.6-luna");
+    }
+
+    private OpenAiVisionClient clientOf(ExchangeFunction exchange, long timeoutSeconds, String model) {
         return new OpenAiVisionClient(
                 WebClient.builder().exchangeFunction(exchange).build(),
-                new ObjectMapper(), "gpt-4o", timeoutSeconds);
+                new ObjectMapper(), model, timeoutSeconds, 1400, timeoutSeconds);
     }
 
     private static ClientResponse json(HttpStatus status, String body) {
@@ -103,9 +118,9 @@ class OpenAiVisionClientTest {
     }
 
     @Test
-    @DisplayName("인사이트만 출력 상한이 넓다 — 800 에서 잘리면 재시도해도 같은 자리에서 또 잘린다")
-    void insightAsksForMoreTokensThanTheRest() {
-        String insightEnvelope = """
+    @DisplayName("호출마다 출력 상한이 다르다 — 피부 1400 · 인사이트 1200 · 나머지 800")
+    void eachCallAsksForItsOwnTokenBudget() {
+        String textEnvelope = """
                 {"choices":[{"message":{"content":%s}}]}"""
                 .formatted(new ObjectMapper().valueToTree(
                         "{\"summary\":\"요약\",\"topics\":[{\"category\":\"DRY\",\"description\":\"설명\"}]}")
@@ -114,7 +129,7 @@ class OpenAiVisionClientTest {
         StringBuilder insight = new StringBuilder();
         clientOf(request -> {
             insight.append(bodyOf(request));
-            return Mono.just(json(HttpStatus.OK, insightEnvelope));
+            return Mono.just(json(HttpStatus.OK, textEnvelope));
         }, 5).generateSkinInsight("무시된다");
 
         StringBuilder skin = new StringBuilder();
@@ -123,10 +138,52 @@ class OpenAiVisionClientTest {
             return Mono.just(json(HttpStatus.OK, ENVELOPE));
         }, 5).analyzeSkin(PHOTOS);
 
+        String commentEnvelope = """
+                {"choices":[{"message":{"content":%s}}]}"""
+                .formatted(new ObjectMapper().valueToTree(
+                        "{\"aiTip\":\"팁\",\"dailyComment\":\"코멘트\"}").toString());
+
+        StringBuilder comment = new StringBuilder();
+        clientOf(request -> {
+            comment.append(bodyOf(request));
+            return Mono.just(json(HttpStatus.OK, commentEnvelope));
+        }, 5).generateComments("무시된다");
+
         // 한국어 문장 넷(summary + description ×3)이 800 토큰 상한에 닿는다.
-        assertThat(insight.toString()).contains("\"max_tokens\":1200");
-        // 나머지 호출은 그대로 800 — 상한을 다 같이 올리면 출력 폭주 방어가 함께 헐거워진다.
-        assertThat(skin.toString()).contains("\"max_tokens\":800");
+        assertThat(insight.toString()).contains("\"max_completion_tokens\":1200");
+        // 피부는 5지표 + 8축 + 근거라 출력이 인사이트보다도 크다. 프로퍼티로 주입된다.
+        assertThat(skin.toString()).contains("\"max_completion_tokens\":1400");
+        // 문장 생성은 그대로 800 — 상한을 다 같이 올리면 출력 폭주 방어가 함께 헐거워진다.
+        assertThat(comment.toString()).contains("\"max_completion_tokens\":800");
+    }
+
+    @Test
+    @DisplayName("gpt-5 계열은 요청 규약이 다르다 — max_tokens 와 temperature 를 보내면 400 이다")
+    void reasoningModelUsesItsOwnRequestShape() {
+        StringBuilder luna = new StringBuilder();
+        clientOf(request -> {
+            luna.append(bodyOf(request));
+            return Mono.just(json(HttpStatus.OK, ENVELOPE));
+        }, 5, "gpt-5.6-luna").analyzeSkin(PHOTOS);
+
+        // 실측 400: "Use 'max_completion_tokens' instead" / "Only the default (1) value is supported"
+        assertThat(luna.toString())
+                .contains("\"max_completion_tokens\":1400")
+                .contains("\"reasoning_effort\":\"low\"")   // reasoning 이 출력 상한을 갉아먹는다
+                .doesNotContain("\"max_tokens\"")
+                .doesNotContain("\"temperature\"");
+
+        StringBuilder gpt4o = new StringBuilder();
+        clientOf(request -> {
+            gpt4o.append(bodyOf(request));
+            return Mono.just(json(HttpStatus.OK, ENVELOPE));
+        }, 5, "gpt-4o").analyzeSkin(PHOTOS);   // 롤백 경로
+
+        assertThat(gpt4o.toString())
+                .contains("\"max_tokens\":1400")
+                .contains("\"temperature\":0.2")            // 재현성 레버는 4o 에서만 쓸 수 있다
+                .doesNotContain("max_completion_tokens")
+                .doesNotContain("reasoning_effort");
     }
 
     /** WebClient 는 본문을 BodyInserter 로 들고 있다. 실제로 써 봐야 내용이 보인다. */
@@ -172,6 +229,34 @@ class OpenAiVisionClientTest {
 
         assertThat(result.hydration()).isEqualTo(38);
         assertThat(calls.get()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("출력 상한에서 잘리면 파싱 전에 막는다 — 빈 content 는 형식 오류와 구분되지 않는다")
+    void truncatedResponseIsRejectedBeforeParsing() {
+        // reasoning 토큰이 상한을 다 먹으면 content 가 빈 문자열로 온다. isTextual() 이
+        // true 라 가드를 통과하고, 파싱 단계에서 "No content to map" 으로 뭉개지면
+        // "상한을 올려라"라는 유일한 신호가 사라진다.
+        String truncated = """
+                {"choices":[{"finish_reason":"length","message":{"content":""}}],
+                 "usage":{"completion_tokens":1400,"completion_tokens_details":{"reasoning_tokens":1400}}}""";
+
+        assertThatThrownBy(() -> clientOf(request -> Mono.just(json(HttpStatus.OK, truncated)), 5)
+                .analyzeSkin(PHOTOS))
+                .isInstanceOf(OpenAiClientException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.AI_ANALYSIS_FAILED);
+    }
+
+    @Test
+    @DisplayName("content 가 빈 문자열이면 성공으로 보지 않는다")
+    void blankContentIsNotAcceptedAsSuccess() {
+        String blank = """
+                {"choices":[{"finish_reason":"stop","message":{"content":"   "}}]}""";
+
+        assertThatThrownBy(() -> clientOf(request -> Mono.just(json(HttpStatus.OK, blank)), 5)
+                .analyzeSkin(PHOTOS))
+                .isInstanceOf(OpenAiClientException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.AI_ANALYSIS_FAILED);
     }
 
     @Test
