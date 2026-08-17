@@ -209,14 +209,14 @@ class OpenAiVisionClientTest {
         return timeoutFieldOf("skinTimeout", configured, 12);
     }
 
-    private static Duration reportTimeoutOf(long configured) {
-        return timeoutFieldOf("reportTimeout", 28, configured);
+    private static Duration viewTimeoutOf(long configured) {
+        return timeoutFieldOf("viewTimeout", 28, configured);
     }
 
-    private static Duration timeoutFieldOf(String field, long skinTimeout, long reportTimeout) {
+    private static Duration timeoutFieldOf(String field, long skinTimeout, long viewTimeout) {
         OpenAiVisionClient client = new OpenAiVisionClient(
                 WebClient.builder().build(), new ObjectMapper(),
-                "gpt-5.6-luna", 5, 1400, skinTimeout, reportTimeout);
+                "gpt-5.6-luna", 5, 1400, skinTimeout, viewTimeout);
         return (Duration) ReflectionTestUtils.getField(client, field);
     }
 
@@ -230,7 +230,7 @@ class OpenAiVisionClientTest {
     }
 
     /**
-     * <b>필드를 읽는 것만으로는 부족하다.</b> 배선을 되돌려도(reportTimeout → timeout)
+     * <b>필드를 읽는 것만으로는 부족하다.</b> 배선을 되돌려도(viewTimeout → timeout)
      * 필드는 그대로 채워지므로 리플렉션 단언은 초록으로 남는다. 실제로 호출해서
      * 리포트 예산에서 끊기는지 봐야 이 PR 이 고친 그 한 줄이 검증된다.
      */
@@ -252,8 +252,30 @@ class OpenAiVisionClientTest {
                 .extracting("errorCode").isEqualTo(ErrorCode.AI_TIMEOUT);
     }
 
+    /**
+     * 인사이트는 주간 코멘트보다 나쁜 자리에 있다 — {@code GET /skin-insights} 가 동기로
+     * 기다리는데 실패를 삼키지도 않아, 느린 날 화면이 멎은 끝에 에러가 그대로 뜬다.
+     * 가르는 기준이 "어느 기능인가"가 아니라 "화면이 멎는가"라는 것을 여기서 못 박는다.
+     */
     @Test
-    @DisplayName("리포트 예산을 줄여도 분석 경로는 그대로다 — 한 값이 다섯 경로를 흔들지 않는다")
+    @DisplayName("인사이트도 조회 예산에서 끊긴다 — 화면이 멎는 호출은 둘 다 같은 규칙이다")
+    void insightUsesViewBudget() {
+        ExchangeFunction slow = request -> Mono.delay(Duration.ofMillis(1500))
+                .then(Mono.just(json(HttpStatus.OK, textEnvelopeOf(
+                        "{\"summary\":\"요약\",\"topics\":"
+                                + "[{\"category\":\"DRY\",\"description\":\"설명\"}]}"))));
+
+        OpenAiVisionClient client = new OpenAiVisionClient(
+                WebClient.builder().exchangeFunction(slow).build(), new ObjectMapper(),
+                "gpt-5.6-luna", 5, 1400, 5, 1);
+
+        assertThatThrownBy(() -> client.generateSkinInsight("표"))
+                .isInstanceOf(OpenAiClientException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.AI_TIMEOUT);
+    }
+
+    @Test
+    @DisplayName("조회 예산을 줄여도 분석 경로는 그대로다 — 한 값이 다섯 경로를 흔들지 않는다")
     void analysisPathKeepsItsOwnBudget() {
         ExchangeFunction slow = request -> Mono.delay(Duration.ofMillis(1500))
                 .then(Mono.just(json(HttpStatus.OK, textEnvelopeOf(
@@ -268,18 +290,18 @@ class OpenAiVisionClientTest {
     }
 
     @Test
-    @DisplayName("리포트 타임아웃 상한은 분석과 다른 15초다 — 오타 하나로 조회 화면이 다시 멎지 않는다")
-    void reportTimeoutHasItsOwnCeiling() {
-        assertThat(reportTimeoutOf(12)).isEqualTo(Duration.ofSeconds(12));
+    @DisplayName("조회 타임아웃 상한은 분석과 다른 15초다 — 오타 하나로 조회 화면이 다시 멎지 않는다")
+    void viewTimeoutHasItsOwnCeiling() {
+        assertThat(viewTimeoutOf(12)).isEqualTo(Duration.ofSeconds(12));
 
-        // 28 은 분석의 상한이지 리포트의 상한이 아니다. 그대로 허용하면
-        // REPORT_TIMEOUT_SECONDS 오타 하나로 이 분리가 통째로 무효가 된다.
-        assertThat(reportTimeoutOf(28)).isEqualTo(Duration.ofSeconds(15));
-        assertThat(reportTimeoutOf(40)).isEqualTo(Duration.ofSeconds(15));
+        // 28 은 분석의 상한이지 조회 경로의 상한이 아니다. 그대로 허용하면
+        // VIEW_TIMEOUT_SECONDS 오타 하나로 이 분리가 통째로 무효가 된다.
+        assertThat(viewTimeoutOf(28)).isEqualTo(Duration.ofSeconds(15));
+        assertThat(viewTimeoutOf(40)).isEqualTo(Duration.ofSeconds(15));
 
         // 0 을 넣으면 Duration.ZERO 가 되어 주간 문장이 항상 죽는데,
         // fail-soft 라 화면은 멀쩡해서 아무도 모른다. 하한이 그 자리를 막는다.
-        assertThat(reportTimeoutOf(0)).isEqualTo(Duration.ofSeconds(1));
+        assertThat(viewTimeoutOf(0)).isEqualTo(Duration.ofSeconds(1));
     }
 
     @Test

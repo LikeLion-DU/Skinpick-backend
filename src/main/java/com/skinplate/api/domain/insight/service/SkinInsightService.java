@@ -57,7 +57,7 @@ public class SkinInsightService {
      * 인사이트가 아직 없으면 이 호출 안에서 만든다(lazy 동기 · 추천과 같은 방식).
      *
      * 트랜잭션이 두 번 열리고 그 사이에 AI 호출이 있다. @Transactional 하나로 감싸면
-     * OpenAI 응답을 기다리는 25초 내내 커넥션을 쥐고 있게 된다.
+     * OpenAI 응답을 기다리는 12초 내내 커넥션을 쥐고 있게 된다.
      *
      * (읽기 구간도 같은 TransactionTemplate 을 쓴다. readOnly 플래그가 아니라
      *  "Response.from 이 트랜잭션 안에서 돈다"가 지켜야 할 불변식이고 — open-in-view 가
@@ -87,7 +87,7 @@ public class SkinInsightService {
      *
      * 프롬프트 문자열과 프로필 스냅샷을 여기서 다 만들어 나가는 것이 핵심이다 —
      * user·metrics 를 들고 나가면 트랜잭션 밖에서 LAZY 를 건드리게 되고, 스냅샷을
-     * 저장 구간에서 다시 뽑으면 그 사이 25초 동안의 프로필 변경이 끼어든다.
+     * 저장 구간에서 다시 뽑으면 그 사이 12초 동안의 프로필 변경이 끼어든다.
      */
     private Draft load(Long userId, Long skinAnalysisId) {
         // 타인의 id 면 403 이 아니라 404 다. 존재 여부 자체를 알려주지 않는다.
