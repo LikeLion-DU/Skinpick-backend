@@ -57,7 +57,7 @@ public class TestAccountInitializer implements ApplicationRunner {
      *     slot 2·3  declared = null   → 갭 카드 없음, 인라인 선택 칩
      *     dev1      DRY == DRY        → 일치 메시지
      *     slot 1    OILY vs DRY       → SPECIAL["OILY→DRY"] 전용 문구
-     *     dev2      SENSITIVE vs DRY  → SPECIAL 에 없음 → 폴백 문구
+     *     dev2      SENSITIVE vs DRY  → 민감성 전용 분기 (붉은기 64 → "오늘도 붉은기가…")
      *     dev3      UNKNOWN           → "오늘 측정 기준으로는 …에 가깝습니다"
      */
     private static final List<DevAccount> DEV_ACCOUNTS = List.of(

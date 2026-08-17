@@ -30,11 +30,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.ArrayList;
-import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
 
@@ -83,13 +81,6 @@ public class SkinAnalysisService {
     /** 위 축 중 "높을수록 나쁨". 나머지는 높을수록 좋다. */
     private static final Set<String> AGE_HIGHER_IS_WORSE =
             Set.of("wrinkles", "pores", "pigmentation", "blemishMarks");
-
-    /** 경향은 최대 둘까지만 보여준다. 넷을 다 이어 붙이면 label 이 한 줄을 넘는다. */
-    private static final int TRAITS_MAX = 2;
-
-    /** SkinAnalysisPrompt.SCHEMA 의 skinType.primary enum 과 같아야 한다. */
-    private static final Set<SkinType> SCHEMA_PRIMARY_TYPES =
-            EnumSet.of(SkinType.DRY, SkinType.NORMAL, SkinType.OILY, SkinType.COMBINATION);
 
     private final AppUserRepository userRepository;
     private final SkinAnalysisRepository skinAnalysisRepository;
@@ -153,37 +144,31 @@ public class SkinAnalysisService {
                 aiResult.hydration(), aiResult.oil(), aiResult.redness(),
                 aiResult.trouble(), aiResult.barrier());
 
-        // 한 번만 만든다. 두 번 부르면 enum 파싱 경고가 사고마다 두 줄씩 찍힌다.
-        SkinTypeDto skinType = skinType(aiResult);
-        warnIfSkinTypeContradicts(skinType, metrics);
-
         SkinAnalysis analysis = skinAnalysisRepository.save(SkinAnalysis.create(
                 user, metrics, scoreCalculator.calculate(metrics),
                 trimSummary(aiResult.summary()), toJson(aiResult)));
 
-        return toResponse(analysis, aiResult, skinType);
+        return toResponse(analysis, aiResult);
     }
 
     /**
-     * highlights 와 skinTypeGap 은 저장하지 않고 조회할 때마다 지표에서 다시 만든다.
+     * highlights · skinType · skinTypeGap 은 저장하지 않고 조회할 때마다 지표에서 다시 만든다.
      * 파생값을 저장해두면 판정 규칙을 바꿨을 때 과거 기록과 어긋난다. (PRD §14.3 ⑤)
      *
-     * 근거·피부 타입·피부 나이는 사정이 다르다 — 지표에서 다시 만들 수 없고, AI 를
-     * 한 번 더 부르지 않는 한 복원되지 않는다. 그래서 이미 통째로 저장해 둔 원본 응답을
-     * 되읽는다. 전용 컬럼을 따로 두면 같은 JSON 이 두 벌이 되고 마이그레이션이 하나 는다.
+     * 근거·피부 나이는 사정이 다르다 — 지표에서 다시 만들 수 없고, AI 를 한 번 더
+     * 부르지 않는 한 복원되지 않는다. 그래서 이미 통째로 저장해 둔 원본 응답을 되읽는다.
+     * 전용 컬럼을 따로 두면 같은 JSON 이 두 벌이 되고 마이그레이션이 하나 는다.
      */
     private SkinAnalysisResponse toResponse(SkinAnalysis analysis) {
-        OpenAiSkinResult detail = parseDetail(analysis.getRawAiResponse());
-        return toResponse(analysis, detail, skinType(detail));
+        return toResponse(analysis, parseDetail(analysis.getRawAiResponse()));
     }
 
-    private SkinAnalysisResponse toResponse(SkinAnalysis analysis, OpenAiSkinResult detail,
-                                            SkinTypeDto skinType) {
+    private SkinAnalysisResponse toResponse(SkinAnalysis analysis, OpenAiSkinResult detail) {
         SkinMetrics metrics = analysis.getMetrics();
 
         return SkinAnalysisResponse.from(analysis,
                 metricDetails(metrics, detail),
-                skinType,
+                skinType(metrics, detail),
                 skinAge(detail),
                 highlightBuilder.build(metrics),
                 skinTypeGapAnalyzer.analyze(analysis.getUser().getDeclaredSkinType(), metrics));
@@ -223,38 +208,32 @@ public class SkinAnalysisService {
                 ScoredItemDto.of("barrier",   metrics.getBarrier(),   false, evidence.barrier(),   METRIC_EVIDENCE_MAX));
     }
 
-    /** 스키마가 enum 을 강제하지만 그건 OpenAI 쪽 약속이다. 모르는 값이 오면 버린다. */
-    private SkinTypeDto skinType(OpenAiSkinResult detail) {
-        if (detail == null || detail.skinType() == null) return null;
+    /**
+     * 타입도 상태도 <b>지표에서 규칙으로 만든다</b> — AI 에게 묻지 않는다.
+     *
+     * 그래서 이 값은 {@code skinTypeGap.observed} 와 항상 같다. 예전에는 AI 관찰값이라
+     * 둘이 갈릴 수 있었고, S05 는 제목과 칩에 서로 다른 타입을 나란히 그렸다.
+     *
+     * 피부결·색소만 나이 축에서 빌려 온다. 같은 것을 재는 Vision 값을 새로 만들지
+     * 않으려는 것이다 — 확장 필드가 없던 시절의 기록이면 원본에 없어 null 이고,
+     * 그때는 그 두 상태만 빠진다. 타입과 나머지 넷은 지표에서 나오므로 그대로 나온다.
+     */
+    private SkinTypeDto skinType(SkinMetrics metrics, OpenAiSkinResult detail) {
+        OpenAiSkinResult.SkinAgeAnalysis age = detail == null ? null : detail.skinAgeAnalysis();
 
-        // enum 통과만 보면 안 된다. SkinType 에는 UNKNOWN("잘 모르겠어요")과 SENSITIVE 도
-        // 있는데 전자는 사용자 미선택 표식이고 후자는 traits 쪽 개념이다. 스키마가 허용한
-        // 넷인지까지 봐야 "AI 가 관찰한 피부 타입: 잘 모르겠어요" 가 화면에 안 뜬다.
-        SkinType primary = parseEnum(SkinType.class, detail.skinType().primary());
-        if (primary == null) return null;
-        if (!SCHEMA_PRIMARY_TYPES.contains(primary)) {
-            log.warn("AI 가 스키마에 없는 피부 타입을 보냈다: {}", primary);
-            return null;
-        }
+        return SkinTypeDto.of(
+                SkinType.observe(metrics),
+                SkinTrait.observe(metrics,
+                        axisScore(age == null ? null : age.skinTexture()),
+                        axisScore(age == null ? null : age.pigmentation())));
+    }
 
-        // 중복을 걷고 개수를 자른다 — evidence 와 같은 이유다. strict 스키마에 maxItems 가
-        // 없어서 넷이 다 오거나 같은 값이 두 번 올 수 있고, 그 label 을 앱이 그대로
-        // 그리므로 S05 칩 줄이 무너진다.
-        // 자르기 전에 enum 선언 순서로 정렬한다. AI 가 준 순서대로 자르면 DEHYDRATED 가
-        // 뒤에 왔을 때 잘려 나가고, 그러면 '수부지' 별칭이 영영 안 뜬다 — 그 별칭 하나
-        // 때문에 primary/traits 를 나눈 것이라 순서에 맡길 수 없다. 정렬은 label 을
-        // 결정적으로 만드는 효과도 같이 낸다.
-        List<String> names = detail.skinType().traits();
-        List<SkinTrait> traits = names == null ? List.of()
-                : names.stream()
-                       .map(name -> parseEnum(SkinTrait.class, name))
-                       .filter(Objects::nonNull)
-                       .distinct()
-                       .sorted()
-                       .limit(TRAITS_MAX)
-                       .toList();
-
-        return SkinTypeDto.of(primary, traits);
+    /**
+     * 0~100 밖이면 없는 값으로 본다 — 나이 카드를 통째로 빼는 규칙과 같다.
+     * clamp 하면 score 키가 빠진 응답(0)이 "피부결 거칢" 상태로 둔갑한다.
+     */
+    private static Integer axisScore(OpenAiSkinResult.Axis axis) {
+        return axis != null && ScoredItemDto.isUsableScore(axis.score()) ? axis.score() : null;
     }
 
     /**
@@ -307,45 +286,6 @@ public class SkinAnalysisService {
                                 OpenAiSkinResult.Axis axis, boolean higherIsWorse) {
         if (axis == null || !ScoredItemDto.isUsableScore(axis.score())) return;
         axes.add(ScoredItemDto.of(key, axis.score(), higherIsWorse, axis.evidence(), AGE_EVIDENCE_MAX));
-    }
-
-    /**
-     * 로그를 남기는 이유 — 프롬프트나 enum 이름을 바꾸면 그 값만 조용히 사라지고
-     * S05 의 칩이 통째로 안 그려진다. 그때 원인을 알 방법이 이 한 줄뿐이다.
-     * {@code FoodAnalysisService.toIngredientTag} · {@code StandardFoodTable.toCookingMethod}
-     * 도 같은 상황에서 같은 이유로 로그를 남긴다.
-     */
-    private static <E extends Enum<E>> E parseEnum(Class<E> type, String name) {
-        if (name == null) return null;
-        try {
-            return Enum.valueOf(type, name);
-        } catch (IllegalArgumentException e) {
-            log.warn("AI 가 모르는 {} 값을 보냈다: {}", type.getSimpleName(), name);
-            return null;
-        }
-    }
-
-    /**
-     * 명백한 모순만 로그로 남긴다. <b>재분류는 하지 않는다</b> — 갭 카드가 쓰는 observed 는
-     * 여전히 규칙에서 나오므로(PRD §14.3), AI 가 틀려도 화면은 흔들리지 않는다.
-     * 그래도 남기는 이유는 프롬프트가 언제부터 어긋났는지 알 방법이 이것뿐이라서다.
-     */
-    private void warnIfSkinTypeContradicts(SkinTypeDto skinType, SkinMetrics metrics) {
-        if (skinType == null) return;
-
-        // 문자열이 아니라 이미 파싱된 enum 으로 받는다. 리터럴로 비교하면 SkinType 상수를
-        // 이름만 바꿔도 컴파일은 통과하고 switch 가 default 로 떨어져, 이 경고가 영영
-        // 안 뜬다 — 프롬프트가 언제부터 어긋났는지 알 방법이 이것뿐인데 그게 사라진다.
-        boolean contradicts = switch (skinType.primary()) {
-            case OILY -> !metrics.isOily();     // 유분 임계(70)를 못 넘겼는데 지성이라 함
-            case DRY  -> !metrics.isDry();      // 수분 임계(40) 이상인데 건성이라 함
-            default   -> false;
-        };
-
-        if (contradicts) {
-            log.warn("AI 피부 타입 {} 이 지표와 어긋난다 — 수분 {} 유분 {}",
-                    skinType.primary(), metrics.getHydration(), metrics.getOil());
-        }
     }
 
     /**

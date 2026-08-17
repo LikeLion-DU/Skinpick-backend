@@ -136,7 +136,7 @@ class SkinAnalysisServiceTest {
     @Test
     @DisplayName("faceDetected=false 면 422 이고 저장하지 않는다")
     void analyze_faceNotDetected_throwsAndDoesNotSave() {
-        givenSkinResult(new OpenAiSkinResult(false, 0, 0, 0, 0, 0, null, null, null, null));
+        givenSkinResult(new OpenAiSkinResult(false, 0, 0, 0, 0, 0, null, null, null));
 
         assertThatThrownBy(this::analyzeThreePhotos)
                 .isInstanceOf(BusinessException.class)
@@ -270,7 +270,7 @@ class SkinAnalysisServiceTest {
                 new OpenAiSkinResult.MetricEvidence(
                         List.of("첫째", "둘째", "셋째", "넷째"),   // 넷을 보내도
                         List.of(), List.of("  "), null, List.of("근거")),
-                null, null, "요약"));
+                null, "요약"));
 
         List<ScoredItemDto> details = analyzeThreePhotos().metricDetails();
 
@@ -304,7 +304,7 @@ class SkinAnalysisServiceTest {
         // 모든 축을 80 으로 준다. 높을수록 좋은 축은 GOOD(80), 나쁜 축은 정렬 20 이라
         // SEVERE 다 — 같은 숫자가 방향에 따라 정반대 등급으로 갈린다.
         // 방향 표가 오타 하나로 어긋나도 개수는 7 이라 통과하므로 값으로 잡는다.
-        givenSkinResult(new OpenAiSkinResult(true, 38, 52, 64, 25, 78, null, null,
+        givenSkinResult(new OpenAiSkinResult(true, 38, 52, 64, 25, 78, null,
                 new OpenAiSkinResult.SkinAgeAnalysis(29,
                         axis(80), axis(80), axis(80), axis(80),
                         axis(80), axis(80), axis(80), axis(80), "설명"),
@@ -328,7 +328,7 @@ class SkinAnalysisServiceTest {
         givenUser(null);
         // score 키가 빠진 응답을 Jackson 이 0 으로 채운 상황. 깎아 두면
         // "피부결 0점 · SEVERE" 라는 없는 등급이 화면에 그려진다.
-        givenSkinResult(new OpenAiSkinResult(true, 38, 52, 64, 25, 78, null, null,
+        givenSkinResult(new OpenAiSkinResult(true, 38, 52, 64, 25, 78, null,
                 new OpenAiSkinResult.SkinAgeAnalysis(29,
                         new OpenAiSkinResult.Axis(-1, List.of()),
                         axis(76), axis(28), axis(58), axis(42), axis(35), axis(60), axis(30),
@@ -358,7 +358,7 @@ class SkinAnalysisServiceTest {
     @DisplayName("나이 축이 하나도 없으면 카드를 뺀다 — 나이만 덩그러니 남지 않는다")
     void analyze_dropsSkinAgeWithoutAxes() {
         givenUser(null);
-        givenSkinResult(new OpenAiSkinResult(true, 38, 52, 64, 25, 78, null, null,
+        givenSkinResult(new OpenAiSkinResult(true, 38, 52, 64, 25, 78, null,
                 new OpenAiSkinResult.SkinAgeAnalysis(29,
                         null, null, null, null, null, null, null, null, "설명만 있다"),
                 "요약"));
@@ -367,75 +367,80 @@ class SkinAnalysisServiceTest {
     }
 
     @Test
-    @DisplayName("스키마에 없는 피부 타입은 버린다 — UNKNOWN 은 사용자 미선택 표식이지 관찰값이 아니다")
-    void analyze_dropsSkinTypeOutsideSchema() {
+    @DisplayName("타입과 상태는 지표에서 나온다 — 시연 지표 38/52/64 는 건성 + 붉은기다")
+    void analyze_derivesTypeAndConditionsFromMetrics() {
         givenUser(null);
-        givenSkinResult(new OpenAiSkinResult(true, 38, 52, 64, 25, 78, null,
-                new OpenAiSkinResult.SkinTypeResult("UNKNOWN", List.of()), null, "요약"));
-
-        // enum 에는 있지만 스키마가 허용한 넷이 아니다. 통과시키면 S05 에
-        // "AI 가 관찰한 피부 타입: 잘 모르겠어요" 가 뜬다.
-        assertThat(analyzeThreePhotos().skinType()).isNull();
-    }
-
-    @Test
-    @DisplayName("경향은 중복을 걷고 둘까지만 남긴다 — label 을 앱이 그대로 그린다")
-    void analyze_dedupesAndCapsTraits() {
-        givenUser(null);
-        givenSkinResult(new OpenAiSkinResult(true, 38, 52, 64, 25, 78, null,
-                new OpenAiSkinResult.SkinTypeResult("DRY",
-                        List.of("DEHYDRATED", "DEHYDRATED", "SENSITIVE_TENDENCY", "TROUBLE_TENDENCY")),
-                null, "요약"));
+        givenSkinResult(demoResult("요약"));
 
         SkinTypeDto skinType = analyzeThreePhotos().skinType();
 
-        assertThat(skinType.traits())
-                .containsExactly(SkinTrait.DEHYDRATED, SkinTrait.SENSITIVE_TENDENCY);
-        assertThat(skinType.label()).isEqualTo("건성 · 수분 부족 경향 · 민감 경향");
+        assertThat(skinType.primary()).isEqualTo(SkinType.DRY);           // 수분 38 · 유분 52
+        assertThat(skinType.traits()).containsExactly(SkinTrait.REDNESS_PRONE);   // 붉은기 64
+        // 앱이 조합하지 않도록 서버가 문구까지 만들어 준다 — 갭 카드와 같은 원칙이다
+        assertThat(skinType.label()).isEqualTo("건성 · 붉은기");
     }
 
     @Test
-    @DisplayName("경향을 자를 때 수부지가 살아남는다 — AI 순서대로 자르면 별칭이 영영 안 뜬다")
-    void analyze_keepsDehydratedWhenTruncatingTraits() {
-        givenUser(null);
-        // DEHYDRATED 가 맨 뒤에 왔다. 스키마는 순서를 보장하지 않는다.
-        givenSkinResult(new OpenAiSkinResult(true, 38, 52, 64, 25, 78, null,
-                new OpenAiSkinResult.SkinTypeResult("COMBINATION",
-                        List.of("OILY_T_ZONE", "SENSITIVE_TENDENCY", "DEHYDRATED")),
-                null, "요약"));
-
-        // 순서대로 둘만 남기면 DEHYDRATED 가 잘려 "수부지" 가 안 뜬다.
-        // 그 별칭 하나 때문에 primary/traits 를 나눈 것이라 순서에 맡길 수 없다.
-        assertThat(analyzeThreePhotos().skinType().label())
-                .isEqualTo("복합성 · 수분 부족 경향 · T존 유분 경향(수부지)");
-    }
-
-    @Test
-    @DisplayName("AI 피부 타입은 갭 카드를 건드리지 않는다 — observed 는 계속 규칙에서 나온다")
-    void analyze_aiSkinTypeDoesNotReplaceGapCard() {
+    @DisplayName("skinType 과 skinTypeGap.observed 가 항상 같다 — 한 화면에서 타입이 둘로 갈리지 않는다")
+    void analyze_skinTypeAndObservedAreOneValue() {
         givenUser(SkinType.OILY);
         givenSkinResult(demoResult("요약"));
 
         SkinAnalysisResponse response = analyzeThreePhotos();
 
-        assertThat(response.skinType().primary()).isEqualTo(SkinType.DRY);
-        assertThat(response.skinType().traits()).containsExactly(SkinTrait.SENSITIVE_TENDENCY);
-        // 앱이 조합하지 않도록 서버가 문구까지 만들어 준다 — 갭 카드와 같은 원칙이다
-        assertThat(response.skinType().label()).isEqualTo("건성 · 민감 경향");
-        // 지표 38/52/64/25/78 → observe() 는 DRY. AI 가 뭘 말하든 이 값이 갭 카드를 만든다.
-        assertThat(response.skinTypeGap().observed()).isEqualTo(SkinType.DRY);
+        assertThat(response.skinType().primary()).isEqualTo(response.skinTypeGap().observed());
     }
 
     @Test
-    @DisplayName("모르는 타입·경향 값은 버린다 — 스키마 enum 은 OpenAI 쪽 약속일 뿐이다")
-    void analyze_dropsUnknownSkinTypeValues() {
+    @DisplayName("T존 복합성이 NORMAL 로 떨어지지 않는다 — 예전 규칙은 수분<40 && 유분>70 을 요구했다")
+    void analyze_tZoneCombinationIsNotNormal() {
         givenUser(null);
-        givenSkinResult(new OpenAiSkinResult(true, 38, 52, 64, 25, 78, null,
-                new OpenAiSkinResult.SkinTypeResult("DRY", List.of("DEHYDRATED", "없는값")),
-                null, "요약"));
+        givenSkinResult(metricsOnly(50, 65, 30, 20, 80));
 
-        assertThat(analyzeThreePhotos().skinType().traits())
-                .containsExactly(SkinTrait.DEHYDRATED);
+        assertThat(analyzeThreePhotos().skinType().primary()).isEqualTo(SkinType.COMBINATION);
+    }
+
+    @Test
+    @DisplayName("붉은기·트러블·장벽은 타입이 아니라 상태로 붙는다")
+    void analyze_conditionMetricsDoNotChangeTheType() {
+        givenUser(null);
+        // 수분 50 · 유분 65 = 복합성. 나머지 셋이 전부 나쁘다.
+        givenSkinResult(metricsOnly(50, 65, 90, 90, 10));
+
+        SkinTypeDto skinType = analyzeThreePhotos().skinType();
+
+        assertThat(skinType.primary()).isEqualTo(SkinType.COMBINATION);
+        assertThat(skinType.traits()).containsExactly(
+                SkinTrait.BARRIER_WEAK, SkinTrait.REDNESS_PRONE, SkinTrait.TROUBLE_PRONE);
+    }
+
+    @Test
+    @DisplayName("피부결·색소는 나이 축에서 빌려 와 상태가 된다 — Vision 값을 새로 만들지 않는다")
+    void analyze_reusesAgeAxesAsConditions() {
+        givenUser(null);
+        // 지표 다섯은 전부 멀쩡하고 피부결 30 · 색소 75 만 나쁘다
+        givenSkinResult(withAppearance(70, 40, 30, 20, 80, 30, 75));
+
+        SkinTypeDto skinType = analyzeThreePhotos().skinType();
+
+        assertThat(skinType.primary()).isEqualTo(SkinType.NORMAL);   // 타입은 흔들리지 않는다
+        assertThat(skinType.traits()).containsExactly(
+                SkinTrait.PIGMENTATION_CONCERN, SkinTrait.TEXTURE_CONCERN);
+    }
+
+    @Test
+    @DisplayName("나이 축 점수가 범위 밖이면 그 상태를 만들지 않는다 — 깎아 살리면 없는 상태가 뜬다")
+    void analyze_ignoresOutOfRangeAppearanceScores() {
+        givenUser(null);
+        // score 키가 빠진 응답을 Jackson 이 0 으로 채운 상황. 깎으면 "피부결 거칢" 이 된다.
+        givenSkinResult(new OpenAiSkinResult(true, 70, 40, 30, 20, 80, null,
+                new OpenAiSkinResult.SkinAgeAnalysis(29,
+                        new OpenAiSkinResult.Axis(-1, List.of()),
+                        axis(76), axis(28), axis(58), axis(42), axis(35), axis(60), axis(30),
+                        "설명"),
+                "요약"));
+
+        assertThat(analyzeThreePhotos().skinType().traits()).isEmpty();
     }
 
     @Test
@@ -465,19 +470,16 @@ class SkinAnalysisServiceTest {
     }
 
     @Test
-    @DisplayName("AI 타입이 지표와 어긋나도 재분류하지 않는다 — 경고만 남기고 값은 그대로 내린다")
-    void analyze_contradictingSkinTypeIsKeptNotReclassified() {
-        givenUser(SkinType.OILY);
-        // 수분 90 · 유분 10 인데 AI 가 OILY 라고 한다. 명백한 모순이다.
-        givenSkinResult(new OpenAiSkinResult(true, 90, 10, 10, 10, 90, null,
-                new OpenAiSkinResult.SkinTypeResult("OILY", List.of()), null, "요약"));
+    @DisplayName("민감성을 고른 사용자도 갭 코멘트가 붉은기를 짚는다 — observe() 는 SENSITIVE 를 못 낸다")
+    void analyze_declaredSensitiveIsAnsweredByTheRednessCondition() {
+        givenUser(SkinType.SENSITIVE);
+        givenSkinResult(metricsOnly(70, 40, 90, 20, 80));
 
         SkinAnalysisResponse response = analyzeThreePhotos();
 
-        // 값을 고치지 않는다 — 고치기 시작하면 규칙이 두 벌이 된다
-        assertThat(response.skinType().primary()).isEqualTo(SkinType.OILY);
-        // 갭 카드는 여전히 규칙에서 나온다 (PRD §14.3)
         assertThat(response.skinTypeGap().observed()).isEqualTo(SkinType.NORMAL);
+        assertThat(response.skinTypeGap().message()).contains("오늘도 붉은기가 관찰됩니다");
+        assertThat(response.skinType().traits()).containsExactly(SkinTrait.REDNESS_PRONE);
     }
 
     @Test
@@ -487,7 +489,6 @@ class SkinAnalysisServiceTest {
         givenSkinResult(new OpenAiSkinResult(true, 38, 52, 64, 25, 78,
                 new OpenAiSkinResult.MetricEvidence(
                         List.of("가".repeat(400)), List.of(), List.of(), List.of(), List.of()),
-                null,
                 new OpenAiSkinResult.SkinAgeAnalysis(29,
                         axis(72), axis(76), axis(28), axis(58), axis(42), axis(35), axis(60), axis(30),
                         "나".repeat(900)),
@@ -516,8 +517,41 @@ class SkinAnalysisServiceTest {
         assertThat(response.skinScore()).isEqualTo(55);
         assertThat(response.metricDetails()).hasSize(5);
         assertThat(response.metricDetails().get(0).evidence()).isEmpty();
-        assertThat(response.skinType()).isNull();
         assertThat(response.skinAge()).isNull();
+
+        // 타입과 상태는 지표에서 다시 만들어지므로 예전 기록에도 나온다.
+        // 나이 축이 없어 피부결·색소만 빠진다.
+        assertThat(response.skinType().primary()).isEqualTo(SkinType.DRY);
+        assertThat(response.skinType().traits()).containsExactly(SkinTrait.REDNESS_PRONE);
+    }
+
+    @Test
+    @DisplayName("스키마에서 뺀 skinType 이 남아 있는 옛 기록도 읽는다 — 여기서 터지면 나이까지 같이 사라진다")
+    void getLatest_readsRowsThatStillCarryTheRemovedSkinTypeField() {
+        AppUser user = givenUser(null);
+        SkinAnalysis stored = SkinAnalysis.create(user, SkinMetrics.of(38, 52, 64, 25, 78), 55, "요약",
+                """
+                {"faceDetected":true,"hydration":38,"oil":52,"redness":64,
+                 "trouble":25,"barrier":78,
+                 "skinType":{"primary":"DRY","traits":["SENSITIVE_TENDENCY"]},
+                 "skinAgeAnalysis":{"estimatedSkinAge":29,
+                   "skinTexture":{"score":72,"evidence":[]},
+                   "elasticity":{"score":76,"evidence":[]},
+                   "wrinkles":{"score":28,"evidence":[]},
+                   "skinTone":{"score":58,"evidence":[]},
+                   "pores":{"score":42,"evidence":[]},
+                   "pigmentation":{"score":35,"evidence":[]},
+                   "redness":{"score":60,"evidence":[]},
+                   "blemishMarks":{"score":30,"evidence":[]},
+                   "ageAssessment":"설명"},
+                 "summary":"요약"}""");
+        given(skinAnalysisRepository.findFirstByUserIdOrderByCreatedAtDesc(USER_ID))
+                .willReturn(Optional.of(stored));
+
+        SkinAnalysisResponse response = skinAnalysisService.getLatest(USER_ID);
+
+        assertThat(response.skinAge().estimatedSkinAge()).isEqualTo(29);
+        assertThat(response.skinType().primary()).isEqualTo(SkinType.DRY);
     }
 
     @Test
@@ -555,7 +589,6 @@ class SkinAnalysisServiceTest {
                         List.of("코와 볼 주변에 붉은기가 뚜렷함"),
                         List.of("작은 융기가 소수만 보임"),
                         List.of("전반적인 피부결이 균일한 편임")),
-                new OpenAiSkinResult.SkinTypeResult("DRY", List.of("SENSITIVE_TENDENCY")),
                 new OpenAiSkinResult.SkinAgeAnalysis(estimatedSkinAge,
                         axis(72), axis(76), axis(28), axis(58),
                         axis(42), axis(35), axis(60), axis(30),
@@ -571,7 +604,18 @@ class SkinAnalysisServiceTest {
     private static OpenAiSkinResult metricsOnly(int hydration, int oil, int redness,
                                                 int trouble, int barrier) {
         return new OpenAiSkinResult(true, hydration, oil, redness, trouble, barrier,
-                null, null, null, "요약");
+                null, null, "요약");
+    }
+
+    /** 상태 판정용 — 다섯 지표와 나이 축의 피부결·색소만 지정한다. */
+    private static OpenAiSkinResult withAppearance(int hydration, int oil, int redness,
+                                                   int trouble, int barrier,
+                                                   int skinTexture, int pigmentation) {
+        return new OpenAiSkinResult(true, hydration, oil, redness, trouble, barrier, null,
+                new OpenAiSkinResult.SkinAgeAnalysis(29,
+                        axis(skinTexture), axis(76), axis(28), axis(58),
+                        axis(42), axis(pigmentation), axis(60), axis(30), "설명"),
+                "요약");
     }
 
     private AppUser givenUser(SkinType declaredSkinType) {

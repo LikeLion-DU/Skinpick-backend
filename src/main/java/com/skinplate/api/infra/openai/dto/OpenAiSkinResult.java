@@ -1,15 +1,22 @@
 package com.skinplate.api.infra.openai.dto;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+
 import java.util.List;
 
 /**
  * OpenAI Structured Outputs(json_schema) 응답을 그대로 받는 DTO.
  * 필드명이 {@code SkinAnalysisPrompt.SCHEMA} 와 1:1로 일치해야 한다.
  *
- * 확장 필드(metricEvidence · skinType · skinAgeAnalysis)는 <b>null 일 수 있다.</b>
+ * 확장 필드(metricEvidence · skinAgeAnalysis)는 <b>null 일 수 있다.</b>
  * 이 필드들이 생기기 전에 저장된 raw_ai_response 를 다시 읽을 때 그렇다 —
  * 그 행도 점수·지표·뱃지는 그대로 나와야 한다.
+ *
+ * {@code ignoreUnknown} 은 반대 방향을 막는다. 스키마에서 뺀 필드(예전의 {@code skinType})가
+ * 들어 있는 옛 행을 읽을 때 여기서 터지면 {@code parseDetail} 이 통째로 null 을 돌려주고,
+ * 남아 있는 근거·피부 나이까지 같이 사라진다. 전역 Jackson 설정에 기대지 않고 여기서 못 박는다.
  */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public record OpenAiSkinResult(
         boolean faceDetected,
         int hydration,
@@ -18,7 +25,6 @@ public record OpenAiSkinResult(
         int trouble,
         int barrier,
         MetricEvidence metricEvidence,
-        SkinTypeResult skinType,
         SkinAgeAnalysis skinAgeAnalysis,
         String summary
 ) {
@@ -32,12 +38,6 @@ public record OpenAiSkinResult(
         /** 확장 필드가 없던 기록을 읽을 때 쓴다. 조회마다 새로 만들 이유가 없다. */
         public static final MetricEvidence EMPTY = new MetricEvidence(null, null, null, null, null);
     }
-
-    /**
-     * enum 이 아니라 String 으로 받는다. 스키마가 값을 강제하지만 그건 OpenAI 쪽 약속이고,
-     * 모르는 값 하나에 역직렬화가 통째로 실패하면 25초짜리 유료 호출이 날아간다.
-     */
-    public record SkinTypeResult(String primary, List<String> traits) {}
 
     /** 나이 축 하나. evidence 는 축당 최대 1개. */
     public record Axis(int score, List<String> evidence) {}

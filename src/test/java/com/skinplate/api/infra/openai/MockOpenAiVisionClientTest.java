@@ -9,6 +9,7 @@ import com.skinplate.api.domain.plate.engine.PlateContext;
 import com.skinplate.api.domain.plate.engine.PlateRuleEngine;
 import com.skinplate.api.domain.plate.engine.rules.*;
 import com.skinplate.api.domain.skin.entity.SkinMetrics;
+import com.skinplate.api.domain.skin.entity.SkinTrait;
 import com.skinplate.api.domain.user.entity.SkinType;
 import com.skinplate.api.infra.openai.dto.FacePhoto;
 import com.skinplate.api.infra.openai.dto.FacePhotoType;
@@ -76,15 +77,19 @@ class MockOpenAiVisionClientTest {
     }
 
     @Test
-    @DisplayName("Mock 의 피부 타입이 규칙 도출값과 같다 — 다르면 한 화면에서 타입이 둘로 갈린다")
-    void skinTypeAgreesWithTheRule() {
+    @DisplayName("Mock 지표가 무대에서 말할 타입·상태를 만든다 — 건성 + 붉은기")
+    void skinMetricsProduceTheDemoTypeAndConditions() {
         OpenAiSkinResult result = client.analyzeSkin(PHOTOS);
 
         SkinMetrics metrics = SkinMetrics.of(result.hydration(), result.oil(),
                 result.redness(), result.trouble(), result.barrier());
 
-        // 갭 카드는 observe() 를 쓴다. Mock 만 다른 타입을 말하면 무대에서 설명할 수 없다.
-        assertThat(result.skinType().primary()).isEqualTo(SkinType.observe(metrics).name());
+        // Mock 은 타입을 말하지 않는다. 서버가 이 지표에서 낸다 — 그 값이 무대의 대사다.
+        assertThat(SkinType.observe(metrics)).isEqualTo(SkinType.DRY);
+        assertThat(SkinTrait.observe(metrics,
+                        result.skinAgeAnalysis().skinTexture().score(),
+                        result.skinAgeAnalysis().pigmentation().score()))
+                .containsExactly(SkinTrait.REDNESS_PRONE);
     }
 
     @Test
