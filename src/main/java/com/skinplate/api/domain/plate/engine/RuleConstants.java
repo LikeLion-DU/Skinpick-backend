@@ -20,25 +20,47 @@ public final class RuleConstants {
     public static final int R04_SODIUM           = -8;   // 나트륨 과다
     public static final int R05_PROTEIN          =  6;   // 단백질 충분
     public static final int R06_VITAMIN          =  5;   // 비타민/항산화
-    public static final int R07_FRIED_OIL        = -10;  // 유분 × 튀김
+    public static final int R07_FRIED_OIL        = -10;  // 유분 × 튀김/기름진 음식
     public static final int R08_OMEGA3_BARRIER   =  7;   // 장벽 약화 × 오메가3
     public static final int R09_PROBIOTIC        =  4;   // 발효식품
-    // ---- R10(고열량)은 미구현이다. 델타와 회복 점수를 쌍으로 남겨둔다. ----
-    // 문서 §18.6 룰표가 R10을 "확장"으로 명시하고 있으므로 상수도 함께 남긴다.
-    // 나중에 넣을 때 값을 다시 정하지 않아도 되고, 지금 지우면 GAIN_LESS_RICE 만
-    // 고아가 되거나(둘은 한 쌍이다) 룰표와 코드가 또 어긋난다.
-    public static final int R10_HIGH_CALORIE     = -5;   // 고열량 (확장 · 미구현)
+    // 피부 지표와 직접 매지 않는 보조 룰이라 심각도 계수를 태우지 않는 고정 델타다.
+    // 시연 음식(520·610kcal)에는 걸리지 않아 예시 60·87 이 그대로다.
+    public static final int R10_HIGH_CALORIE     = -5;   // 고열량
 
     // ---- 추천 행동 시 회복 점수 ----
     public static final int GAIN_SOUP_HALF       = 8;
     public static final int GAIN_LESS_SPICY      = 6;
     public static final int GAIN_WATER_NOT_SODA  = 7;
     public static final int GAIN_REMOVE_BATTER   = 5;
-    public static final int GAIN_LESS_RICE       = 4;   // R10 쌍 (확장 · 미구현)
+    // R10 은 고정 -5 다. LESS_RICE 가 열량을 3/4 로 줄여 900 아래로 내리면 회복이
+    // 정확히 5 이고, 900~1200kcal 이 그 구간이다. **1200 을 넘으면 줄여도 900 위라
+    // 실제 회복은 0 이다** — 그건 GAIN_SOUP_HALF 와 같은 종류의 근사다(감점이 가변인
+    // R04 는 애초에 정확할 수 없다). 4 를 쓰면 그 근사와 무관하게 일반적인 구간에서도
+    // 카드가 "+4" 라 말하고 시뮬레이션은 5 를 올리는, 확인 가능한 거짓이 된다.
+    public static final int GAIN_LESS_RICE       = 5;   // R10 쌍 · |R10_HIGH_CALORIE| 와 같다
 
     // ---- 나트륨 초과량 비례 감점 ----
     public static final int SODIUM_STEP_MG       = 500;  // 500mg 초과마다 1점 추가 감점
     public static final int SODIUM_MAX_PENALTY   = 15;
+
+    // ---- 음식 특성 강도 계수 (스키마 v2) ----
+    // SeverityCalculator 의 피부 축과 직교로 곱는 음식 축이다.
+    // MEDIUM·UNKNOWN·NONE(캡사이신으로 발동한 경우)은 1.0 — 특성이 없던 시절과
+    // 완전히 같은 점수가 나온다(하위 호환 불변식). AI 유래 값이라 표준 테이블의
+    // 재현성 밖이므로 폭을 ±30% 로 상한한다 — 판정이 갈려도 점수가 뛰지 않게.
+    public static final double SPICINESS_MILD_FACTOR     = 0.7;
+    public static final double SPICINESS_HOT_FACTOR      = 1.3;
+    // 튀김이 아닌데 기름진 음식(삼겹살 구이)은 튀김보다 약하게 — R07 확장 트리거.
+    public static final double OILINESS_NON_FRIED_FACTOR = 0.7;
+
+    // ---- 영양 단계화 ----
+    // 당류는 VERY_HIGH 에서 감점을 더한다. 25~40g 구간은 기존과 동일하다.
+    //
+    // 경계값(몇 g부터 많다고 보는가)은 여기 없다 — Nutrition 이 SODIUM/PROTEIN/
+    // SUGAR/CALORIES 임계값을 이미 전부 쥐고 있고, 단계 경계만 이리 떼어 오면
+    // "당류를 몇 g부터 많다고 보는가"의 답이 두 파일로 갈린다.
+    // 여기는 델타(몇 점 깎을지)만 둔다. Nutrition.isVeryHighSugar() 를 쓴다.
+    public static final int R03_SUGAR_VERY_HIGH_EXTRA    = -4;
 
     // ---- 점수 범위 ----
     public static final int MIN_SCORE = 0;

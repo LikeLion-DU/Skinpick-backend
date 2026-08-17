@@ -46,7 +46,7 @@ HTTPS 는 자동이 아니다 — 리버스 프록시가 인증서와 **본문 �
 - 사용자 식별은 `@CurrentUser Long userId` 하나뿐. 요청 본문의 userId는 무시한다
 
 **Rule Engine** — 룰 추가 = `PlateRule` 구현 `@Component` 1개. 엔진도 기존 룰도 건드리지 않는다.
-- 임계값·델타는 전부 `RuleConstants` 한 파일에서만 바꾼다
+- **델타·계수는 `RuleConstants`, 영양 임계값은 `Nutrition`** — 두 파일뿐이다
 - `PlateRuleEngineTest`(예시 A=60 · B=87)가 깨지면 **문서 예시도 같이 고친다**
 - 시뮬레이션은 **detached 복사본**으로만 계산한다. 관리 엔티티를 만지면 `orphanRemoval`이 재료를 DELETE 한다
 

@@ -4,6 +4,8 @@
 
 채취 조건 — 로컬 `bootRun` · `AI_MOCK=true` · 2026-08-14 · commit `4e569cd`
 
+> **2026-08-17 이후 응답에는 필드가 더 있다** — `skinBasis`·`skinMeasuredAt`(분석·기록), `food` 의 관찰 특성 5종(`foodGroup`~`processingLevel`), `feedbacks.good[]/caution[]` 의 `reason`. 전부 **추가**라 이 픽스처의 필드는 그대로 유효하다. 점수(60·72)도 그대로다 — Mock 특성이 강도 1.0 조합이다.
+
 | 파일 | 엔드포인트 | 상태 |
 |---|---|---|
 | `plate_analyze.json` | `POST /api/v1/plates/analyze` | 200 |

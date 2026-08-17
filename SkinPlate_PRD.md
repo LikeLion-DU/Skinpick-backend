@@ -1381,9 +1381,6 @@ src/main/java/com/skinplate/api/
     │   │   ├── FoodAnalysisPrompt.java
     │   │   ├── PlateCommentPrompt.java
     │   │   └── SkinInsightPrompt.java          # v1.8 — 인사이트 문장 (§18.10)
-    │   ├── schema/
-    │   │   ├── skin-analysis-schema.json       # Structured Outputs
-    │   │   └── food-analysis-schema.json
     │   ├── dto/
     │   │   ├── OpenAiSkinResult.java
     │   │   └── OpenAiFoodResult.java
@@ -1516,6 +1513,7 @@ erDiagram
         bigint skin_plate_id FK
         varchar type "GOOD/CAUTION/ACTION"
         varchar message
+        varchar reason "판정 이유 문장 · V8 · NULL 허용(ACTION·V8 이전 행)"
         int score_delta "GOOD/CAUTION 행"
         int expected_gain "ACTION 행 회복 점수"
         varchar rule_code
@@ -1917,6 +1915,9 @@ public class SkinPlateFeedback extends BaseTimeEntity {
 
     @Column(nullable = false, length = 200)
     private String message;
+
+    @Column(length = 300)
+    private String reason;       // 판정 이유 문장 (V8 · GOOD/CAUTION 만, NULL 허용)
 
     private int scoreDelta;      // GOOD / CAUTION 행에서 사용 (± 점수)
 
@@ -2471,11 +2472,10 @@ GET /latest · GET /{id} 는 raw_ai_response 를 되읽어 근거·타입·나�
 | 액션 | 의미 | 영양값 조정 |
 |---|---|---|
 | `HALVE_SOUP` | 국물을 절반만 남긴다 | `sodiumMg × 0.5` |
-| `LESS_SPICY` | 매운 양념을 덜어낸다 | `spicy = false`, `CAPSAICIN` 태그 제거 |
+| `LESS_SPICY` | 매운 양념을 덜어낸다 | `spicy = false`, `CAPSAICIN` 태그 제거, **관찰 매운맛 강도(spiciness) = NONE** |
 | `NO_SUGAR_DRINK` | 단 음료 대신 물 | `sugarG × 0.4` |
-| `REMOVE_BATTER` | 튀김옷 일부 제거 | `cookingMethod = GRILLED` (R07 해제). **`fatG`는 손대지 않는다 — 어떤 룰도 지방을 보지 않아 점수에 영향이 0이다** |
-
-> `LESS_RICE`는 넣지 않았다. 연결될 룰(R10 고열량)이 미구현이라 버튼이 붙을 카드가 영영 생기지 않는다.
+| `REMOVE_BATTER` | 튀김옷 일부 제거 | `cookingMethod = GRILLED` (R07 해제), **관찰 기름기(oiliness) HIGH → MEDIUM** — HIGH 로 남기면 R07 이 기름기 경로로 다시 걸려 버튼 효과가 사라진다. **`fatG`는 손대지 않는다 — 어떤 룰도 지방을 보지 않아 점수에 영향이 0이다** |
+| `LESS_RICE` | 밥·면 양을 조금 줄인다 | `caloriesKcal × 0.75` (R10 이 1200kcal 까지 해제). 탄수는 손대지 않는다 — 같은 원칙, 어떤 룰도 안 본다 |
 
 **Response 200**
 
@@ -3656,20 +3656,24 @@ public class PlateRuleEngine {
 
 > **핵심** — 룰을 추가하려면 `PlateRule`을 구현한 `@Component` 클래스를 하나 만들면 끝이다. 엔진 코드도, 기존 룰도 건드리지 않는다. 이것이 "확장 가능한 아키텍처"의 실질적 의미다.
 
-### 18.6 룰 정의표 (MVP 9종 + 확장 1종)
+### 18.6 룰 정의표 (10종 — R10 은 2026-08-17 구현)
 
 | 코드 | 조건 (피부 × 음식) | Δ | 타입 | 메시지 | 추천 행동 |
 |---|---|---|---|---|---|
 | **R01** | 건조(hydration<40) × 수분/오메가3 재료 | **+8** | GOOD | 수분 보충 재료 | — |
-| **R02** | 홍조(redness>60) × 매운 음식/CAPSAICIN | **-10** | CAUTION | 매운맛 자극 | 매운 양념을 덜어내고 드셔보세요 (+6) |
-| **R03** | 트러블(trouble>60) × 당류>25g | **-12** | CAUTION | 당류 과다 | 단 음료 대신 물을 곁들이세요 (+7) |
+| **R02** | 홍조(redness>60) × 매운 음식/CAPSAICIN | **-10** × 강도 | CAUTION | 매운맛 자극 | 매운 양념을 덜어내고 드셔보세요 (+6) |
+| **R03** | 트러블(trouble>60) × 당류>25g (**40g 초과 시 기본 델타에 -4** · 심각도 곱하기 전) | **-12** | CAUTION | 당류 과다 | 단 음료 대신 물을 곁들이세요 (+7) |
 | **R04** | 나트륨 > 1500mg | **-8** | CAUTION | 나트륨 과다 | **국물을 절반만 남기면 점수가 상승합니다 (+8)** |
 | **R05** | 단백질 ≥ 20g | **+6** | GOOD | 단백질 충분 | — |
 | **R06** | VITAMIN_C / **VITAMIN_A** / ANTIOXIDANT 재료 포함 | **+5** | GOOD | 비타민 풍부 | — |
-| **R07** | 유분(oil>70) × 튀김(FRIED) | **-10** | CAUTION | 튀김 조리 | 튀김옷을 일부 제거해 보세요 (+5) |
+| **R07** | 유분(oil>70) × 튀김(FRIED) **또는 관찰 기름기 HIGH** | **-10** (비튀김 ×0.7) | CAUTION | 튀김 조리 / 기름진 음식 | 튀김옷을 일부 제거해 보세요 (+5 · 튀김만) |
 | **R08** | 장벽 약화(barrier<40) × OMEGA3 | **+7** | GOOD | 오메가3 함유 | — |
 | **R09** | PROBIOTIC 재료 포함 (김치·된장·요거트) | **+4** | GOOD | 발효식품 포함 | — |
-| R10 *(확장)* | 칼로리 > 900kcal | -5 | CAUTION | 열량이 높음 | 밥을 2/3만 드셔보세요 (+4) |
+| **R10** | 칼로리 > 900kcal | **-5** (고정) | CAUTION | 열량이 높음 | 밥이나 면 양을 조금 줄여보세요 (+5) |
+
+> **강도 계수 (2026-08-17)** — 최종 델타 = `기본 델타 × 심각도(피부 축) × 강도(음식 축)`. 심각도는 기존 SeverityCalculator(1.0/1.2/1.5) 그대로이고, 강도는 스키마 v2 의 관찰값에서 온다: spiciness `MILD 0.7 / MEDIUM 1.0 / HOT 1.3`, R07 의 비튀김 기름기 `0.7`. **UNKNOWN 은 전부 1.0** — 특성이 없던 시절 기록·구 토큰과 완전히 같은 점수가 나온다. R10 은 피부 지표와 직접 매지 않는 보조 룰이라 계수 없이 고정 -5 이고, ConcernRules(고민 점수)에도 매지 않는다. 나트륨은 이미 초과량 비례 감점이라 단계(VERY_HIGH 2500mg)를 점수에 겹치지 않고 문장에만 쓴다. §18.7 예시 A=60 · B=87 은 강도 1.0 조합이라 그대로다.
+>
+> **판정 이유(reason · V8)** — 각 GOOD/CAUTION 피드백에 "지금 붉은기가 높은 상태에서 강한 매운맛이 들어 있어 부담이 될 수 있어요" 같은 문장이 붙는다. **AI 문장이 아니라 룰 코드의 결정론 템플릿**이다(같은 입력 = 같은 문장). 인과를 단정하지 않고 "~될 수 있어요"까지만 말한다. 짧은 라벨(message)은 리포트의 빈도 집계 축이라 그대로 두고, 문장은 별도 필드다.
 
 ### 18.7 예시 계산 — 같은 사람, 다른 한 끼
 
@@ -4397,7 +4401,7 @@ Flutter FaceGate에 FRONT·LEFT·RIGHT 판정이 이미 다 들어 있는데 화
 | N8 | 파일 목록에 신규 클래스 9개 누락 | 양쪽 문서 목록 갱신 |
 | N9 | §13.3 오참조 | 설계서 §1.12.1로 |
 | N10 | 표준 영양값 조회가 `Map.of` → 순회 순서 무작위 | `StandardFoodTable` 이 낱말의 **접미사를 긴 쪽부터** 해시 조회 — 순서에 기대지 않는다 |
-| N11 | `LESS_RICE` → R10(미구현) | 액션에서 제거 |
+| N11 | `LESS_RICE` → R10(미구현) | 액션에서 제거 *(2026-08-17 R10 구현과 함께 복귀 — §18.6)* |
 | N12 | `REMOVE_BATTER`의 `fatG × 0.7`이 점수에 영향 0 | 조정표에서 삭제 |
 | N13 | 계산 내역 카드가 쓸 `baseScore`가 응답에 없음 | `SkinPlateResponse.baseScore` 추가 |
 | N14 | 부록 A 비밀번호 하드코딩 | 환경변수로 |

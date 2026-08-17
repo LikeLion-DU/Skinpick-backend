@@ -4,9 +4,15 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.skinplate.api.domain.food.entity.CookingMethod;
 import com.skinplate.api.domain.food.entity.FoodAnalysis;
+import com.skinplate.api.domain.food.entity.FoodGroup;
 import com.skinplate.api.domain.food.entity.FoodIngredient;
+import com.skinplate.api.domain.food.entity.FoodTraits;
 import com.skinplate.api.domain.food.entity.IngredientTag;
 import com.skinplate.api.domain.food.entity.Nutrition;
+import com.skinplate.api.domain.food.entity.Oiliness;
+import com.skinplate.api.domain.food.entity.PortionSize;
+import com.skinplate.api.domain.food.entity.ProcessingLevel;
+import com.skinplate.api.domain.food.entity.Spiciness;
 import com.skinplate.api.domain.food.repository.FoodAnalysisRepository;
 import com.skinplate.api.domain.food.service.FoodAnalysisService;
 import com.skinplate.api.domain.plate.dto.PlateAnalysisResponse;
@@ -103,7 +109,8 @@ class SkinPlateServiceTest {
         engine = new PlateRuleEngine(List.of(
                 new SodiumRule(), new SpicyRednessRule(), new SugarTroubleRule(),
                 new FriedOilRule(), new HydrationFoodRule(), new Omega3BarrierRule(),
-                new ProteinRule(), new VitaminRule(), new ProbioticRule()));
+                new ProteinRule(), new VitaminRule(), new ProbioticRule(),
+                new HighCalorieRule()));
 
         // 문장 생성은 이 테스트의 관심사가 아니다 — 실패해도 저장이 도는 게 계약이라
         // EMPTY 를 돌려주는 mock 으로 통과시킨다.
@@ -128,14 +135,34 @@ class SkinPlateServiceTest {
     }
 
     @Test
-    @DisplayName("before 는 저장된 점수 그대로다 — 시뮬레이션이 원본 점수를 덮어쓰지 않는다")
-    void simulate_keepsStoredScoreAsBefore() {
+    @DisplayName("before 는 지금 룰로 다시 센 점수다 — 저장 점수와 같은 한 값도 같다")
+    void simulate_beforeScoreIsRecomputed() {
         givenPlate();
 
         PlateSimulateResponse response = simulate(PlateActionCode.HALVE_SOUP);
 
         assertThat(response.beforeScore()).isEqualTo(60);
         assertThat(response.plateId()).isEqualTo(PLATE_ID);
+    }
+
+    /**
+     * 룰을 고친 뒤 옛 기록을 시뮬레이션하면 저장 점수와 재계산 점수가 갈린다.
+     * 그때 저장값을 before 로 쓰면 한 응답이 두 규칙을 섞어 — 옛 룰의 70 옆에
+     * 새 룰의 after·removedRules 가 붙어 — 설명할 수 없는 카드가 나온다.
+     */
+    @Test
+    @DisplayName("저장 점수가 지금 룰과 어긋나도 before·after·removedRules 는 한 규칙으로 답한다")
+    void simulate_neverMixesStoredAndRecomputedRules() {
+        SkinPlate plate = givenPlate();
+        // 옛 룰로 매겨진 것처럼 저장 점수만 어긋나게 둔다(엔진은 여전히 60을 낸다).
+        ReflectionTestUtils.setField(plate, "plateScore", 70);
+
+        PlateSimulateResponse response = simulate(PlateActionCode.HALVE_SOUP);
+
+        assertThat(response.beforeScore()).isEqualTo(60);              // 저장값 70 이 아니다
+        assertThat(response.afterScore()).isEqualTo(68);
+        assertThat(response.afterScore() - response.beforeScore()).isPositive();
+        assertThat(response.removedRules()).containsExactly("R04");
     }
 
     @Test
@@ -738,6 +765,50 @@ class SkinPlateServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .extracting(exception -> ((BusinessException) exception).getErrorCode())
                 .isEqualTo(ErrorCode.SKIN_ANALYSIS_NOT_FOUND);
+    }
+
+    /**
+     * detachedCopy 가 특성을 옮기는지는 점수로만 관찰된다 — HOT 이 복사에서 빠지면
+     * before 가 60 으로, LESS_SPICY 가 spiciness 를 안 지우면 after 가 낮게 나온다.
+     */
+    @Test
+    @DisplayName("simulateFromToken — HOT 매운맛은 R02 를 -16 으로 키우고, LESS_SPICY 가 통째로 되돌린다")
+    void simulateFromToken_hotSpicinessDeepensR02() {
+        givenSkinAnalysis();
+        OpenAiFoodResult aiResult = givenAiResult();
+        givenAnalysisTokenPayload(aiResult);
+
+        FoodAnalysis hotFood = givenFood();
+        hotFood.assignTraits(FoodTraits.of(FoodGroup.SOUP_STEW, PortionSize.UNKNOWN,
+                Spiciness.HOT, Oiliness.UNKNOWN, ProcessingLevel.UNKNOWN));
+        given(foodAnalysisService.toEntity(null, aiResult)).willReturn(hotFood);
+
+        PlateAnalysisSimulateResponse response = simulateFromToken(PlateActionCode.LESS_SPICY);
+
+        // 70 +6(R05) +4(R09) -8(R04) -16(R02 홍조 64 × HOT 1.3) = 56 → R02 가 꺼져 72
+        assertThat(response.beforeScore()).isEqualTo(56);
+        assertThat(response.afterScore()).isEqualTo(72);
+        assertThat(response.removedRules()).contains("R02");
+    }
+
+    @Test
+    @DisplayName("simulate — LESS_RICE 는 열량을 3/4 로 줄여 R10 을 끈다 (65 → 70)")
+    void simulateFromToken_lessRiceTurnsOffHighCalorie() {
+        givenSkinAnalysis();
+        OpenAiFoodResult aiResult = givenAiResult();
+        givenAnalysisTokenPayload(aiResult);
+
+        // 시연 지표(38/52/64/25/78)에서 R10 만 걸리는 음식 — 맵지 않고 싱겁고 단백질도 낮다.
+        FoodAnalysis heavyFood = FoodAnalysis.create(null, "짜장면 곱빼기", "중식",
+                Nutrition.of(1000, BigDecimal.TEN, BigDecimal.TEN, BigDecimal.TEN, 1000, BigDecimal.ONE),
+                CookingMethod.ETC, false, "{}");
+        given(foodAnalysisService.toEntity(null, aiResult)).willReturn(heavyFood);
+
+        PlateAnalysisSimulateResponse response = simulateFromToken(PlateActionCode.LESS_RICE);
+
+        assertThat(response.beforeScore()).isEqualTo(65);   // 70 - 5(R10)
+        assertThat(response.afterScore()).isEqualTo(70);    // 1000 × 0.75 = 750 → R10 해제
+        assertThat(response.removedRules()).containsExactly("R10");
     }
 
     @Test

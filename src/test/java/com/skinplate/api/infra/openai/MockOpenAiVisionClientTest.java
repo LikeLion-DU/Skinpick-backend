@@ -42,7 +42,8 @@ class MockOpenAiVisionClientTest {
     private final PlateRuleEngine engine = new PlateRuleEngine(List.of(
             new SodiumRule(), new SpicyRednessRule(), new SugarTroubleRule(),
             new FriedOilRule(), new HydrationFoodRule(), new Omega3BarrierRule(),
-            new ProteinRule(), new VitaminRule(), new ProbioticRule()));
+            new ProteinRule(), new VitaminRule(), new ProbioticRule(),
+            new HighCalorieRule()));
 
     @Test
     @DisplayName("피부 응답은 문서의 시연 지표를 그대로 돌려준다")
