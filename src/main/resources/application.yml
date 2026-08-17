@@ -67,6 +67,11 @@ app:
     # 이 값 + 2 ≤ 클라이언트 상한(32초) 이어야 한다. 넘겨 주면 28 로 조정되고 경고가 뜬다.
     # 실측 지연이 3.5초라 여유는 충분하다.
     skin-timeout-seconds: ${SKIN_TIMEOUT_SECONDS:28}
+    # 리포트 문장만 따로 짧게 간다. 분석은 사용자가 "분석 중"을 보며 기다리는 화면이지만
+    # 리포트는 하루에도 여러 번 여는 조회 화면이라, 25초를 물려 두면 캐시가 빈 첫 조회에서
+    # 화면이 통째로 멎는다. 실패해도 숫자는 그대로 나오고 문장만 빠지므로(fail-soft)
+    # 짧게 끊는 쪽이 언제나 낫다. 재시도 대기까지 포함한 전체 마감은 이 값 + 2 다.
+    report-timeout-seconds: ${REPORT_TIMEOUT_SECONDS:8}
     mock: ${AI_MOCK:false}
 
 springdoc:

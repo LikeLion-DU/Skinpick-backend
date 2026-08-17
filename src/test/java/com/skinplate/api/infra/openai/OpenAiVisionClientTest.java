@@ -71,7 +71,7 @@ class OpenAiVisionClientTest {
     private OpenAiVisionClient clientOf(ExchangeFunction exchange, long timeoutSeconds, String model) {
         return new OpenAiVisionClient(
                 WebClient.builder().exchangeFunction(exchange).build(),
-                new ObjectMapper(), model, timeoutSeconds, 1400, timeoutSeconds);
+                new ObjectMapper(), model, timeoutSeconds, 1400, timeoutSeconds, timeoutSeconds);
     }
 
     private static ClientResponse json(HttpStatus status, String body) {
@@ -199,10 +199,19 @@ class OpenAiVisionClientTest {
      * 클램프는 생성자에서 끝나므로 주입된 값만 본다 — 프로젝트가 이미 쓰는 방식이다.
      */
     private static Duration skinTimeoutOf(long configured) {
+        return timeoutFieldOf("skinTimeout", 1400, configured, 8);
+    }
+
+    private static Duration reportTimeoutOf(long configured) {
+        return timeoutFieldOf("reportTimeout", 1400, 28, configured);
+    }
+
+    private static Duration timeoutFieldOf(String field, int skinMaxTokens,
+                                           long skinTimeout, long reportTimeout) {
         OpenAiVisionClient client = new OpenAiVisionClient(
                 WebClient.builder().build(), new ObjectMapper(),
-                "gpt-5.6-luna", 5, 1400, configured);
-        return (Duration) ReflectionTestUtils.getField(client, "skinTimeout");
+                "gpt-5.6-luna", 5, skinMaxTokens, skinTimeout, reportTimeout);
+        return (Duration) ReflectionTestUtils.getField(client, field);
     }
 
     @Test
@@ -212,6 +221,18 @@ class OpenAiVisionClientTest {
         assertThat(skinTimeoutOf(40)).isEqualTo(Duration.ofSeconds(28));
         assertThat(skinTimeoutOf(28)).isEqualTo(Duration.ofSeconds(28));
         assertThat(skinTimeoutOf(20)).isEqualTo(Duration.ofSeconds(20));   // 상한 아래는 그대로
+    }
+
+    @Test
+    @DisplayName("리포트 문장은 자기 타임아웃을 쓴다 — 분석용 25초를 물려받지 않는다")
+    void reportTimeoutIsIndependent() {
+        // 리포트는 하루에도 여러 번 여는 조회 화면이라 분석과 다른 예산을 쓴다.
+        assertThat(reportTimeoutOf(8)).isEqualTo(Duration.ofSeconds(8));
+
+        // 하한·상한은 다른 경로와 같은 규칙이다. 0 을 넣으면 Duration.ZERO 가 되어
+        // 주간 문장이 항상 죽는데, fail-soft 라 화면은 멀쩡해서 아무도 모른다.
+        assertThat(reportTimeoutOf(0)).isEqualTo(Duration.ofSeconds(1));
+        assertThat(reportTimeoutOf(40)).isEqualTo(Duration.ofSeconds(28));
     }
 
     @Test

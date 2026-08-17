@@ -73,6 +73,17 @@ public class OpenAiVisionClient implements VisionClient {
     private final Duration skinTimeout;
 
     /**
+     * 리포트 문장만 짧게 끊는다. 나머지 넷은 사용자가 "분석 중"을 보며 기다리는 화면이지만,
+     * 리포트는 하루에도 여러 번 여는 조회 화면이다 — 25초를 물려 두면 캐시가 빈 첫 조회에서
+     * 화면이 통째로 멎고, 앱이 GET 에 더 짧은 상한을 쓰면 사용자에겐 그냥 실패로 보인다.
+     *
+     * 짧게 끊어도 잃는 것이 문장 하나뿐이라 가능한 선택이다 — 생성 실패는 이미 삼켜지고
+     * 점수·영양·고민은 그대로 나간다(WeeklyReportService.comment). 다른 호출은 실패하면
+     * 기능 자체가 없다.
+     */
+    private final Duration reportTimeout;
+
+    /**
      * gpt-5 계열은 요청 규약이 다르다. 실제로 던져 본 결과다.
      *   max_tokens        → 400 "Use 'max_completion_tokens' instead"
      *   temperature=0.2   → 400 "Only the default (1) value is supported"
@@ -87,7 +98,7 @@ public class OpenAiVisionClient implements VisionClient {
     private static final String REASONING_EFFORT = "low";
 
     /**
-     * 다섯 호출 경로가 같은 규칙을 쓴다. 피부만 막아 두면 음식·문장·인사이트·주간 문장에 0 이
+     * 다섯 호출 경로가 같은 규칙을 쓴다. 피부·리포트만 막아 두면 음식·문장·인사이트에 0 이
      * 들어갔을 때 그쪽만 조용히 죽는다 — 위쪽 상한보다 이 아래쪽이 나쁘다.
      * 아무 로그 없이 기능만 사라지기 때문이다.
      */
@@ -115,7 +126,8 @@ public class OpenAiVisionClient implements VisionClient {
                               @Value("${app.ai.model}") String model,
                               @Value("${app.ai.timeout-seconds}") long timeoutSeconds,
                               @Value("${app.ai.skin-max-tokens}") int skinMaxTokens,
-                              @Value("${app.ai.skin-timeout-seconds}") long skinTimeoutSeconds) {
+                              @Value("${app.ai.skin-timeout-seconds}") long skinTimeoutSeconds,
+                              @Value("${app.ai.report-timeout-seconds}") long reportTimeoutSeconds) {
         this.openAiWebClient = openAiWebClient;
         this.objectMapper = objectMapper;
         this.model = model;
@@ -136,6 +148,12 @@ public class OpenAiVisionClient implements VisionClient {
         // 후자가 더 나쁘다. 아무 로그 없이 기능만 사라지기 때문이다.
         this.skinTimeout = Duration.ofSeconds(
                 clampTimeout(skinTimeoutSeconds, "app.ai.skin-timeout-seconds"));
+
+        // 같은 하한(1초)이 여기도 걸린다. 0 을 넣으면 Duration.ZERO 가 되어 주간 문장이
+        // 항상 타임아웃으로 죽는데, fail-soft 라 아무 화면도 깨지지 않고 문장만 영영
+        // 안 나온다 — 로그를 안 보면 기능이 사라진 것을 모른다.
+        this.reportTimeout = Duration.ofSeconds(
+                clampTimeout(reportTimeoutSeconds, "app.ai.report-timeout-seconds"));
 
         // 재현성 레버가 사라진 것을 기동 로그에 남긴다. 모델 이름 한 줄로 조용히
         // 꺼지는 스위치라, 발표 전에 눈에 띄어야 한다. (CLAUDE.md — 재현성이 이 제품의 주장)
@@ -188,11 +206,14 @@ public class OpenAiVisionClient implements VisionClient {
                 List.of(text(userContext)), INSIGHT_MAX_TOKENS, timeout, SkinInsightSentences.class);
     }
 
-    /** 인사이트와 같이 한국어 문장이 넷이라 상한도 INSIGHT_MAX_TOKENS 를 같이 쓴다. */
+    /**
+     * 인사이트와 같이 한국어 문장이 넷이라 출력 상한은 INSIGHT_MAX_TOKENS 를 같이 쓴다.
+     * <b>타임아웃만 다르다</b> — reportTimeout(기본 8초, 재시도 포함 전체 마감 10초).
+     */
     @Override
     public WeeklyComment generateWeeklyComment(String userContext) {
         return call(WeeklyReportPrompt.SYSTEM, WeeklyReportPrompt.SCHEMA, "weekly_report",
-                List.of(text(userContext)), INSIGHT_MAX_TOKENS, timeout, WeeklyComment.class);
+                List.of(text(userContext)), INSIGHT_MAX_TOKENS, reportTimeout, WeeklyComment.class);
     }
 
     private static Map<String, Object> text(String value) {
