@@ -90,11 +90,16 @@ class PlateRuleEngineTest {
 
     /**
      * 하위 호환의 핵심 불변식 — 특성이 없거나(UNKNOWN 포함) 전부 모르는 값이면
-     * 엔진은 특성이 생기기 전과 완전히 같은 점수를 낸다. 여기가 깨지면
-     * 과거 기록의 시뮬레이션 before 가 저장 점수와 갈라진다.
+     * <b>강도 계수가 전부 1.0</b> 이라 R02·R07 이 특성이 생기기 전과 같은 점수를 낸다.
+     *
+     * <p><b>"어떤 과거 입력이든 점수가 같다"는 뜻이 아니다.</b> 같은 PR 의 R10(&gt;900kcal)과
+     * R03 의 40g 초과 단계는 특성과 무관하게 걸리므로, 그 조건에 해당하는 과거 입력은
+     * 특성이 없어도 점수가 달라진다(highCalorieRule · sugarVeryHighAddsExtraPenalty 가
+     * 그 동작을 따로 고정한다). 이 테스트가 덮는 것은 <b>특성 축</b> 하나뿐이다 —
+     * 픽스처가 520kcal · 6.2g 이라 나머지 둘은 애초에 발동하지 않는다.
      */
     @Test
-    @DisplayName("특성이 전부 UNKNOWN 이면 특성이 없던 시절과 점수가 같다")
+    @DisplayName("특성이 전부 UNKNOWN 이면 강도 계수가 1.0 이라 특성이 없던 시절과 점수가 같다")
     void unknownTraitsBehaveExactlyAsBefore() {
         PlateEvaluation withoutTraits = engine.evaluate(new PlateContext(SKIN, demoStew()));
 
