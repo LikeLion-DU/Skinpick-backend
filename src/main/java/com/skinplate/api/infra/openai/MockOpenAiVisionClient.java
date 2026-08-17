@@ -6,6 +6,7 @@ import com.skinplate.api.infra.openai.dto.OpenAiFoodResult;
 import com.skinplate.api.infra.openai.dto.OpenAiSkinResult;
 import com.skinplate.api.infra.openai.dto.PlateComments;
 import com.skinplate.api.infra.openai.dto.SkinInsightSentences;
+import com.skinplate.api.infra.openai.dto.WeeklyComment;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
@@ -126,6 +127,16 @@ public class MockOpenAiVisionClient implements VisionClient {
         return new PlateComments(
                 "나트륨이 조금 높았어요. 다음 식사에는 국물을 줄이고 채소를 곁들여 보세요!",
                 "발효식품과 단백질을 잘 챙긴 하루였어요. 내일은 나트륨을 조금만 줄여볼까요?");
+    }
+
+    /** 시연 주간(나트륨이 반복되는 김치찌개 한 주)에 맞는 고정 문장 넷. */
+    @Override
+    public WeeklyComment generateWeeklyComment(String userContext) {
+        return new WeeklyComment(
+                "발효식품과 단백질을 꾸준히 챙긴 한 주였어요.",
+                "나트륨이 높은 끼니가 여러 번 함께 기록됐어요.",
+                "국물 요리가 반복해서 올라오고 있어요.",
+                "다음 주에는 국물을 절반만 남기는 끼니를 세 번 만들어 볼까요?");
     }
 
     /**

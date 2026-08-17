@@ -8,11 +8,13 @@ import com.skinplate.api.infra.openai.dto.OpenAiFoodResult;
 import com.skinplate.api.infra.openai.dto.OpenAiSkinResult;
 import com.skinplate.api.infra.openai.dto.PlateComments;
 import com.skinplate.api.infra.openai.dto.SkinInsightSentences;
+import com.skinplate.api.infra.openai.dto.WeeklyComment;
 import com.skinplate.api.infra.openai.exception.OpenAiClientException;
 import com.skinplate.api.infra.openai.prompt.FoodAnalysisPrompt;
 import com.skinplate.api.infra.openai.prompt.PlateCommentPrompt;
 import com.skinplate.api.infra.openai.prompt.SkinAnalysisPrompt;
 import com.skinplate.api.infra.openai.prompt.SkinInsightPrompt;
+import com.skinplate.api.infra.openai.prompt.WeeklyReportPrompt;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -77,7 +79,7 @@ public class OpenAiVisionClient implements VisionClient {
      * 모델 이름으로 갈라 두면 모델 교체가 application.yml 한 줄로 끝난다.
      *
      * startsWith 가 아니라 contains 다. 파인튜닝 모델은 {@code ft:gpt-5.6-luna:...} 처럼
-     * 접두사가 붙어서, startsWith 면 조용히 옛 규약으로 나가 네 호출이 한꺼번에 400 이 된다.
+     * 접두사가 붙어서, startsWith 면 조용히 옛 규약으로 나가 다섯 호출이 한꺼번에 400 이 된다.
      */
     private final boolean reasoningModel;
 
@@ -85,7 +87,7 @@ public class OpenAiVisionClient implements VisionClient {
     private static final String REASONING_EFFORT = "low";
 
     /**
-     * 네 호출 경로가 같은 규칙을 쓴다. 피부만 막아 두면 음식·문장·인사이트에 0 이
+     * 다섯 호출 경로가 같은 규칙을 쓴다. 피부만 막아 두면 음식·문장·인사이트·주간 문장에 0 이
      * 들어갔을 때 그쪽만 조용히 죽는다 — 위쪽 상한보다 이 아래쪽이 나쁘다.
      * 아무 로그 없이 기능만 사라지기 때문이다.
      */
@@ -101,7 +103,7 @@ public class OpenAiVisionClient implements VisionClient {
     /** 429 재시도 대기. 전체 데드라인 계산에도 쓰인다. */
     private static final long RETRY_DELAY_SECONDS = 2;
 
-    /** 이 값 + 재시도 대기 2초 ≤ 클라이언트 상한 32초. 네 호출 경로에 모두 적용된다. */
+    /** 이 값 + 재시도 대기 2초 ≤ 클라이언트 상한 32초. 다섯 호출 경로에 모두 적용된다. */
     private static final long MAX_TIMEOUT_SECONDS = 28;
     private static final long MIN_TIMEOUT_SECONDS = 1;
 
@@ -184,6 +186,13 @@ public class OpenAiVisionClient implements VisionClient {
     public SkinInsightSentences generateSkinInsight(String userContext) {
         return call(SkinInsightPrompt.SYSTEM, SkinInsightPrompt.SCHEMA, "skin_insight",
                 List.of(text(userContext)), INSIGHT_MAX_TOKENS, timeout, SkinInsightSentences.class);
+    }
+
+    /** 인사이트와 같이 한국어 문장이 넷이라 상한도 INSIGHT_MAX_TOKENS 를 같이 쓴다. */
+    @Override
+    public WeeklyComment generateWeeklyComment(String userContext) {
+        return call(WeeklyReportPrompt.SYSTEM, WeeklyReportPrompt.SCHEMA, "weekly_report",
+                List.of(text(userContext)), INSIGHT_MAX_TOKENS, timeout, WeeklyComment.class);
     }
 
     private static Map<String, Object> text(String value) {

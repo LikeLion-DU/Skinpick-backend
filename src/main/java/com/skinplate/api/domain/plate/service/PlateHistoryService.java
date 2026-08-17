@@ -66,13 +66,7 @@ public class PlateHistoryService {
 
         return new PlateHistoryDayDto(date, skinScore, averagePlateScore(sorted), TARGET_SCORE,
                 dailyComment(sorted),
-                sorted.stream()
-                        .map(plate -> new PlateHistoryItemDto(plate.getId(),
-                                plate.getFoodAnalysis().getFoodName(),
-                                plate.getPlateScore(),
-                                MealType.from(plate.getCreatedAt()),
-                                plate.getCreatedAt()))
-                        .toList());
+                sorted.stream().map(PlateHistoryItemDto::from).toList());
     }
 
     /**
