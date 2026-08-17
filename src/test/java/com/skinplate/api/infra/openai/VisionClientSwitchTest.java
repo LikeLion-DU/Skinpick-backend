@@ -25,7 +25,7 @@ class VisionClientSwitchTest {
             .withUserConfiguration(TestBeans.class)
             .withPropertyValues("app.ai.model=gpt-5.6-luna", "app.ai.timeout-seconds=18",
                                 "app.ai.skin-max-tokens=1400", "app.ai.skin-timeout-seconds=28",
-                                "app.ai.report-timeout-seconds=12");
+                                "app.ai.view-timeout-seconds=12");
 
     @Test
     @DisplayName("app.ai.mock=true 면 Mock 이 주입된다")

@@ -73,27 +73,31 @@ public class OpenAiVisionClient implements VisionClient {
     private final Duration skinTimeout;
 
     /**
-     * 리포트 문장만 짧게 끊는다. 가르는 기준은 <b>"실패해도 화면이 남는가"</b>다.
+     * <b>조회 화면이 열린 채로 기다리는 문장 생성</b>의 예산. 주간 코멘트와 개인화
+     * 인사이트 둘이 여기 걸린다.
      *
-     * <p>주간 문장은 생성 실패를 이미 삼키고 있어서(WeeklyReportService.comment) 짧게
-     * 끊어도 잃는 것이 문장 하나다 — 점수·영양·고민·BEST DAY 는 그대로 나간다. 나머지
-     * 네 경로는 실패하면 그 기능 자체가 없으므로 같은 선택을 할 수 없다.
+     * <p>가르는 기준은 "어느 기능인가"가 아니라 <b>"사용자가 지금 빈 화면을 보고 있는가"</b>다.
+     * 분석 세 경로(피부·음식·기록 문장)는 POST 이고 앱이 "분석 중" 단계를 그리며 기다리는
+     * 화면이라 25~28초가 정당하다. 반면 이 둘은 GET 조회 도중 동기로 생성되므로, 그 시간이
+     * 그대로 <b>화면이 멎어 있는 시간</b>이다. 25초를 물려받으면 앱이 먼저 포기하고
+     * 사용자에겐 그냥 실패로 보인다.
      *
-     * <p>여기에 걸리는 것은 리포트가 <b>하루에도 여러 번 여는 조회 화면</b>이라는 점이다.
-     * 25초를 물려 두면 캐시가 빈 첫 조회에서 화면이 통째로 멎고, 앱이 GET 에 더 짧은
-     * 상한을 쓰면 사용자에겐 그냥 실패로 보인다.
+     * <p>두 호출의 실패 결과는 다르다 — 주간 코멘트는 서비스가 삼켜 문장만 빠지고
+     * (점수·영양·고민은 그대로 나간다), 인사이트는 저장하지 않고 던져서 다음 조회가
+     * 재시도가 된다(1회 고정 정책이라 정적 폴백을 저장할 수 없다). 어느 쪽이든
+     * <b>오래 기다린 끝의 실패가 빨리 온 실패보다 나쁘다</b>는 것은 같다.
      *
-     * <p><b>12 는 상한이지 목표가 아니다.</b> PRD 는 AI 응답을 5~8초로 적고 있고 이 호출은
+     * <p><b>12 는 상한이지 목표가 아니다.</b> PRD 는 AI 응답을 5~8초로 적고 있고 두 호출 다
      * 이미지 없는 텍스트 전용이라 그보다 가볍다. 8 로 잡았다가 12 로 올린 이유가 있다 —
-     * 이 경로의 실패는 조용하다. 문장만 사라지고 아무 화면도 안 깨져서, 대역이 좁은 날
-     * 기능이 통째로 없어진 것을 로그 없이는 모른다. 실측이 쌓이면 조인다.
+     * 주간 코멘트 쪽 실패는 조용하다. 문장만 사라지고 아무 화면도 안 깨져서, 대역이 좁은
+     * 날 기능이 통째로 없어진 것을 로그 없이는 모른다. 실측이 쌓이면 조인다.
      *
      * <p><b>429 재시도는 이 경로에서 사실상 죽는다.</b> 전체 마감이 값+2 인데 재시도
      * 대기가 그중 2초를 그대로 먹어, 첫 시도가 늦게 429 를 받을수록 두 번째 시도에 남는
      * 시간이 짧다. 알고 두는 것이다 — 여기서 재시도를 살리자고 예산을 늘리면 이 분리
      * 자체가 무의미해지고, 문장 하나를 위해 조회 화면을 30초 세우게 된다.
      */
-    private final Duration reportTimeout;
+    private final Duration viewTimeout;
 
     /**
      * gpt-5 계열은 요청 규약이 다르다. 실제로 던져 본 결과다.
@@ -115,9 +119,9 @@ public class OpenAiVisionClient implements VisionClient {
      * 아무 로그 없이 기능만 사라지기 때문이다.
      *
      * <p>상한은 인자로 받는다. 경로마다 상한의 <b>이유</b>가 다르기 때문이다 — 분석은
-     * "클라이언트 32초 안에 들어와야 한다"이고, 리포트는 "조회 화면이 그만큼 멎어도
-     * 되는가"다. 하나로 묶으면 리포트에 28 을 넣어도 통과하면서, 경고 문구는
-     * "허용 범위 안"이라 승인처럼 읽힌다.
+     * "클라이언트 32초 안에 들어와야 한다"이고, 조회는 "화면이 그만큼 멎어도 되는가"다.
+     * 하나로 묶으면 조회 경로에 28 을 넣어도 통과하면서, 경고 문구는 "허용 범위 안"이라
+     * 승인처럼 읽힌다.
      */
     private static long clampTimeout(long seconds, long maxSeconds, String property) {
         long clamped = Math.max(MIN_TIMEOUT_SECONDS, Math.min(seconds, maxSeconds));
@@ -131,16 +135,16 @@ public class OpenAiVisionClient implements VisionClient {
     /** 429 재시도 대기. 전체 데드라인 계산에도 쓰인다. */
     private static final long RETRY_DELAY_SECONDS = 2;
 
-    /** 이 값 + 재시도 대기 2초 ≤ 클라이언트 상한 32초. 분석 네 경로에 적용된다. */
+    /** 이 값 + 재시도 대기 2초 ≤ 클라이언트 상한 32초. 분석 세 경로에 적용된다. */
     private static final long MAX_TIMEOUT_SECONDS = 28;
     private static final long MIN_TIMEOUT_SECONDS = 1;
 
     /**
-     * 리포트는 상한의 이유가 다르다. 32초 예산이 아니라 <b>"조회 화면이 그만큼 멎어도
-     * 되는가"</b>다. 28 을 그대로 허용하면 REPORT_TIMEOUT_SECONDS 오타 하나로 이 분리가
+     * 조회 경로는 상한의 이유가 다르다. 32초 예산이 아니라 <b>"화면이 그만큼 멎어도
+     * 되는가"</b>다. 28 을 그대로 허용하면 VIEW_TIMEOUT_SECONDS 오타 하나로 이 분리가
      * 통째로 무효가 되는데, 경고 문구는 "허용 범위 안"이라 승인처럼 읽힌다.
      */
-    private static final long MAX_REPORT_TIMEOUT_SECONDS = 15;
+    private static final long MAX_VIEW_TIMEOUT_SECONDS = 15;
 
     /** 실측 출력이 442~554 토큰이다. 그 아래로 내려가면 전부 잘린다. */
     private static final int MIN_SKIN_MAX_TOKENS = 800;
@@ -151,7 +155,7 @@ public class OpenAiVisionClient implements VisionClient {
                               @Value("${app.ai.timeout-seconds}") long timeoutSeconds,
                               @Value("${app.ai.skin-max-tokens}") int skinMaxTokens,
                               @Value("${app.ai.skin-timeout-seconds}") long skinTimeoutSeconds,
-                              @Value("${app.ai.report-timeout-seconds}") long reportTimeoutSeconds) {
+                              @Value("${app.ai.view-timeout-seconds}") long viewTimeoutSeconds) {
         this.openAiWebClient = openAiWebClient;
         this.objectMapper = objectMapper;
         this.model = model;
@@ -177,9 +181,9 @@ public class OpenAiVisionClient implements VisionClient {
         // 같은 하한(1초)이 여기도 걸린다. 0 을 넣으면 Duration.ZERO 가 되어 주간 문장이
         // 항상 타임아웃으로 죽는데, fail-soft 라 아무 화면도 깨지지 않고 문장만 영영
         // 안 나온다 — 로그를 안 보면 기능이 사라진 것을 모른다.
-        this.reportTimeout = Duration.ofSeconds(
-                clampTimeout(reportTimeoutSeconds, MAX_REPORT_TIMEOUT_SECONDS,
-                        "app.ai.report-timeout-seconds"));
+        this.viewTimeout = Duration.ofSeconds(
+                clampTimeout(viewTimeoutSeconds, MAX_VIEW_TIMEOUT_SECONDS,
+                        "app.ai.view-timeout-seconds"));
 
         // 재현성 레버가 사라진 것을 기동 로그에 남긴다. 모델 이름 한 줄로 조용히
         // 꺼지는 스위치라, 발표 전에 눈에 띄어야 한다. (CLAUDE.md — 재현성이 이 제품의 주장)
@@ -223,23 +227,29 @@ public class OpenAiVisionClient implements VisionClient {
     }
 
     /**
-     * generateComments 와 같은 텍스트 전용 호출이다. 타임아웃·429 정책도 같고,
-     * 출력 상한만 INSIGHT_MAX_TOKENS 로 넓힌다.
+     * generateComments 와 같은 텍스트 전용 호출이다. 출력 상한을 INSIGHT_MAX_TOKENS 로
+     * 넓히고, <b>타임아웃은 viewTimeout 을 쓴다</b> — {@code GET /skin-insights} 가 이 호출을
+     * 동기로 기다리므로 그 시간이 그대로 화면이 멎는 시간이다.
+     *
+     * <p>여기서 실패는 사용자에게 그대로 보인다(1회 고정 정책이라 폴백을 저장할 수 없어
+     * SkinInsightService 가 삼키지 않는다). 그래서 더더욱 빨리 끊어야 한다 — 27초를
+     * 기다린 끝의 에러와 12초 만의 에러는 같은 실패가 아니다.
      */
     @Override
     public SkinInsightSentences generateSkinInsight(String userContext) {
         return call(SkinInsightPrompt.SYSTEM, SkinInsightPrompt.SCHEMA, "skin_insight",
-                List.of(text(userContext)), INSIGHT_MAX_TOKENS, timeout, SkinInsightSentences.class);
+                List.of(text(userContext)), INSIGHT_MAX_TOKENS, viewTimeout,
+                SkinInsightSentences.class);
     }
 
     /**
      * 인사이트와 같이 한국어 문장이 넷이라 출력 상한은 INSIGHT_MAX_TOKENS 를 같이 쓴다.
-     * <b>타임아웃만 다르다</b> — reportTimeout(기본 12초, 재시도 포함 전체 마감 14초).
+     * <b>타임아웃만 다르다</b> — viewTimeout(기본 12초, 재시도 포함 전체 마감 14초).
      */
     @Override
     public WeeklyComment generateWeeklyComment(String userContext) {
         return call(WeeklyReportPrompt.SYSTEM, WeeklyReportPrompt.SCHEMA, "weekly_report",
-                List.of(text(userContext)), INSIGHT_MAX_TOKENS, reportTimeout, WeeklyComment.class);
+                List.of(text(userContext)), INSIGHT_MAX_TOKENS, viewTimeout, WeeklyComment.class);
     }
 
     private static Map<String, Object> text(String value) {
