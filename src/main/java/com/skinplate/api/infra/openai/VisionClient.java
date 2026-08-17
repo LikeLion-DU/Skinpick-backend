@@ -5,6 +5,7 @@ import com.skinplate.api.infra.openai.dto.OpenAiFoodResult;
 import com.skinplate.api.infra.openai.dto.OpenAiSkinResult;
 import com.skinplate.api.infra.openai.dto.PlateComments;
 import com.skinplate.api.infra.openai.dto.SkinInsightSentences;
+import com.skinplate.api.infra.openai.dto.WeeklyComment;
 
 import java.util.List;
 
@@ -41,4 +42,11 @@ public interface VisionClient {
      * (PRD §18.10 — 주제 선정은 규칙, 문장 생성만 AI)
      */
     SkinInsightSentences generateSkinInsight(String userContext);
+
+    /**
+     * 주간 리포트의 문장을 만든다. <b>판단은 이미 끝나 있다</b> — 평균 점수도 BEST DAY 도
+     * 서버가 집계해 userContext 에 싣고, AI 는 그 표를 설명하기만 한다.
+     * 한 주치 음식 기록 원문은 넘기지 않는다(WeeklyReportPrompt 참조).
+     */
+    WeeklyComment generateWeeklyComment(String userContext);
 }

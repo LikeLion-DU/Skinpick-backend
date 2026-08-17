@@ -305,7 +305,9 @@ List<SkinAnalysis> findByUserIdAndCreatedAtGreaterThanEqualAndCreatedAtLessThanO
 
 ## 9. 제외 범위
 
-기록 상세 · 기록 삭제 · 과거 임의 날짜 리포트 · 나트륨 누적(mg) · 지난주 대비 비교 · 서버 이미지 저장(R2 포함) · 분석/기록 분리 · DB migration · 기존 분석/점수 로직 변경 · `POST /plates` 동작 변경
+기록 상세 · 기록 삭제 · ~~과거 임의 날짜 리포트~~ · 나트륨 누적(mg) · 지난주 대비 비교 · 서버 이미지 저장(R2 포함) · 분석/기록 분리 · DB migration · 기존 분석/점수 로직 변경 · `POST /plates` 동작 변경
+
+> **2026-08-17 갱신** — 과거 임의 날짜·임의 구간 리포트는 `GET /reports/daily?date=` · `GET /reports/weekly?from=&to=` 로 범위에 들어왔다(PRD §18.11). 이 문서의 §4.1 "기준일은 서버의 오늘(KST) 이다 · 과거 임의 날짜 조회는 범위 밖" 은 **기존 `GET /reports?period=` 에만** 해당한다 — 그 엔드포인트는 그대로 유지된다.
 
 ## 10. 난이도 · 작업량
 

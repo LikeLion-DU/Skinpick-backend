@@ -127,14 +127,14 @@ public class ReportService {
                 .toList();
     }
 
-    /** 음식 종류가 아니라 그 룰이 걸린 끼니 수를 센다. 같은 음식을 두 번 먹으면 2 다. */
+    /**
+     * 음식 종류가 아니라 그 룰이 걸린 끼니 수를 센다. 같은 음식을 두 번 먹으면 2 다.
+     *
+     * 정렬 규칙은 일일·주간 리포트와 한 벌을 쓴다 — 두 벌이면 한쪽만 바뀌었을 때
+     * 같은 목록이 화면마다 다른 순서로 뜬다.
+     */
     private List<String> topFoods(List<String> foodNames) {
-        return foodNames.stream()
-                .collect(Collectors.groupingBy(name -> name, Collectors.counting()))
-                .entrySet().stream()
-                .sorted(Map.Entry.<String, Long>comparingByValue().reversed()
-                                 .thenComparing(Map.Entry.comparingByKey()))
-                .limit(TOP_FOOD_COUNT)
+        return DailyReportAssembler.topCounts(foodNames.stream(), TOP_FOOD_COUNT).stream()
                 .map(Map.Entry::getKey)
                 .toList();
     }

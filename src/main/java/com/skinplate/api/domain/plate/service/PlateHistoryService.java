@@ -3,7 +3,6 @@ package com.skinplate.api.domain.plate.service;
 import com.skinplate.api.domain.plate.dto.PlateHistoryDayDto;
 import com.skinplate.api.domain.plate.dto.PlateHistoryItemDto;
 import com.skinplate.api.domain.plate.dto.PlateHistoryResponse;
-import com.skinplate.api.domain.plate.entity.MealType;
 import com.skinplate.api.domain.plate.entity.SkinPlate;
 import com.skinplate.api.domain.plate.repository.SkinPlateRepository;
 import com.skinplate.api.domain.skin.entity.SkinAnalysis;
@@ -66,13 +65,7 @@ public class PlateHistoryService {
 
         return new PlateHistoryDayDto(date, skinScore, averagePlateScore(sorted), TARGET_SCORE,
                 dailyComment(sorted),
-                sorted.stream()
-                        .map(plate -> new PlateHistoryItemDto(plate.getId(),
-                                plate.getFoodAnalysis().getFoodName(),
-                                plate.getPlateScore(),
-                                MealType.from(plate.getCreatedAt()),
-                                plate.getCreatedAt()))
-                        .toList());
+                sorted.stream().map(PlateHistoryItemDto::from).toList());
     }
 
     /**
