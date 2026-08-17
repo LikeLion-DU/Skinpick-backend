@@ -187,6 +187,13 @@ class OpenAiVisionClientTest {
                 .doesNotContain("reasoning_effort");
     }
 
+    /** 텍스트 전용 호출의 응답 봉투. content 는 JSON 문자열이라 한 번 더 감싸야 한다. */
+    private static String textEnvelopeOf(String contentJson) {
+        return """
+                {"choices":[{"message":{"content":%s}}]}"""
+                .formatted(new ObjectMapper().valueToTree(contentJson).toString());
+    }
+
     /** WebClient 는 본문을 BodyInserter 로 들고 있다. 실제로 써 봐야 내용이 보인다. */
     private static String bodyOf(ClientRequest request) {
         MockClientHttpRequest http = new MockClientHttpRequest(HttpMethod.POST, URI.create("/"));
@@ -199,18 +206,17 @@ class OpenAiVisionClientTest {
      * 클램프는 생성자에서 끝나므로 주입된 값만 본다 — 프로젝트가 이미 쓰는 방식이다.
      */
     private static Duration skinTimeoutOf(long configured) {
-        return timeoutFieldOf("skinTimeout", 1400, configured, 8);
+        return timeoutFieldOf("skinTimeout", configured, 12);
     }
 
     private static Duration reportTimeoutOf(long configured) {
-        return timeoutFieldOf("reportTimeout", 1400, 28, configured);
+        return timeoutFieldOf("reportTimeout", 28, configured);
     }
 
-    private static Duration timeoutFieldOf(String field, int skinMaxTokens,
-                                           long skinTimeout, long reportTimeout) {
+    private static Duration timeoutFieldOf(String field, long skinTimeout, long reportTimeout) {
         OpenAiVisionClient client = new OpenAiVisionClient(
                 WebClient.builder().build(), new ObjectMapper(),
-                "gpt-5.6-luna", 5, skinMaxTokens, skinTimeout, reportTimeout);
+                "gpt-5.6-luna", 5, 1400, skinTimeout, reportTimeout);
         return (Duration) ReflectionTestUtils.getField(client, field);
     }
 
@@ -223,16 +229,57 @@ class OpenAiVisionClientTest {
         assertThat(skinTimeoutOf(20)).isEqualTo(Duration.ofSeconds(20));   // 상한 아래는 그대로
     }
 
+    /**
+     * <b>필드를 읽는 것만으로는 부족하다.</b> 배선을 되돌려도(reportTimeout → timeout)
+     * 필드는 그대로 채워지므로 리플렉션 단언은 초록으로 남는다. 실제로 호출해서
+     * 리포트 예산에서 끊기는지 봐야 이 PR 이 고친 그 한 줄이 검증된다.
+     */
     @Test
-    @DisplayName("리포트 문장은 자기 타임아웃을 쓴다 — 분석용 25초를 물려받지 않는다")
-    void reportTimeoutIsIndependent() {
-        // 리포트는 하루에도 여러 번 여는 조회 화면이라 분석과 다른 예산을 쓴다.
-        assertThat(reportTimeoutOf(8)).isEqualTo(Duration.ofSeconds(8));
+    @DisplayName("주간 문장은 리포트 예산에서 끊긴다 — 분석용 예산을 물려받지 않는다")
+    void weeklyCommentUsesReportBudget() {
+        // 응답을 1.5초 지연시킨다. 분석 5초 · 리포트 1초라 갈라져야 정상이다.
+        ExchangeFunction slow = request -> Mono.delay(Duration.ofMillis(1500))
+                .then(Mono.just(json(HttpStatus.OK, textEnvelopeOf(
+                        "{\"goodPoint\":\"좋음\",\"improvePoint\":\"주의\","
+                                + "\"habit\":\"습관\",\"nextWeek\":\"추천\"}"))));
 
-        // 하한·상한은 다른 경로와 같은 규칙이다. 0 을 넣으면 Duration.ZERO 가 되어
-        // 주간 문장이 항상 죽는데, fail-soft 라 화면은 멀쩡해서 아무도 모른다.
+        OpenAiVisionClient client = new OpenAiVisionClient(
+                WebClient.builder().exchangeFunction(slow).build(), new ObjectMapper(),
+                "gpt-5.6-luna", 5, 1400, 5, 1);
+
+        assertThatThrownBy(() -> client.generateWeeklyComment("표"))
+                .isInstanceOf(OpenAiClientException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.AI_TIMEOUT);
+    }
+
+    @Test
+    @DisplayName("리포트 예산을 줄여도 분석 경로는 그대로다 — 한 값이 다섯 경로를 흔들지 않는다")
+    void analysisPathKeepsItsOwnBudget() {
+        ExchangeFunction slow = request -> Mono.delay(Duration.ofMillis(1500))
+                .then(Mono.just(json(HttpStatus.OK, textEnvelopeOf(
+                        "{\"aiTip\":\"팁\",\"dailyComment\":\"코멘트\"}"))));
+
+        // 리포트만 1초로 조인다. 같은 1.5초 지연이라도 분석용 문장은 5초 예산이라 살아야 한다.
+        OpenAiVisionClient client = new OpenAiVisionClient(
+                WebClient.builder().exchangeFunction(slow).build(), new ObjectMapper(),
+                "gpt-5.6-luna", 5, 1400, 5, 1);
+
+        assertThat(client.generateComments("컨텍스트").aiTip()).isEqualTo("팁");
+    }
+
+    @Test
+    @DisplayName("리포트 타임아웃 상한은 분석과 다른 15초다 — 오타 하나로 조회 화면이 다시 멎지 않는다")
+    void reportTimeoutHasItsOwnCeiling() {
+        assertThat(reportTimeoutOf(12)).isEqualTo(Duration.ofSeconds(12));
+
+        // 28 은 분석의 상한이지 리포트의 상한이 아니다. 그대로 허용하면
+        // REPORT_TIMEOUT_SECONDS 오타 하나로 이 분리가 통째로 무효가 된다.
+        assertThat(reportTimeoutOf(28)).isEqualTo(Duration.ofSeconds(15));
+        assertThat(reportTimeoutOf(40)).isEqualTo(Duration.ofSeconds(15));
+
+        // 0 을 넣으면 Duration.ZERO 가 되어 주간 문장이 항상 죽는데,
+        // fail-soft 라 화면은 멀쩡해서 아무도 모른다. 하한이 그 자리를 막는다.
         assertThat(reportTimeoutOf(0)).isEqualTo(Duration.ofSeconds(1));
-        assertThat(reportTimeoutOf(40)).isEqualTo(Duration.ofSeconds(28));
     }
 
     @Test
