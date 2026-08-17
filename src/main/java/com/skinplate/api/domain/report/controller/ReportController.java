@@ -1,11 +1,8 @@
 package com.skinplate.api.domain.report.controller;
 
 import com.skinplate.api.domain.report.dto.DailyReportResponse;
-import com.skinplate.api.domain.report.dto.ReportPeriod;
-import com.skinplate.api.domain.report.dto.ReportResponse;
 import com.skinplate.api.domain.report.dto.WeeklyReportResponse;
 import com.skinplate.api.domain.report.service.DailyReportService;
-import com.skinplate.api.domain.report.service.ReportService;
 import com.skinplate.api.domain.report.service.WeeklyReportService;
 import com.skinplate.api.global.common.ApiResponse;
 import com.skinplate.api.global.security.CurrentUser;
@@ -25,21 +22,8 @@ public class ReportController {
 
     // @RequiredArgsConstructor 가 필드 선언 순서로 생성자를 만든다. 순서를 바꾸면
     // 테스트의 new ReportController(...) 인자 순서가 조용히 어긋난다.
-    private final ReportService reportService;
     private final DailyReportService dailyReportService;
     private final WeeklyReportService weeklyReportService;
-
-    /**
-     * 기준일은 서버의 오늘(KST) 이다. 과거 임의 날짜는 히스토리가 맡는다.
-     *
-     * 모르는 period 는 Spring 이 MethodArgumentTypeMismatchException 을 던지고
-     * GlobalExceptionHandler 가 400 으로 받는다.
-     */
-    @GetMapping
-    public ApiResponse<ReportResponse> get(@CurrentUser Long userId,
-                                           @RequestParam ReportPeriod period) {
-        return ApiResponse.ok(reportService.get(userId, period));
-    }
 
     /**
      * 일일 리포트. date 는 KST 달력일이고, 생략하면 서버의 오늘이다.

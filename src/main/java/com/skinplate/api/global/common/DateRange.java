@@ -35,11 +35,6 @@ public record DateRange(LocalDate fromDate, LocalDate toDate) {
         return new DateRange(fromDate, toDate);
     }
 
-    public static DateRange today() {
-        LocalDate today = LocalDate.now(KST);
-        return new DateRange(today, today);
-    }
-
     /** 오늘을 포함해 days 일. days=7 이면 6일 전부터 오늘까지다. */
     public static DateRange lastDays(int days) {
         LocalDate today = LocalDate.now(KST);
