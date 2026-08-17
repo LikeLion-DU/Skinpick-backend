@@ -297,14 +297,34 @@ Skin Score 55
 **관찰 타입 판정 규칙 (결정론적)**
 
 ```
-redness > 70                    → SENSITIVE
-hydration < 40 && oil > 70      → COMBINATION   (수분 부족형 지성)
-oil > 70                        → OILY
+oil > 70                        → OILY          (얼굴 전반이 번들거림)
+oil >= 60                       → COMBINATION   (부위별로 유분이 다름 · T존)
 hydration < 40                  → DRY
 그 외                           → NORMAL
 ```
 
-> AI에게 "이 사람 피부 타입이 뭐야"를 묻지 않는다. **5개 지표에서 규칙으로 도출한다.** 같은 지표면 항상 같은 타입이 나와야 갭 코멘트도 재현 가능하다.
+> AI에게 "이 사람 피부 타입이 뭐야"를 묻지 않는다. **수분과 유분에서 규칙으로 도출한다.** 같은 지표면 항상 같은 타입이 나와야 갭 코멘트도 재현 가능하다.
+>
+> **근거는 수분·유분 둘뿐이다.** 붉은기·트러블·장벽은 타입을 바꾸지 않는다 — 그것들은 오늘의 상태이지 피부의 성질이고, 컨디션이 나쁜 날마다 "당신은 지성"이 "당신은 민감성"으로 바뀌면 이 갭 카드가 비교하려던 대상 자체가 사라진다. 그 셋은 아래 **상태 판정**이 따로 낸다. `SENSITIVE` 는 자가 신고 선택지로만 남는다.
+>
+> **유분을 두 단계로 읽는 것이 핵심이다.** 전역 유분 점수 하나로도 부위별 유분과 전면 유분은 갈린다 — T존만 번들거리면 얼굴 전체 평균이 중간대(60~70)에 머물고, 전반이 번들거려야 70을 넘는다. 예전 규칙은 복합성에 `hydration < 40 && oil > 70`을 요구해서 **전형적인 T존 복합성(수분 50 · 유분 65)이 NORMAL로 떨어졌다.** 프롬프트의 `oil` 정의에도 같은 구분을 지시해서 AI와 백엔드가 같은 기준을 본다.
+
+**현재 상태 판정 규칙 (결정론적)**
+
+타입과 별개로, 오늘 관찰된 상태를 심각한 순으로 전부 낸다(`skinType.traits`). 방향만 맞추면 경계가 하나다 — **높을수록 좋은 축은 40 미만, 높을수록 나쁜 축은 60 초과.**
+
+| 상태 | 조건 | 출처 |
+|---|---|---|
+| `DEHYDRATED` | `hydration < 40 && oil >= 60` | 지표 |
+| `REDNESS_PRONE` | `redness > 60` | 지표 |
+| `TROUBLE_PRONE` | `trouble > 60` | 지표 |
+| `BARRIER_WEAK` | `barrier < 40` | 지표 |
+| `TEXTURE_CONCERN` | `skinTexture < 40` | 피부 나이 축 |
+| `PIGMENTATION_CONCERN` | `pigmentation > 60` | 피부 나이 축 |
+
+> 임계값을 새로 만들지 않았다. 앞의 넷은 `SkinMetrics`가 이미 뱃지·룰 엔진·추천에 쓰던 판정자를 그대로 쓴다. 뒤의 둘은 **이미 받고 있는 피부 나이 축을 되읽는다** — Vision 호출도 스키마 항목도 늘리지 않고, 8축 구조도 그대로다. 확장 필드가 없던 시절의 기록이면 그 두 상태만 빠진다.
+>
+> `DEHYDRATED`에 유분 조건이 붙는 이유 — 유분이 낮은데 수분도 낮으면 타입이 이미 `DRY`다. 조건을 빼면 라벨이 "건성 · 수분 부족"이 되어 같은 말을 두 번 한다. 유분이 올라와 있는데 수분이 부족한 상태가 흔히 말하는 **수부지**이고, 라벨이 그 별칭을 붙인다.
 
 > 자가 신고값(피부 타입·고민·생활 습관)을 점수 계산에 넣지 않는 원칙은 **점수 계산 한정**이다 — 추천 보완(§18.9)에는 쓴다.
 
@@ -2272,8 +2292,8 @@ public class Recommendation extends BaseTimeEntity {
     ],
     "skinType": {
       "primary": "DRY",
-      "traits": ["SENSITIVE_TENDENCY"],
-      "label": "건성 · 민감 경향"
+      "traits": ["REDNESS_PRONE"],
+      "label": "건성 · 붉은기"
     },
     "skinAge": {
       "estimatedSkinAge": 29,
@@ -2308,9 +2328,11 @@ public class Recommendation extends BaseTimeEntity {
 
 > **`skinTypeGap`은 사용자가 피부 타입을 선택했을 때만 내려간다.** 미선택이면 키가 생략되고, 앱은 그 자리에 "평소 본인 피부는?" 인라인 선택 칩을 띄운다.
 >
-> `observed`는 AI에게 묻지 않는다. 5개 지표에서 **규칙으로 도출**한다(§4.4.1). 같은 지표면 항상 같은 타입이 나와야 갭 코멘트도 재현 가능하다. **이 값은 DB에 저장하지 않는다** — 지표에서 언제든 다시 계산되는 파생값이라 저장하면 규칙을 바꿨을 때 과거 데이터와 어긋난다.
+> `observed`는 AI에게 묻지 않는다. 수분·유분에서 **규칙으로 도출**한다(§4.4.1). 같은 지표면 항상 같은 타입이 나와야 갭 코멘트도 재현 가능하다. **이 값은 DB에 저장하지 않는다** — 지표에서 언제든 다시 계산되는 파생값이라 저장하면 규칙을 바꿨을 때 과거 데이터와 어긋난다.
 
-> **`skinType` 과 `skinTypeGap.observed` 는 서로 다른 값이다.** `skinType` 은 AI 가 사진에서 읽은 것이고, `observed` 는 위 규칙 도출값이다. 둘이 갈리는 것은 오류가 아니다 — 갭 카드는 계속 규칙값을 쓰고, 백엔드는 명백한 모순일 때 경고 로그만 남긴다. **재분류하지 않는다.**
+> **`skinType.primary` 와 `skinTypeGap.observed` 는 항상 같은 값이다.** 둘 다 §4.4.1 의 규칙 도출값이다. 예전에는 `skinType` 이 AI 관찰값이라 둘이 갈릴 수 있었고, 그래서 S05 는 제목에 규칙값을·칩에 AI 값을 그리며 **한 화면에서 타입 두 개를 들고 있었다.** 값이 갈릴 때 사용자에게 어느 쪽을 믿으라고 말할 방법이 없어서, 판정을 백엔드로 모으고 프롬프트에서 피부 타입 질문을 통째로 뺐다.
+>
+> **`skinType.traits` 는 오늘의 상태다** — 타입과 다른 층이고, §4.4.1 의 상태 판정 규칙으로 도출한다. 해당하는 것을 **심각한 순으로 전부** 싣는다. `label` 은 그중 앞의 둘만 쓴다(칩 한 줄을 넘기지 않으려는 것이고, 배열은 자르지 않는다).
 >
 > **`level` 은 AI 가 아니라 Backend 가 만든다.** 방향을 "높을수록 좋음"으로 맞춘 점수에 `SEVERE(0~20) · CAUTION(21~40) · NORMAL(41~60) · GOOD(61~80) · EXCELLENT(81~100)` 를 적용한다. 그래서 `oil: 52` 가 `NORMAL`(정렬 48)이고 `trouble: 25` 가 `GOOD`(정렬 75)이다. **`score` 는 뒤집지 않은 원값이므로 바 길이는 이 값으로 그린다.**
 >
@@ -2324,13 +2346,16 @@ public class Recommendation extends BaseTimeEntity {
 
 ```
 세 장 각각 검증(매직바이트) → 각각 Base64 → OpenAI Vision 1회 (Structured Output)
-     → 5개 지표 · 지표별 근거 · 피부 타입 · 피부 나이 8축 수신
+     → 5개 지표 · 지표별 근거 · 피부 나이 8축 수신 (피부 타입은 묻지 않는다)
      → SkinScoreCalculator로 종합 점수 산출 (나이는 여기 안 들어간다)
-     → level 산출 · highlights 생성 · (선언 타입이 있으면) skinTypeGap 생성
+     → level 산출 · highlights 생성 · 타입/상태 판정(§4.4.1)
+       · (선언 타입이 있으면) skinTypeGap 생성
      → DB 저장 (AI 원본은 raw_ai_response 에 통째로) → 응답
 
-GET /latest · GET /{id} 는 raw_ai_response 를 되읽어 근거·타입·나이를 복원한다.
+GET /latest · GET /{id} 는 raw_ai_response 를 되읽어 근거와 나이를 복원한다.
 지표에서 재계산할 수 없는 값이라 파생값 재계산 규칙(§14.3 ⑤)의 예외다.
+타입·상태·뱃지는 그 예외가 아니다 — 저장된 지표에서 매번 다시 만들어지므로,
+확장 필드가 없던 시절의 기록에도 그대로 나온다(피부결·색소 상태만 빠진다).
 ```
 
 ---
@@ -2803,10 +2828,12 @@ public record ScoredItemDto(String key, int score, SkinLevel level, List<String>
 /** 0~20 SEVERE · 21~40 CAUTION · 41~60 NORMAL · 61~80 GOOD · 81~100 EXCELLENT */
 public enum SkinLevel { SEVERE, CAUTION, NORMAL, GOOD, EXCELLENT }
 
-/** primary 는 DRY · NORMAL · OILY · COMBINATION 만. SENSITIVE 는 traits 쪽이다 */
+/** primary 는 DRY · NORMAL · OILY · COMBINATION 만. SENSITIVE 는 자가 신고 전용이다 */
 public record SkinTypeDto(SkinType primary, List<SkinTrait> traits, String label) {}
 
-public enum SkinTrait { DEHYDRATED, OILY_T_ZONE, SENSITIVE_TENDENCY, TROUBLE_TENDENCY }
+/** 오늘의 상태. 전부 규칙 도출이다 — AI 에게 묻지 않는다 (§4.4.1) */
+public enum SkinTrait { DEHYDRATED, REDNESS_PRONE, TROUBLE_PRONE,
+                        BARRIER_WEAK, TEXTURE_CONCERN, PIGMENTATION_CONCERN }
 
 /** axes 는 7개다 — AI 는 redness 도 평가하지만 응답에는 넣지 않는다(§14.3) */
 public record SkinAgeDto(int estimatedSkinAge, List<ScoredItemDto> axes, String assessment) {}
@@ -3152,7 +3179,7 @@ public class TestAccountInitializer implements ApplicationRunner {
 | 이메일 | 비밀번호 | 피부 타입 | 확인 가능한 갭 분기 |
 |---|---|---|---|
 | `dev1@skinplate.app` | `test1234!` | `DRY` | **일치** — "평소 생각하신 건성 그대로입니다" |
-| `dev2@skinplate.app` | `test1234!` | `SENSITIVE` | **불일치 폴백** — "평소 민감성이라고 생각하셨지만, 오늘 측정은 건성에…" |
+| `dev2@skinplate.app` | `test1234!` | `SENSITIVE` | **민감성 전용 분기** — "민감성이라고 하셨는데 오늘도 붉은기가 관찰됩니다…" (붉은기 64) |
 | `dev3@skinplate.app` | `test1234!` | `UNKNOWN` | **모름** — "오늘 측정 기준으로는 건성에 가깝습니다" |
 
 > **여섯 개가 같은 비밀번호를 쓴다.** 계정별로 다르게 두면 아무도 못 외우고 결국 어딘가에 적어두게 된다. `TEST_ACCOUNT_ENABLED=false`면 전부 안 생긴다.
@@ -3343,11 +3370,15 @@ public class OpenAiVisionClient {
 > | 블록 | 내용 |
 > |---|---|
 > | [A] 피부 상태 | 5개 지표 0~100 + 지표별 `metricEvidence` 최대 2개 |
-> | [B] 피부 타입 | `primary` DRY·NORMAL·OILY·COMBINATION 중 하나 + `traits` 4종 중 관찰된 것 |
-> | [C] 피부 나이 | 8개 축 0~100 + 축별 evidence 1개 (구간 정의는 소스의 rubric) |
-> | [D] `estimatedSkinAge` | 18~80 정수. 8축을 종합하되 평균을 나이로 환산하지 않는다 |
-> | [E] `ageAssessment` | 1~3문장, '~보여요' 체 |
-> | [F] `summary` | 1~3문장 200자 이내, '~합니다' 체 |
+> | [B] 피부 나이 | 8개 축 0~100 + 축별 evidence 1개 (구간 정의는 소스의 rubric) |
+> | [C] `estimatedSkinAge` | 18~80 정수. 8축을 종합하되 평균을 나이로 환산하지 않는다 |
+> | [D] `ageAssessment` | 1~3문장, '~보여요' 체 |
+> | [E] `summary` | 1~3문장 200자 이내, '~합니다' 체 |
+>
+> **피부 타입은 묻지 않는다.** 프롬프트가 그렇게 말하고 스키마에도 자리가 없다 —
+> 타입·상태는 Backend 가 지표에서 규칙으로 낸다(§4.4.1). 물으면 판정의 출처가 다시 둘이 된다.
+> 대신 `oil` 정의에 **T존만 번들거리면 60~70 / 전반이 번들거리면 70 초과**를 지시해서,
+> AI 가 재는 값과 백엔드가 읽는 기준이 같은 눈금을 쓰게 한다.
 >
 > **AI 는 점수만 낸다.** 등급(`level`)도 Skin Score 도 Backend 가 계산한다(§4.1 · §14.3).
 > 스키마 strict 모드는 모든 오브젝트에 `additionalProperties:false` 와 전 필드 `required` 를

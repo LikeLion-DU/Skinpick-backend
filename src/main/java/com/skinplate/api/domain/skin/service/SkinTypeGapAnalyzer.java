@@ -23,13 +23,13 @@ public class SkinTypeGapAnalyzer {
             "지성이라고 생각하셨지만 오늘은 유분보다 수분 부족이 두드러집니다. 유분기는 수분이 모자랄 때도 늘어날 수 있습니다.",
 
             key(SkinType.OILY, SkinType.COMBINATION),
-            "유분은 많은데 수분이 부족한 상태입니다. 흔히 '수분 부족형 지성'이라고 부릅니다.",
+            "지성이라고 생각하셨지만 오늘은 유분이 얼굴 전체가 아니라 부위별로 올라와 있습니다.",
 
             key(SkinType.DRY, SkinType.OILY),
             "건성이라고 생각하셨지만 오늘은 유분이 많은 편입니다. 세안 후 수분 공급이 부족하지 않은지 살펴보세요.",
 
-            key(SkinType.SENSITIVE, SkinType.NORMAL),
-            "민감성이라고 하셨는데 오늘은 자극이 적은 안정된 상태입니다.",
+            key(SkinType.DRY, SkinType.COMBINATION),
+            "건성이라고 생각하셨지만 오늘은 T존 쪽에 유분이 올라와 있습니다. 부위마다 다르게 케어해 보세요.",
 
             key(SkinType.COMBINATION, SkinType.DRY),
             "복합성이라고 생각하셨지만 오늘은 전반적으로 건조합니다."
@@ -48,6 +48,19 @@ public class SkinTypeGapAnalyzer {
             return new SkinTypeGapDto(declared, observed, false,
                     "오늘 측정 기준으로는 " + observed.getLabel() + "에 가깝습니다.");
         }
+
+        // SENSITIVE 는 observe() 가 낼 수 없는 값이다 — 붉은기는 타입이 아니라 오늘의 상태로 본다.
+        // 이 분기가 없으면 민감성을 고른 사용자는 무슨 사진을 찍든 영영 "일치하지 않음"이고,
+        // 붉은기가 실제로 관찰된 날조차 그 사실이 갭 카드에 한 글자도 안 나온다.
+        if (declared == SkinType.SENSITIVE) {
+            String state = metrics.hasRedness()
+                    ? "오늘도 붉은기가 관찰됩니다"
+                    : "오늘은 자극이 적은 안정된 상태입니다";
+            return new SkinTypeGapDto(declared, observed, false,
+                    "민감성이라고 하셨는데 " + state + ". "
+                            + "수분과 유분 기준으로는 " + observed.getLabel() + "에 가깝습니다.");
+        }
+
         if (declared == observed) {
             return new SkinTypeGapDto(declared, observed, true,
                     "평소 생각하신 " + declared.getLabel() + " 그대로입니다. 오늘 측정과 일치합니다.");

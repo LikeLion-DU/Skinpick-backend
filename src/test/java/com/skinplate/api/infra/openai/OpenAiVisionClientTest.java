@@ -40,7 +40,7 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 class OpenAiVisionClientTest {
 
     /**
-     * 확장 필드(metricEvidence · skinType · skinAgeAnalysis)가 없는 <b>예전 응답 모양</b>이다.
+     * 확장 필드(metricEvidence · skinAgeAnalysis)가 없는 <b>예전 응답 모양</b>이다.
      * 이게 그대로 파싱돼야 조회 경로가 과거에 저장된 raw_ai_response 를 읽을 수 있다.
      */
     private static final String CONTENT = """

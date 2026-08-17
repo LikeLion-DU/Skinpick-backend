@@ -1,6 +1,5 @@
 package com.skinplate.api.infra.openai;
 
-import com.skinplate.api.domain.skin.entity.SkinTrait;
 import com.skinplate.api.infra.openai.dto.OpenAiSkinResult;
 import com.skinplate.api.infra.openai.prompt.SkinAnalysisPrompt;
 import org.junit.jupiter.api.DisplayName;
@@ -50,8 +49,8 @@ class SkinAnalysisPromptTest {
             }
         }
 
-        // 루트 + metricEvidence + skinType + skinAgeAnalysis + 나이 축 8개
-        assertThat(objects).isEqualTo(12);
+        // 루트 + metricEvidence + skinAgeAnalysis + 나이 축 8개
+        assertThat(objects).isEqualTo(11);
     }
 
     @Test
@@ -72,31 +71,21 @@ class SkinAnalysisPromptTest {
     }
 
     @Test
-    @DisplayName("traits enum 은 SkinTrait 와 같은 목록이다 — 어긋나면 그 값만 조용히 버려진다")
+    @DisplayName("스키마에 피부 타입이 없다 — AI 가 타입을 내면 판정의 출처가 다시 둘이 된다")
     @SuppressWarnings("unchecked")
-    void traitEnumMatchesDomain() {
+    void schemaDoesNotAskForASkinType() {
         Map<String, Object> properties = (Map<String, Object>) SkinAnalysisPrompt.SCHEMA.get("properties");
-        Map<String, Object> skinType = (Map<String, Object>) properties.get("skinType");
-        Map<String, Object> traits = (Map<String, Object>) ((Map<String, Object>) skinType.get("properties")).get("traits");
-        Map<String, Object> items = (Map<String, Object>) traits.get("items");
 
-        assertThat((List<String>) items.get("enum"))
-                .containsExactlyInAnyOrder(Arrays.stream(SkinTrait.values()).map(Enum::name).toArray(String[]::new));
+        assertThat(properties).doesNotContainKey("skinType");
+        assertThat(SkinAnalysisPrompt.SYSTEM).contains("피부 타입(건성·지성·복합성·보통)은 판단하지 않습니다");
     }
 
     @Test
-    @DisplayName("primary enum 이 서버 화이트리스트와 같다 — 어긋나면 그 타입만 응답에서 통째로 사라진다")
-    @SuppressWarnings("unchecked")
-    void primaryEnumMatchesServerWhitelist() {
-        Map<String, Object> properties = (Map<String, Object>) SkinAnalysisPrompt.SCHEMA.get("properties");
-        Map<String, Object> skinType = (Map<String, Object>) properties.get("skinType");
-        Map<String, Object> primary = (Map<String, Object>) ((Map<String, Object>) skinType.get("properties")).get("primary");
-
-        // SkinAnalysisService.SCHEMA_PRIMARY_TYPES 는 이 목록을 손으로 옮겨 적은 것이다.
-        // 스키마에 SENSITIVE 를 넣고 저쪽을 안 고치면, 그 값이 온 사용자만 타입 칩이
-        // 통째로 사라지고 근거는 WARN 로그 한 줄뿐이다.
-        assertThat((List<String>) primary.get("enum"))
-                .containsExactlyInAnyOrder("DRY", "NORMAL", "OILY", "COMBINATION");
+    @DisplayName("프롬프트가 유분의 두 단계를 말한다 — 이게 없으면 T존 복합성과 전면 지성이 같은 값으로 온다")
+    void systemSeparatesRegionalOilFromOverallOil() {
+        // 백엔드는 유분 60~70 을 복합성, 70 초과를 지성으로 읽는다(SkinType.observe).
+        // 프롬프트가 그 구분을 지시하지 않으면 두 사람이 같은 숫자를 받는다.
+        assertThat(SkinAnalysisPrompt.SYSTEM).contains("T존에만 유분이 몰리고", "얼굴 전반이 고르게 번들거리면");
     }
 
     @Test

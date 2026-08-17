@@ -1263,7 +1263,7 @@ public class TestAccountInitializer implements ApplicationRunner {
      *     slot 2·3  declared = null   → 갭 카드 없음, 인라인 선택 칩
      *     dev1      DRY == DRY        → 일치 메시지
      *     slot 1    OILY vs DRY       → SPECIAL["OILY→DRY"] 전용 문구
-     *     dev2      SENSITIVE vs DRY  → SPECIAL 에 없음 → 폴백 문구
+     *     dev2      SENSITIVE vs DRY  → 민감성 전용 분기 (붉은기 64 → "오늘도 붉은기가…")
      *     dev3      UNKNOWN           → "오늘 측정 기준으로는 …에 가깝습니다"
      */
     private static final List<DevAccount> DEV_ACCOUNTS = List.of(
@@ -1337,7 +1337,7 @@ public class TestAccountInitializer implements ApplicationRunner {
 | 이메일 | 비밀번호 | 피부 타입 | 확인 가능한 갭 분기 |
 |---|---|---|---|
 | `dev1@skinplate.app` | `test1234!` | `DRY` | **일치** — "평소 생각하신 건성 그대로입니다" |
-| `dev2@skinplate.app` | `test1234!` | `SENSITIVE` | **불일치 폴백** — "평소 민감성이라고 생각하셨지만, 오늘 측정은 건성에…" |
+| `dev2@skinplate.app` | `test1234!` | `SENSITIVE` | **민감성 전용 분기** — "민감성이라고 하셨는데 오늘도 붉은기가 관찰됩니다…" (붉은기 64) |
 | `dev3@skinplate.app` | `test1234!` | `UNKNOWN` | **모름** — "오늘 측정 기준으로는 건성에 가깝습니다" |
 
 > **여섯 개가 같은 비밀번호를 쓴다.** 계정별로 다르게 두면 아무도 못 외우고 결국 어딘가에 적어두게 된다. `TEST_ACCOUNT_ENABLED=false`면 전부 안 생긴다.
@@ -1372,7 +1372,7 @@ import com.skinplate.api.domain.skin.entity.SkinMetrics;
  * 피부 타입. 두 가지 용도로 쓰인다.
  *
  *   declared : 사용자가 스스로 고른 값 (S01c)
- *   observed : 5개 지표에서 규칙으로 도출한 값 — AI 에게 묻지 않는다
+ *   observed : 수분·유분에서 규칙으로 도출한 값 — AI 에게 묻지 않는다
  *
  * 어느 쪽도 Skin Plate Score 계산에는 들어가지 않는다.
  * 둘의 차이를 보여주는 것이 이 타입의 존재 이유다.
@@ -1398,20 +1398,25 @@ public enum SkinType {
     }
 
     /**
-     * 5개 지표에서 오늘의 관찰 타입을 도출한다. (PRD §4.4.1)
+     * 오늘의 관찰 타입을 도출한다. (PRD §4.4.1)
      * 같은 지표면 항상 같은 타입이 나와야 갭 코멘트도 재현 가능하다.
+     *
+     * 근거는 유분과 수분 둘뿐이다. 붉은기·트러블·장벽은 SkinTrait 가 상태로 낸다.
      */
-    public static SkinType observe(SkinMetrics m) {
-        if (m.getRedness() > 70)          return SENSITIVE;
-        if (m.isDry() && m.isOily())      return COMBINATION;   // 수분 부족형 지성
-        if (m.isOily())                   return OILY;
-        if (m.isDry())                    return DRY;
+    public static SkinType observe(SkinMetrics metrics) {
+        if (metrics.isOily())        return OILY;          // 유분 > 70 · 얼굴 전반이 번들거림
+        if (metrics.isOilElevated()) return COMBINATION;   // 유분 ≥ 60 · 부위별로 유분이 다름
+        if (metrics.isDry())         return DRY;           // 수분 < 40
         return NORMAL;
     }
 }
 ```
 
-> **판정 순서가 곧 우선순위다.** 홍조가 매우 높으면(>70) 다른 조건보다 먼저 `SENSITIVE`로 잡는다. 자극이 심한 상태에서 "지성이시네요"라고 말하는 건 사용자에게 도움이 안 된다.
+> **판정 순서가 곧 우선순위다.** 유분을 먼저 두 단계로 읽고, 유분이 올라오지 않았을 때만 수분을 본다.
+>
+> **왜 붉은기가 빠졌나** — 예전에는 `redness > 70`이 맨 앞에서 `SENSITIVE`를 잡았다. 그런데 그러면 컨디션이 나쁜 날마다 "당신의 피부 타입"이 바뀌고, 갭 카드가 비교하려던 대상 자체가 사라진다. 게다가 그 `70`은 `REDNESS_THRESHOLD(60)`과 달라서, 붉은기 65면 **뱃지는 "홍조 주의"인데 타입은 민감성이 아닌** 상태가 나왔다. 붉은기는 이제 `REDNESS_PRONE` 상태로만 나오고, 임계는 60 하나다.
+>
+> **왜 복합성이 유분 60인가** — `hydration < 40 && oil > 70`은 너무 좁아서 전형적인 T존 복합성(수분 50 · 유분 65)이 `NORMAL`로 떨어졌다. 전역 유분 점수 하나로도 두 상태는 갈린다 — T존만 번들거리면 얼굴 전체 평균이 중간대에 머물고, 전반이 번들거려야 70을 넘는다. 60은 새 숫자가 아니라 `SkinHighlightBuilder`가 이미 "유분 많음" 뱃지를 다는 선이다.
 
 **`domain/user/entity/SkinConcern.java`**
 
@@ -2040,8 +2045,8 @@ public class SkinTypeGapAnalyzer {
             key(SkinType.DRY, SkinType.OILY),
             "건성이라고 생각하셨지만 오늘은 유분이 많은 편입니다. 세안 후 수분 공급이 부족하지 않은지 살펴보세요.",
 
-            key(SkinType.SENSITIVE, SkinType.NORMAL),
-            "민감성이라고 하셨는데 오늘은 자극이 적은 안정된 상태입니다.",
+            key(SkinType.DRY, SkinType.COMBINATION),
+            "건성이라고 생각하셨지만 오늘은 T존 쪽에 유분이 올라와 있습니다. 부위마다 다르게 케어해 보세요.",
 
             key(SkinType.COMBINATION, SkinType.DRY),
             "복합성이라고 생각하셨지만 오늘은 전반적으로 건조합니다."
@@ -2060,6 +2065,19 @@ public class SkinTypeGapAnalyzer {
             return new SkinTypeGapDto(declared, observed, false,
                     "오늘 측정 기준으로는 " + observed.getLabel() + "에 가깝습니다.");
         }
+
+        // SENSITIVE 는 observe() 가 낼 수 없다 — 붉은기는 타입이 아니라 오늘의 상태다.
+        // 이 분기가 없으면 민감성을 고른 사용자는 영영 "일치하지 않음"이고,
+        // 붉은기가 실제로 관찰된 날조차 그 사실이 갭 카드에 한 글자도 안 나온다.
+        if (declared == SkinType.SENSITIVE) {
+            String state = metrics.hasRedness()
+                    ? "오늘도 붉은기가 관찰됩니다"
+                    : "오늘은 자극이 적은 안정된 상태입니다";
+            return new SkinTypeGapDto(declared, observed, false,
+                    "민감성이라고 하셨는데 " + state + ". "
+                            + "수분과 유분 기준으로는 " + observed.getLabel() + "에 가깝습니다.");
+        }
+
         if (declared == observed) {
             return new SkinTypeGapDto(declared, observed, true,
                     "평소 생각하신 " + declared.getLabel() + " 그대로입니다. 오늘 측정과 일치합니다.");
@@ -2082,10 +2100,18 @@ public class SkinTypeGapAnalyzer {
 
 ```
 observe(38, 52, 64, 25, 78)
-  redness 64 > 70 ?      아니오
-  dry(38<40) && oily(52>70) ?  아니오
-  oily(52>70) ?          아니오
-  dry(38<40) ?           예     → DRY
+  oily(52 > 70) ?          아니오
+  oilElevated(52 >= 60) ?  아니오
+  dry(38 < 40) ?           예     → DRY
+
+상태 = SkinTrait.observe(지표, skinTexture 72, pigmentation 35)
+  dehydrated(38<40 && 52>=60) ? 아니오   ← 타입이 이미 건성이다
+  redness 64 > 60 ?             예       → REDNESS_PRONE
+  trouble 25 > 60 ?             아니오
+  barrier 78 < 40 ?             아니오
+  skinTexture 72 < 40 ?         아니오
+  pigmentation 35 > 60 ?        아니오
+                                         → label "건성 · 붉은기"
 
 declared OILY ≠ observed DRY  →  SPECIAL["OILY→DRY"]
   "지성이라고 생각하셨지만 오늘은 유분보다 수분 부족이 두드러집니다.
@@ -3210,7 +3236,7 @@ public record SkinAnalysisResponse(
         int skinScore,
         SkinMetricsDto metrics,               // 기존 계약 그대로. S05 의 지표 바가 읽는다
         List<ScoredItemDto> metricDetails,    // 같은 5개에 등급과 관찰 근거를 붙인 것
-        SkinTypeDto skinType,                 // AI 가 읽은 타입. 없으면 null → 키 생략
+        SkinTypeDto skinType,                 // 규칙 도출 타입 + 오늘의 상태. 항상 채워진다
         SkinAgeDto skinAge,                   // 예전 분석이면 null → 키 생략
         String summary,
         List<HighlightDto> highlights,
@@ -3283,21 +3309,33 @@ public enum SkinLevel {
 **`domain/skin/dto/SkinTypeDto.java` · `domain/skin/entity/SkinTrait.java`**
 
 ```java
-/** primary 는 DRY · NORMAL · OILY · COMBINATION 만. SENSITIVE 는 traits 쪽이다 */
+/** primary 는 DRY · NORMAL · OILY · COMBINATION 만. SENSITIVE 는 자가 신고 전용이다 */
 public record SkinTypeDto(SkinType primary, List<SkinTrait> traits, String label) {
 
     /** 앱이 조합하지 않도록 서버가 문구까지 만든다 — 갭 카드와 같은 원칙이다 */
     public static SkinTypeDto of(SkinType primary, List<SkinTrait> traits) { ... }
 }
 
-public enum SkinTrait { DEHYDRATED, OILY_T_ZONE, SENSITIVE_TENDENCY, TROUBLE_TENDENCY }
+/** 오늘의 상태. 전부 규칙 도출이다 — AI 에게 묻지 않는다 (PRD §4.4.1) */
+public enum SkinTrait {
+    DEHYDRATED, REDNESS_PRONE, TROUBLE_PRONE,       // 지표에서
+    BARRIER_WEAK, TEXTURE_CONCERN, PIGMENTATION_CONCERN;   // 뒤 둘은 피부 나이 축에서
+
+    public static List<SkinTrait> observe(SkinMetrics metrics,
+                                          Integer textureScore,
+                                          Integer pigmentationScore) { ... }
+}
 ```
 
-> **`skinTypeGap.observed` 와는 다른 값이다.** 그쪽은 `SkinType.observe(metrics)` 규칙 도출값이고(§1.12.2 · PRD §14.3), 이쪽은 AI 관찰이다. 둘이 갈리는 것은 오류가 아니라 정보다 — **갭 카드는 계속 규칙값을 쓰고 재분류하지 않는다.** 백엔드는 명백한 모순(유분 임계 미달인데 OILY 등)일 때 경고 로그만 남긴다.
+> **`primary` 는 `skinTypeGap.observed` 와 항상 같은 값이다.** 둘 다 `SkinType.observe(metrics)` 다(§1.12.2 · PRD §14.3). 예전에는 이 필드가 AI 관찰값이라 둘이 갈릴 수 있었고, S05 는 제목에 규칙값을·칩에 AI 값을 그리며 한 화면에서 타입 두 개를 들고 있었다 — 값이 갈릴 때 어느 쪽을 믿으라고 말할 방법이 없었다. 프롬프트에서 피부 타입 질문을 통째로 빼서 출처를 하나로 만들었다.
 >
-> "수부지"를 primary 로 만들지 않는다. `COMBINATION` + `DEHYDRATED` 로 표현하면 primary 목록이 늘어나지 않는다. 대신 **`label` 이 그 조합에서만 "복합성 · 수분 부족 경향(수부지)" 로 별칭을 붙인다** — 사용자가 부르는 말이 없으면 자기 피부인 줄 모른다.
+> **`traits` 는 타입과 다른 층이다.** 해당하는 상태를 심각한 순으로 **전부** 싣는다. `label` 은 그중 앞의 둘만 쓴다 — S05 칩은 폭이 정해져 있지 않고 QA 에서 이미 두 번 잘렸는데, 여섯을 이어 붙이면 40자를 넘긴다. 자르는 것은 문구뿐이고 배열은 온전히 내려간다.
 >
-> **`label` 은 서버가 만든다.** 앱이 primary 4개 × traits 4개를 각자 조합하기 시작하면 문구를 바꿀 때 두 곳이 어긋나고, 어긋난 쪽이 화면이다. 갭 카드가 `message` 를 통째로 내려보내는 것과 같은 원칙이다(§1.12.2). 앱은 `label` 을 그대로 그리면 되고, 칩을 따로 그리고 싶으면 `primary` · `traits` 를 쓴다.
+> **`TEXTURE_CONCERN` · `PIGMENTATION_CONCERN` 은 피부 나이 축을 되읽는다.** 같은 것을 재는 Vision 값을 새로 만들지 않으려는 것이고, 8축 구조도 그대로다. 확장 필드가 없던 시절의 기록이면 원본에 없어 그 두 상태만 빠진다 — 그래서 파라미터가 `Integer` 다.
+>
+> "수부지"를 primary 로 만들지 않는다. `DEHYDRATED` 자체가 `수분<40 && 유분≥60` 이라 유분 조건을 이미 담고 있고, **`label` 이 그 상태를 실을 때만 "(수부지)" 별칭을 붙인다** — 사용자가 부르는 말이 없으면 자기 피부인 줄 모른다. 라벨에서 잘려 나간 상태에는 붙이지 않는다. 안 그러면 "지성 · 장벽 약화 · 붉은기(수부지)" 처럼 근거 없는 괄호가 남는다.
+>
+> **`label` 은 서버가 만든다.** 앱이 primary 4개 × 상태 6개를 각자 조합하기 시작하면 문구를 바꿀 때 두 곳이 어긋나고, 어긋난 쪽이 화면이다. 갭 카드가 `message` 를 통째로 내려보내는 것과 같은 원칙이다(§1.12.2). 앱은 `label` 을 그대로 그리면 되고, 칩을 따로 그리고 싶으면 `primary` · `traits` 를 쓴다.
 
 **`domain/skin/dto/SkinAgeDto.java`**
 
@@ -3755,9 +3793,14 @@ package com.skinplate.api.infra.openai.dto;
  * OpenAI Structured Outputs(json_schema) 응답을 그대로 받는 DTO.
  * 필드명이 SkinAnalysisPrompt.SCHEMA 와 1:1로 일치해야 한다.
  *
- * 확장 필드 셋은 null 일 수 있다 — 이 필드들이 생기기 전에 저장된
+ * 확장 필드 둘은 null 일 수 있다 — 이 필드들이 생기기 전에 저장된
  * raw_ai_response 를 다시 읽을 때 그렇다. 그 행도 점수·지표·뱃지는 나와야 한다.
+ *
+ * ignoreUnknown 은 반대 방향을 막는다. 스키마에서 뺀 필드(예전의 skinType)가 들어 있는
+ * 옛 행을 읽을 때 여기서 터지면 parseDetail 이 통째로 null 을 돌려주고, 남아 있는
+ * 근거·피부 나이까지 같이 사라진다. 전역 Jackson 설정에 기대지 않고 여기서 못 박는다.
  */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public record OpenAiSkinResult(
         boolean faceDetected,
         int hydration,
@@ -3766,7 +3809,6 @@ public record OpenAiSkinResult(
         int trouble,
         int barrier,
         MetricEvidence metricEvidence,
-        SkinTypeResult skinType,
         SkinAgeAnalysis skinAgeAnalysis,
         String summary
 ) {
@@ -3775,9 +3817,6 @@ public record OpenAiSkinResult(
                                  List<String> barrier) {
         static final MetricEvidence EMPTY = new MetricEvidence(null, null, null, null, null);
     }
-
-    /** enum 이 아니라 String 이다 — 모르는 값 하나에 역직렬화가 통째로 실패하면 유료 호출이 날아간다. */
-    public record SkinTypeResult(String primary, List<String> traits) {}
 
     public record Axis(int score, List<String> evidence) {}
 
@@ -5705,12 +5744,15 @@ class ScoredItem {
   final List<String> evidence;
 }
 
-/// AI 관찰 피부 타입. 화면 문구는 서버가 조합해 준 [label] 을 **그대로** 쓴다.
+/// 오늘의 피부 타입 + 상태. 화면 문구는 서버가 조합해 준 [label] 을 **그대로** 쓴다.
+///
+/// 클래스 이름의 `Ai` 는 이제 사실과 다르다 — 서버가 지표에서 규칙으로 낸다.
+/// 이름을 바꾸는 것은 프론트 PR 몫이라 여기서는 계약만 적는다.
 class AiSkinType {
   const AiSkinType({required this.primary, required this.label});
 
   final SkinType? primary;  // 모르는 값이면 null. "미선택"과 섞지 않는다
-  final String label;       // "건성 · 민감 경향" · "복합성 · 수분 부족 경향(수부지)"
+  final String label;       // "건성 · 붉은기" · "복합성 · 수분 부족(수부지)"
 }
 
 /// AI 추정 피부 나이. 실제 나이가 아니라 사진 기반 외관 추정이다.
@@ -5804,8 +5846,9 @@ class ScoredItemDto with _$ScoredItemDto {
       _$ScoredItemDtoFromJson(json);
 }
 
-/// AI 가 사진에서 읽은 피부 타입. `skinTypeGap.observed`(규칙 도출)와 다른 값이다.
+/// 오늘의 피부 타입 + 상태. `primary` 는 `skinTypeGap.observed` 와 항상 같은 값이다.
 /// traits 를 enum 으로 올리지 않는다 — 화면 문구는 서버가 조합해 준 label 을 쓴다.
+/// 그래서 서버가 상태 값 이름을 바꿔도 이 모델은 깨지지 않는다.
 @freezed
 class AiSkinTypeDto with _$AiSkinTypeDto {
   const factory AiSkinTypeDto({

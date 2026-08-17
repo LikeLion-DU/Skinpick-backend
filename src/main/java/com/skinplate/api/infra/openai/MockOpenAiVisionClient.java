@@ -69,13 +69,9 @@ public class MockOpenAiVisionClient implements VisionClient {
     /**
      * 사진이 몇 장이든 같은 값을 돌려준다. 시연에서 필요한 건 재현 가능한 60점이다.
      *
-     * 피부 타입은 <b>DRY</b> 다. 설계 문서의 예시는 COMBINATION 이지만, 시연 지표에서
-     * {@code SkinType.observe} 가 도출하는 값은 DRY 이고 갭 카드도 "지성이라고
-     * 생각하셨지만… 건조" 로 뜬다. Mock 만 COMBINATION 이면 한 화면에서 타입이 두 개로
-     * 갈라져 보인다 — 무대에서 설명할 수 없는 종류의 어긋남이다.
-     *
-     * traits 에 SENSITIVE_TENDENCY 를 두는 근거는 붉어짐 64 다(임계 60 초과).
-     * 빈 배열로 두면 traits 칩이 시연에서 한 번도 안 그려진다.
+     * 피부 타입은 여기서 말하지 않는다 — 서버가 이 지표에서 규칙으로 낸다.
+     * 시연 지표(수분 38 · 유분 52)면 <b>건성</b>이고, 상태는 붉어짐 64(임계 60 초과)라
+     * <b>붉은기</b> 하나가 붙는다. 갭 카드도 "지성이라고 생각하셨지만… 건조"로 뜬다.
      */
     @Override
     public OpenAiSkinResult analyzeSkin(List<FacePhoto> photos) {
@@ -86,7 +82,6 @@ public class MockOpenAiVisionClient implements VisionClient {
                         List.of("코와 볼 주변에 붉은기가 뚜렷함"),
                         List.of("작은 융기가 소수만 보임"),
                         List.of("전반적인 피부결이 균일한 편임")),
-                new OpenAiSkinResult.SkinTypeResult("DRY", List.of("SENSITIVE_TENDENCY")),
                 new OpenAiSkinResult.SkinAgeAnalysis(29,
                         axis(72, "볼과 이마의 피부결이 균일한 편임"),
                         axis(76, "턱선의 처짐이 뚜렷하지 않음"),

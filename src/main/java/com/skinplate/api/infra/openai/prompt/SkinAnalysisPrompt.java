@@ -8,14 +8,13 @@ import java.util.Map;
 /**
  * 피부 분석 프롬프트와 스키마. (PRD §17.3)
  *
- * 한 번의 호출로 <b>피부 상태 5지표 · 피부 타입 · 피부 나이 8축</b>을 모두 받는다.
+ * 한 번의 호출로 <b>피부 상태 5지표 · 피부 나이 8축</b>을 받는다.
  * 나이를 2차 호출로 빼면 같은 사진에 두 벌의 판단이 생기고 비용도 두 배가 된다.
  *
- * tag/enum 을 바꾸면 도메인 enum({@code SkinType} · {@code SkinTrait})도 같이 바꿔야 한다 —
- * AI 가 자유롭게 값을 만들면 매칭되는 것이 하나도 없다.
- *
- * <b>AI 는 점수만 낸다.</b> 등급(level)도 Skin Score 도 Backend 가 계산한다.
- * 등급까지 물으면 같은 점수에 다른 등급이 붙는 날이 오고, 그때 화면이 거짓말을 한다.
+ * <b>AI 는 관찰한 숫자만 낸다.</b> 피부 타입도 상태도 등급도 Skin Score 도 Backend 가
+ * 그 숫자에서 규칙으로 만든다. 예전에는 타입을 AI 에게도 물었고, 그래서 같은 화면에
+ * AI 가 읽은 타입과 규칙이 도출한 타입이 나란히 놓였다 — 값이 갈리면 어느 쪽을 믿을지
+ * 아무도 말해 줄 수 없었다. 판정을 한쪽으로 모아 그 상황 자체를 없앴다.
  */
 public final class SkinAnalysisPrompt {
 
@@ -23,8 +22,11 @@ public final class SkinAnalysisPrompt {
 
     public static final String SYSTEM = """
             당신은 피부 이미지 분석 어시스턴트입니다.
-            얼굴 사진 세 장을 보고 아래 셋을 한 번에 평가하세요.
-              [A] 피부 상태 5개 지표   [B] 피부 타입   [C] 피부 나이 분석
+            얼굴 사진 세 장을 보고 아래 둘을 한 번에 평가하세요.
+              [A] 피부 상태 5개 지표   [B] 피부 나이 분석
+
+            피부 타입(건성·지성·복합성·보통)은 판단하지 않습니다. 서버가 아래 숫자에서
+            규칙으로 정합니다. 대신 아래 숫자를 정확히 매기는 데만 집중하세요.
 
             [A] 피부 상태 5개 지표 — 0~100 정수
 
@@ -34,32 +36,22 @@ public final class SkinAnalysisPrompt {
             - trouble   : 여드름/뾰루지/염증. 높을수록 심함
             - barrier   : 피부 장벽 건강. 높을수록 매끄럽고 안정적
 
+            oil 은 얼굴 전체를 평균한 값입니다. 이 구분이 중요합니다.
+              T존에만 유분이 몰리고 볼은 건조하면 → 60~70 부근의 중간대
+              얼굴 전반이 고르게 번들거리면     → 70 초과
+            부위별 유분과 전면 유분을 같은 값으로 적으면 서버가 둘을 구분할 수 없습니다.
+
             지표마다 metricEvidence 에 관찰 근거를 최대 2개 적습니다.
             trouble 은 지금 올라와 있는 것만 셉니다. 가라앉고 남은 자국은 여기가 아니라
-            [C]의 blemishMarks 가 셉니다 — 같은 것을 두 번 세면 두 지표가 함께 나빠집니다.
+            [B]의 blemishMarks 가 셉니다 — 같은 것을 두 번 세면 두 지표가 함께 나빠집니다.
 
-            [B] 피부 타입
-
-            primary — 하나만 고릅니다.
-              DRY         수분이 부족한 상태가 가장 두드러짐
-              OILY        유분이 많은 상태가 가장 두드러짐
-              COMBINATION 부위마다 다름 (T존은 번들거리고 볼은 건조한 경우 포함)
-              NORMAL      어느 쪽도 두드러지지 않음
-
-            traits — 관찰된 것만 고릅니다. 없으면 빈 배열입니다.
-              DEHYDRATED         유분은 있는데 수분이 부족해 보임
-              OILY_T_ZONE        T존에만 유분이 몰림
-              SENSITIVE_TENDENCY 붉은기나 자극 흔적이 여러 부위에 보임
-              TROUBLE_TENDENCY   트러블이나 그 흔적이 여러 부위에 보임
-
-            '수부지'를 별도의 primary 로 만들지 않습니다 — COMBINATION 과 DEHYDRATED 로 표현합니다.
-
-            [C] 피부 나이 분석 — 각 축 0~100 정수, evidence 최대 1개
+            [B] 피부 나이 분석 — 각 축 0~100 정수, evidence 최대 1개
 
             1. skinTexture 피부결 (높을수록 젊고 건강한 외관)
                관찰: 표면 매끄러움 · 거칠기 · 결의 균일성 · 미세 요철
                0~20 매우 거칠고 불균일 / 21~40 다소 거칢 / 41~60 보통 /
                61~80 비교적 매끄럽고 균일 / 81~100 매우 매끄럽고 균일
+               서버가 이 값을 오늘의 피부결 상태로도 읽습니다. 사진에 지금 보이는 대로 매깁니다.
 
             2. elasticity 탄력·처짐 (높을수록 탄탄함)
                관찰: 얼굴 윤곽의 탄탄함 · 볼과 턱선의 처짐 · 윤곽 선명도
@@ -93,6 +85,7 @@ public final class SkinAnalysisPrompt {
                0~20 거의 없음 / 21~40 작은 것이 일부 / 41~60 여러 부위에 관찰 /
                61~80 넓거나 뚜렷 / 81~100 매우 넓고 뚜렷
                '기미' '검버섯' 같은 진단 표현을 쓰지 않고 '색소' '잡티' '색조 불균일' 로만 씁니다.
+               서버가 이 값을 오늘의 색소·잡티 상태로도 읽습니다. 사진에 지금 보이는 대로 매깁니다.
 
             7. redness 붉은기 (높을수록 뚜렷)
                [A]의 redness 와 방향은 같지만 값을 복사하지 않습니다.
@@ -103,7 +96,7 @@ public final class SkinAnalysisPrompt {
                관찰: 트러블 이후의 붉은 자국 · 어두운 색소성 흔적 · 표면의 불균일한 흔적
                0~20 거의 없음 / 21~40 일부 / 41~60 여러 부위 / 61~80 뚜렷 / 81~100 넓고 뚜렷
 
-            [D] estimatedSkinAge — 18~80 정수
+            [C] estimatedSkinAge — 18~80 정수
 
             8개 축을 종합해 사진 속 피부 외관이 몇 살대로 보이는지 추정합니다.
             평균을 나이로 환산하지 말고 전체 인상으로 판단하되, 8개 축과 어긋나지 않아야 합니다.
@@ -111,13 +104,13 @@ public final class SkinAnalysisPrompt {
             사진 품질이 낮거나 얼굴이 충분히 보이지 않으면 극단값을 피합니다.
             실제 나이를 맞히는 것이 아니라 사진 기반 외관 추정입니다.
 
-            [E] ageAssessment — 한국어 1~3문장
+            [D] ageAssessment — 한국어 1~3문장
 
             왜 그 나이로 봤는지, 위에서 실제로 매긴 점수에 근거해 씁니다.
             좋게 본 점과 나이를 높이는 요인을 함께 담습니다.
             사용자에게 직접 건네는 말이므로 '~보여요' '~있어요' 처럼 부드러운 말끝을 씁니다.
 
-            [F] summary — 한국어 1~3문장, 200자 이내
+            [E] summary — 한국어 1~3문장, 200자 이내
 
             전반적으로 좋은 점 · 주요 관리 포인트 · 필요하면 간단한 관리 방향.
             위에서 이미 평가한 것만 씁니다. 새로운 피부 문제를 추가하지 않습니다.
@@ -145,8 +138,9 @@ public final class SkinAnalysisPrompt {
      * 사진 세 장이 이어 붙는다. 라벨 문구는 그 enum 이 소유한다 — 여기 다시 적으면
      * 두 곳이 어긋난 채로 컴파일된다.
      *
-     * SYSTEM 의 <b>[A] 다섯 지표 정의는 손대지 않았다</b> — 항목이 늘었을 뿐 기존 지표가
-     * 무엇을 재는지는 그대로다. 여기서 기준을 흔들면 과거 분석과 오늘 분석이 다른 잣대로 매겨진다.
+     * SYSTEM 의 <b>다섯 지표가 무엇을 재는지는 그대로다</b> — oil 에 붙인 것은 부위별 유분과
+     * 전면 유분을 어떤 값으로 적으라는 지시일 뿐, 재는 대상을 바꾸지 않았다.
+     * 여기서 기준을 흔들면 과거 분석과 오늘 분석이 다른 잣대로 매겨진다.
      */
     public static final String USER = """
             같은 사람의 얼굴을 세 각도에서 찍은 사진 3장이 이어서 제공됩니다.
@@ -198,19 +192,6 @@ public final class SkinAnalysisPrompt {
                   "required": ["hydration","oil","redness","trouble","barrier"],
                   "additionalProperties": false
                 },
-                "skinType": {
-                  "type": "object",
-                  "properties": {
-                    "primary": { "type": "string",
-                                 "enum": ["DRY","NORMAL","OILY","COMBINATION"] },
-                    "traits":  { "type": "array",
-                                 "items": { "type": "string",
-                                            "enum": ["DEHYDRATED","OILY_T_ZONE",
-                                                     "SENSITIVE_TENDENCY","TROUBLE_TENDENCY"] } }
-                  },
-                  "required": ["primary","traits"],
-                  "additionalProperties": false
-                },
                 "skinAgeAnalysis": {
                   "type": "object",
                   "properties": {
@@ -232,7 +213,7 @@ public final class SkinAnalysisPrompt {
                 "summary": { "type": "string" }
               },
               "required": ["faceDetected","hydration","oil","redness","trouble","barrier",
-                           "metricEvidence","skinType","skinAgeAnalysis","summary"],
+                           "metricEvidence","skinAgeAnalysis","summary"],
               "additionalProperties": false
             }""".formatted(AXIS);
 
