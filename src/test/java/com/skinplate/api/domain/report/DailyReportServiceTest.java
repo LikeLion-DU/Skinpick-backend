@@ -2,7 +2,13 @@ package com.skinplate.api.domain.report;
 
 import com.skinplate.api.domain.food.entity.CookingMethod;
 import com.skinplate.api.domain.food.entity.FoodAnalysis;
+import com.skinplate.api.domain.food.entity.FoodGroup;
+import com.skinplate.api.domain.food.entity.FoodTraits;
 import com.skinplate.api.domain.food.entity.Nutrition;
+import com.skinplate.api.domain.food.entity.Oiliness;
+import com.skinplate.api.domain.food.entity.PortionSize;
+import com.skinplate.api.domain.food.entity.ProcessingLevel;
+import com.skinplate.api.domain.food.entity.Spiciness;
 import com.skinplate.api.domain.plate.entity.FeedbackType;
 import com.skinplate.api.domain.plate.entity.MealType;
 import com.skinplate.api.domain.plate.entity.SkinPlate;
@@ -141,6 +147,28 @@ class DailyReportServiceTest {
         // 3600 / 2000 = 180% → 과다
         assertThat(item(nutrition, NutrientType.SODIUM).status()).isEqualTo(NutrientType.Status.HIGH);
         assertThat(item(nutrition, NutrientType.SODIUM).higherIsWorse()).isTrue();
+    }
+
+    /**
+     * 섭취량 환산은 리포트 영양에서만 일어난다. plate_score 는 1인분 기준 그대로다 —
+     * 점수까지 환산하면 표준 테이블이 확보한 재현성이 무너진다(PortionSize 주석).
+     * 특성이 없는 과거 행은 위 nutritionIsSummed 가 회귀로 지킨다(계수 1.0).
+     */
+    @Test
+    @DisplayName("LARGE 섭취량은 리포트 영양에만 ×1.3 환산된다 — 점수는 그대로다")
+    void nutritionAppliesPortionFactor() {
+        SkinPlate large = plate(1L, "김치찌개", 60, DATE.atTime(12, 0),
+                Nutrition.of(1000, decimal(10), decimal(10), decimal(10), 2000, decimal(10)));
+        large.getFoodAnalysis().assignTraits(FoodTraits.of(
+                FoodGroup.SOUP_STEW, PortionSize.LARGE, Spiciness.UNKNOWN,
+                Oiliness.UNKNOWN, ProcessingLevel.UNKNOWN));
+        given(skinPlateRepository.findInRange(anyLong(), any(), any())).willReturn(List.of(large));
+
+        DailyReportResponse report = dailyReportService.get(USER_ID, DATE);
+
+        assertThat(amount(report.nutrition(), NutrientType.CALORIES)).isEqualByComparingTo("1300.0");
+        assertThat(amount(report.nutrition(), NutrientType.SODIUM)).isEqualByComparingTo("2600.0");
+        assertThat(report.dailyScore()).isEqualTo(60);   // 점수는 환산과 무관
     }
 
     @Test

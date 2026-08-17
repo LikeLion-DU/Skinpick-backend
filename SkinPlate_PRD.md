@@ -1484,6 +1484,11 @@ erDiagram
         numeric sugar_g
         varchar cooking_method "FRIED/BOILED/GRILLED/RAW/STEAMED/ETC"
         boolean is_spicy
+        varchar food_group "RICE/NOODLE/SOUP_STEW/... V7 · NULL=UNKNOWN"
+        varchar portion_size "SMALL/MEDIUM/LARGE/UNKNOWN · 리포트 환산 전용"
+        varchar spiciness "NONE/MILD/MEDIUM/HOT/UNKNOWN · R02 강도"
+        varchar oiliness "LOW/MEDIUM/HIGH/UNKNOWN · R07 확장"
+        varchar processing_level "WHOLE~ULTRA_PROCESSED/UNKNOWN · 점수 미사용"
         jsonb raw_ai_response
         timestamp created_at
     }
@@ -3361,6 +3366,16 @@ public class OpenAiVisionClient {
     "cookingMethod": { "type": "string",
                        "enum": ["FRIED","BOILED","GRILLED","RAW","STEAMED","ETC"] },
     "spicy":         { "type": "boolean" },
+    "foodGroup":     { "type": "string",
+                       "enum": ["RICE","NOODLE","SOUP_STEW","MEAT_DISH","SEAFOOD_DISH",
+                                "VEGETABLE_DISH","FRIED_FOOD","DESSERT","BEVERAGE",
+                                "SNACK","SALAD","ETC"] },
+    "portionSize":   { "type": "string", "enum": ["SMALL","MEDIUM","LARGE","UNKNOWN"] },
+    "spiciness":     { "type": "string", "enum": ["NONE","MILD","MEDIUM","HOT","UNKNOWN"] },
+    "oiliness":      { "type": "string", "enum": ["LOW","MEDIUM","HIGH","UNKNOWN"] },
+    "processingLevel": { "type": "string",
+                         "enum": ["WHOLE","MINIMALLY_PROCESSED","PROCESSED",
+                                  "ULTRA_PROCESSED","UNKNOWN"] },
     "ingredients": {
       "type": "array",
       "items": {
@@ -3391,12 +3406,15 @@ public class OpenAiVisionClient {
     }
   },
   "required": ["foodDetected","foodName","foodCategory","cookingMethod",
-               "spicy","ingredients","nutrition"],
+               "spicy","foodGroup","portionSize","spiciness","oiliness",
+               "processingLevel","ingredients","nutrition"],
   "additionalProperties": false
 }
 ```
 
 > **`tag` enum이 Rule Engine의 인터페이스다.** AI가 자유롭게 재료 태그를 만들면 룰이 매칭되지 않는다. enum으로 강제해야 `hasTag(VITAMIN_C)` 같은 판정이 항상 동작한다. 이것이 "AI는 인식, Backend는 로직"을 실제로 구현하는 지점이다.
+
+> **관찰 특성 5종 (스키마 v2 · 2026-08-17)** — `foodGroup`(분류) · `portionSize`(섭취량) · `spiciness`(매운맛 강도) · `oiliness`(기름진 정도) · `processingLevel`(가공도). AI 는 **관찰만** 하고 판정은 여전히 Backend 다. 프롬프트가 "확실하지 않으면 UNKNOWN"을 강제하고, 모르는 값·구 토큰의 null 은 Backend 가 UNKNOWN 으로 흡수한다 — **UNKNOWN 이면 룰·리포트가 기존과 완전히 동일하게 동작한다**(하위 호환 불변식). 영양 추정은 portionSize 와 무관하게 항상 1인분 기준이다. 점수에 쓰이는 것은 spiciness(R02 강도 계수)·oiliness(R07 트리거 확장) 뿐이고, portionSize 는 리포트 영양 환산 전용, foodGroup·processingLevel 은 집계·패턴 분석용이다. 백엔드 enum 과의 값 일치는 `FoodAnalysisPromptTest` 가 잠근다.
 
 ### 17.4 장애 대응
 

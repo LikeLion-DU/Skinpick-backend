@@ -9,7 +9,9 @@ import java.util.Map;
  * 음식 분석 프롬프트와 스키마. (PRD §17.3)
  *
  * ingredients[].tag enum 이 Rule Engine 의 인터페이스다.
- * IngredientTag / CookingMethod 를 바꾸면 이 스키마도 같이 바꿔야 한다.
+ * IngredientTag / CookingMethod / FoodGroup / PortionSize / Spiciness / Oiliness /
+ * ProcessingLevel 을 바꾸면 이 스키마도 같이 바꿔야 한다 — 스키마 파일은 따로 없고
+ * 이 클래스의 SCHEMA_JSON 이 원본이다.
  */
 public final class FoodAnalysisPrompt {
 
@@ -17,13 +19,16 @@ public final class FoodAnalysisPrompt {
 
     public static final String SYSTEM = """
             당신은 음식 이미지 분석 어시스턴트입니다.
-            음식 사진을 보고 음식 종류·주요 재료·영양 정보를 판단하세요.
-            
+            음식 사진을 보고 음식 종류·주요 재료·영양 정보·관찰 가능한 특성을 판단하세요.
+
             규칙
             1. 반드시 주어진 JSON 스키마로만 응답한다.
             2. 재료의 tag 는 스키마에 정의된 값 중에서만 고른다. 애매하면 ETC 를 쓴다.
             3. 음식이 인식되지 않으면 foodDetected 를 false 로 한다.
-            4. 영양 정보는 1인분 기준으로 추정한다.""";
+            4. 영양 정보는 항상 1인분 기준으로 추정한다. portionSize 와 무관하다.
+            5. foodGroup 은 스키마에 정의된 값 중에서 고른다. 애매하면 ETC 를 쓴다.
+            6. portionSize·spiciness·oiliness·processingLevel 은 사진에서 관찰한
+               것만 답한다. 확실하지 않으면 UNKNOWN 을 쓴다 — 추측으로 채우지 않는다.""";
 
     public static final String USER = "이 음식 사진을 분석해 주세요.";
 
@@ -37,6 +42,19 @@ public final class FoodAnalysisPrompt {
                 "cookingMethod": { "type": "string",
                                    "enum": ["FRIED","BOILED","GRILLED","RAW","STEAMED","ETC"] },
                 "spicy":         { "type": "boolean" },
+                "foodGroup":     { "type": "string",
+                                   "enum": ["RICE","NOODLE","SOUP_STEW","MEAT_DISH",
+                                            "SEAFOOD_DISH","VEGETABLE_DISH","FRIED_FOOD",
+                                            "DESSERT","BEVERAGE","SNACK","SALAD","ETC"] },
+                "portionSize":   { "type": "string",
+                                   "enum": ["SMALL","MEDIUM","LARGE","UNKNOWN"] },
+                "spiciness":     { "type": "string",
+                                   "enum": ["NONE","MILD","MEDIUM","HOT","UNKNOWN"] },
+                "oiliness":      { "type": "string",
+                                   "enum": ["LOW","MEDIUM","HIGH","UNKNOWN"] },
+                "processingLevel": { "type": "string",
+                                     "enum": ["WHOLE","MINIMALLY_PROCESSED","PROCESSED",
+                                              "ULTRA_PROCESSED","UNKNOWN"] },
                 "ingredients": {
                   "type": "array",
                   "items": {
@@ -67,7 +85,8 @@ public final class FoodAnalysisPrompt {
                 }
               },
               "required": ["foodDetected","foodName","foodCategory","cookingMethod",
-                           "spicy","ingredients","nutrition"],
+                           "spicy","foodGroup","portionSize","spiciness","oiliness",
+                           "processingLevel","ingredients","nutrition"],
               "additionalProperties": false
             }""";
 

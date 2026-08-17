@@ -7,8 +7,11 @@ import com.skinplate.api.domain.food.dto.FoodAnalysisDto;
 import com.skinplate.api.domain.food.entity.CookingMethod;
 import com.skinplate.api.domain.food.entity.FoodAnalysis;
 import com.skinplate.api.domain.food.entity.FoodIngredient;
+import com.skinplate.api.domain.food.entity.FoodTraits;
 import com.skinplate.api.domain.food.entity.IngredientTag;
 import com.skinplate.api.domain.food.entity.Nutrition;
+import com.skinplate.api.domain.food.entity.Oiliness;
+import com.skinplate.api.domain.food.entity.Spiciness;
 import com.skinplate.api.domain.food.repository.FoodAnalysisRepository;
 import com.skinplate.api.domain.food.service.FoodAnalysisService;
 import com.skinplate.api.domain.plate.dto.FeedbackGroupDto;
@@ -369,6 +372,18 @@ public class SkinPlateService {
                 removeBatter ? CookingMethod.GRILLED : origin.getCookingMethod(),
                 !lessSpicy && origin.isSpicy(),
                 "{}");
+
+        // 특성도 원본에서 옮긴다. 빼먹으면 시뮬레이션의 before 가 저장 점수와 갈라진다 —
+        // R02 강도·R07 의 oiliness 트리거가 특성을 읽기 때문이다.
+        // LESS_SPICY 는 매운맛 강도까지 지우고, REMOVE_BATTER 는 기름기도 낮춘 것으로
+        // 본다(HIGH 로 남기면 R07 이 oiliness 경로로 다시 걸려 버튼 효과가 사라진다).
+        FoodTraits originTraits = origin.getTraits();
+        copy.assignTraits(FoodTraits.of(
+                originTraits.getFoodGroup(),
+                originTraits.getPortionSize(),
+                lessSpicy ? Spiciness.NONE : originTraits.getSpiciness(),
+                removeBatter ? Oiliness.MEDIUM : originTraits.getOiliness(),
+                originTraits.getProcessingLevel()));
 
         origin.getIngredients().stream()
                 .filter(ingredient -> !(lessSpicy && ingredient.getTag() == IngredientTag.CAPSAICIN))

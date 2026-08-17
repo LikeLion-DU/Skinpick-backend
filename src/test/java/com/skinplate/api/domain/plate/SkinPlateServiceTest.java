@@ -875,7 +875,8 @@ class SkinPlateServiceTest {
                         new OpenAiFoodResult.Ingredient("두부", "ETC"),
                         new OpenAiFoodResult.Ingredient("고춧가루", "CAPSAICIN")),
                 new OpenAiFoodResult.Nutrition(520, new BigDecimal("28.5"), new BigDecimal("24.0"),
-                        new BigDecimal("32.0"), sodiumMg, new BigDecimal("6.2")));
+                        new BigDecimal("32.0"), sodiumMg, new BigDecimal("6.2")),
+                "SOUP_STEW", "MEDIUM", "MEDIUM", "MEDIUM", "MINIMALLY_PROCESSED");
     }
 
     /** foodAnalysisService.toEntity(null, aiResult) 가 돌려준다고 가정하는 결과 — user 는 null 이다. */
