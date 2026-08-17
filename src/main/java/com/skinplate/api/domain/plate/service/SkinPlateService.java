@@ -15,6 +15,7 @@ import com.skinplate.api.domain.plate.dto.FeedbackGroupDto;
 import com.skinplate.api.domain.plate.dto.PlateAnalysisResponse;
 import com.skinplate.api.domain.plate.dto.PlateAnalysisSimulateResponse;
 import com.skinplate.api.domain.plate.dto.PlateSimulateResponse;
+import com.skinplate.api.domain.plate.dto.SkinBasis;
 import com.skinplate.api.domain.plate.dto.SkinPlateResponse;
 import com.skinplate.api.domain.plate.engine.PlateContext;
 import com.skinplate.api.domain.plate.engine.PlateEvaluation;
@@ -108,9 +109,15 @@ public class SkinPlateService {
         // Task 3 이 이 토큰을 받아 같은 toEntity 를 다시 태워야 같은 점수가 나온다.
         String analysisToken = analysisTokenProvider.issue(userId, skinAnalysis.getId(), aiResult);
 
+        // 기준 피부가 오늘(KST) 측정인지 명시한다. skinAnalysisId 생략 시 "최신"이
+        // 2주 전일 수 있는데, 그 사실을 숨기면 화면이 "현재 피부 기준"처럼 읽힌다.
+        LocalDateTime skinMeasuredAt = skinAnalysis.getCreatedAt();
+
         return new PlateAnalysisResponse(
                 analysisToken,
                 skinAnalysis.getId(),
+                SkinBasis.of(skinMeasuredAt, LocalDate.now(DateRange.KST)),
+                skinMeasuredAt == null ? null : skinMeasuredAt.toLocalDate(),
                 evaluation.score(),
                 RuleConstants.BASE_SCORE,
                 evaluation.summary(),

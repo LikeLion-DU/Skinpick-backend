@@ -2355,12 +2355,16 @@ GET /latest · GET /{id} 는 raw_ai_response 를 되읽어 근거·타입·나�
 
 **Response 200** — 저장하지 않으므로 201 이 아니다. `plateId` 와 `createdAt` 이 없고, 대신 `analysisToken` 이 실린다. 나머지 필드는 아래 ⑦-c 응답과 같다.
 
+> **`skinBasis` / `skinMeasuredAt` (2026-08-17)** — 채점 기준 피부가 **오늘(KST) 측정이면 `TODAY`**, 과거 측정이면 `RECENT` 다. `skinAnalysisId` 를 생략하면 서버가 최신 분석을 쓰는데 그 "최신"이 2주 전일 수 있다 — 그 사실을 숨기면 화면이 "현재 피부 기준"처럼 읽히므로 기준 시점과 측정일을 함께 내린다. 저장된 기록(⑦-c 응답·`GET /plates/{id}`)에서는 오늘이 아니라 **기록 저장일 대비**로 판정한다 — 과거 기록을 언제 열어도 라벨이 변하지 않는다. 컬럼이 아니라 파생값이라 마이그레이션은 없다.
+
 ```json
 {
   "success": true,
   "data": {
     "analysisToken": "eyJhbGciOiJIUzI1NiJ9...",
     "skinAnalysisId": 101,
+    "skinBasis": "TODAY",
+    "skinMeasuredAt": "2026-08-17",
     "plateScore": 60,
     "baseScore": 70,
     "summary": "...",

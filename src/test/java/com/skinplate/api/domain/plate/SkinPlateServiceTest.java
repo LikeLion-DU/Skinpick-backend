@@ -12,6 +12,7 @@ import com.skinplate.api.domain.food.service.FoodAnalysisService;
 import com.skinplate.api.domain.plate.dto.PlateAnalysisResponse;
 import com.skinplate.api.domain.plate.dto.PlateAnalysisSimulateResponse;
 import com.skinplate.api.domain.plate.dto.PlateSimulateResponse;
+import com.skinplate.api.domain.plate.dto.SkinBasis;
 import com.skinplate.api.domain.plate.dto.SkinPlateResponse;
 import com.skinplate.api.domain.plate.engine.PlateRuleEngine;
 import com.skinplate.api.domain.plate.engine.RuleConstants;
@@ -275,6 +276,93 @@ class SkinPlateServiceTest {
         // toEntity 를 우회해 aiResult 로 FoodAnalysis 를 직접 만들면 표준 영양값
         // 덮어쓰기·문자열 trim 이 빠져, 결과 화면과 저장된 기록의 점수가 갈라진다.
         verify(foodAnalysisService).toEntity(null, aiResult);
+    }
+
+    // ---- 피부 기준 시점 (skinBasis) ----
+
+    @Test
+    @DisplayName("오늘 찍은 피부가 기준이면 skinBasis 가 TODAY 다")
+    void analyze_todaySkin_basisIsToday() {
+        SkinAnalysis analysis = givenSkinAnalysis();
+        ReflectionTestUtils.setField(analysis, "createdAt",
+                LocalDate.now(DateRange.KST).atTime(9, 0));
+        givenAnalyzeStubs();
+
+        PlateAnalysisResponse response = skinPlateService.analyze(USER_ID, image(), ANALYSIS_ID);
+
+        assertThat(response.skinBasis()).isEqualTo(SkinBasis.TODAY);
+        assertThat(response.skinMeasuredAt()).isEqualTo(LocalDate.now(DateRange.KST));
+    }
+
+    @Test
+    @DisplayName("2주 전 피부가 기준이면 RECENT 와 측정일이 함께 내려간다 — '현재 피부'처럼 보이면 안 된다")
+    void analyze_oldSkin_basisIsRecentWithMeasuredDate() {
+        LocalDate measuredDate = LocalDate.now(DateRange.KST).minusDays(14);
+        SkinAnalysis analysis = givenSkinAnalysis();
+        ReflectionTestUtils.setField(analysis, "createdAt", measuredDate.atTime(9, 0));
+        givenAnalyzeStubs();
+
+        PlateAnalysisResponse response = skinPlateService.analyze(USER_ID, image(), ANALYSIS_ID);
+
+        assertThat(response.skinBasis()).isEqualTo(SkinBasis.RECENT);
+        assertThat(response.skinMeasuredAt()).isEqualTo(measuredDate);
+    }
+
+    @Test
+    @DisplayName("어제 자정 직전 측정도 RECENT 다 — 경계는 시간 간격이 아니라 KST 달력일이다")
+    void analyze_yesterdayNightSkin_isRecent() {
+        SkinAnalysis analysis = givenSkinAnalysis();
+        ReflectionTestUtils.setField(analysis, "createdAt",
+                LocalDate.now(DateRange.KST).minusDays(1).atTime(23, 59));
+        givenAnalyzeStubs();
+
+        assertThat(skinPlateService.analyze(USER_ID, image(), ANALYSIS_ID).skinBasis())
+                .isEqualTo(SkinBasis.RECENT);
+    }
+
+    @Test
+    @DisplayName("id 를 생략해 최신 분석으로 흐르는 경로에도 기준 시점이 붙는다")
+    void analyze_withoutId_alsoCarriesBasis() {
+        AppUser user = AppUser.create("test@skinplate.app", "encoded", "테스트유저");
+        SkinAnalysis latest = SkinAnalysis.create(
+                user, SkinMetrics.of(38, 52, 64, 25, 78), 55, "요약", "{}");
+        ReflectionTestUtils.setField(latest, "id", ANALYSIS_ID);
+        ReflectionTestUtils.setField(latest, "createdAt",
+                LocalDate.now(DateRange.KST).minusDays(3).atTime(8, 0));
+        given(skinAnalysisRepository.findFirstByUserIdOrderByCreatedAtDesc(USER_ID))
+                .willReturn(Optional.of(latest));
+        givenAnalyzeStubs();
+
+        PlateAnalysisResponse response = skinPlateService.analyze(USER_ID, image(), null);
+
+        assertThat(response.skinBasis()).isEqualTo(SkinBasis.RECENT);
+        assertThat(response.skinMeasuredAt())
+                .isEqualTo(LocalDate.now(DateRange.KST).minusDays(3));
+    }
+
+    /**
+     * 기준일이 "조회하는 오늘"이면 같은 기록이 열 때마다 라벨이 변한다 —
+     * 과거 기록은 <b>기록 저장일</b> 대비로 판정해야 답이 고정된다.
+     */
+    @Test
+    @DisplayName("저장된 기록의 기준 시점은 오늘이 아니라 기록 저장일 대비다")
+    void get_basisIsRelativeToRecordDate() {
+        LocalDate recordDate = LocalDate.of(2026, 8, 10);
+
+        SkinPlate sameDay = givenPlate();
+        ReflectionTestUtils.setField(sameDay.getSkinAnalysis(), "createdAt", recordDate.atTime(9, 0));
+        ReflectionTestUtils.setField(sameDay, "createdAt", recordDate.atTime(12, 30));
+
+        assertThat(skinPlateService.get(USER_ID, PLATE_ID).skinBasis()).isEqualTo(SkinBasis.TODAY);
+
+        SkinPlate pastSkin = givenPlate();
+        ReflectionTestUtils.setField(pastSkin.getSkinAnalysis(), "createdAt",
+                recordDate.minusDays(2).atTime(9, 0));
+        ReflectionTestUtils.setField(pastSkin, "createdAt", recordDate.atTime(12, 30));
+
+        SkinPlateResponse response = skinPlateService.get(USER_ID, PLATE_ID);
+        assertThat(response.skinBasis()).isEqualTo(SkinBasis.RECENT);
+        assertThat(response.skinMeasuredAt()).isEqualTo(recordDate.minusDays(2));
     }
 
     @Test
@@ -674,6 +762,14 @@ class SkinPlateServiceTest {
     }
 
     // ---- 픽스처 ----
+
+    /** analyze() 공통 스텁 — 인식·변환·토큰 발급. 피부 분석 스텁은 각 테스트가 직접 잡는다. */
+    private void givenAnalyzeStubs() {
+        OpenAiFoodResult aiResult = givenAiResult();
+        given(foodAnalysisService.recognize(any())).willReturn(aiResult);
+        given(foodAnalysisService.toEntity(null, aiResult)).willReturn(givenFood());
+        given(analysisTokenProvider.issue(USER_ID, ANALYSIS_ID, aiResult)).willReturn("signed-token");
+    }
 
     private PlateSimulateResponse simulate(PlateActionCode... actions) {
         return skinPlateService.simulate(USER_ID, PLATE_ID, List.of(actions));
