@@ -184,7 +184,9 @@ class PlateRuleEngineTest {
         PlateEvaluation evaluation = engine.evaluate(new PlateContext(neutral, heavy));
         assertThat(evaluation.score()).isEqualTo(70 - 5);
         assertThat(evaluation.appliedRuleCodes()).containsExactly("R10");
-        assertThat(evaluation.results().get(0).expectedGain()).isEqualTo(4);
+        // 광고한 회복치가 시뮬레이션의 실제 효과와 같아야 한다 — R10 은 고정 감점이라
+        // 근사가 필요 없고, 어긋나면 카드가 확인 가능한 거짓을 말한다.
+        assertThat(evaluation.results().get(0).expectedGain()).isEqualTo(5);
 
         assertThat(engine.evaluate(new PlateContext(neutral, boundary)).score()).isEqualTo(70);
     }

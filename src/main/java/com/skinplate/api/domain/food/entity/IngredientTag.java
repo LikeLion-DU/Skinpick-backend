@@ -5,7 +5,8 @@ package com.skinplate.api.domain.food.entity;
  *
  * AI가 태그를 자유롭게 만들면 룰이 아무것도 매칭하지 못한다.
  * 그래서 OpenAI JSON Schema에서도 이 목록을 enum으로 강제한다.
- * 값을 추가할 때는 스키마(food-analysis-schema.json)도 함께 고쳐야 한다.
+ * 값을 추가할 때는 스키마(FoodAnalysisPrompt.SCHEMA_JSON)도 함께 고쳐야 한다 —
+ * 그 파일은 없다. 값 일치는 FoodAnalysisPromptTest 가 깨져서 알려준다.
  */
 public enum IngredientTag {
     VITAMIN_C,      // 키위, 브로콜리, 파프리카

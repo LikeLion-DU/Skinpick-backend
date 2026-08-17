@@ -29,8 +29,7 @@ public class SodiumRule implements PlateRule {
                 ? "국물을 절반만 남기면 Skin Plate 점수가 상승합니다."
                 : "간이 센 반찬은 절반만 드셔보세요.";
 
-        String sodiumLevel = context.nutrition().getSodiumMg() > SODIUM_VERY_HIGH_MG
-                ? "매우 높은" : "높은";
+        String sodiumLevel = context.nutrition().isVeryHighSodium() ? "매우 높은" : "높은";
         String reason = "나트륨이 " + sodiumLevel + " 편이라 피부 컨디션에 부담이 될 수 있어요.";
 
         return RuleResult.caution(code(), -penalty, "나트륨 과다", reason, action, GAIN_SOUP_HALF);

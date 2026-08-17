@@ -32,7 +32,11 @@ public final class RuleConstants {
     public static final int GAIN_LESS_SPICY      = 6;
     public static final int GAIN_WATER_NOT_SODA  = 7;
     public static final int GAIN_REMOVE_BATTER   = 5;
-    public static final int GAIN_LESS_RICE       = 4;   // R10 쌍
+    // R10 은 고정 -5 이고 LESS_RICE 가 1200kcal 아래에서는 반드시 그 룰을 끈다 —
+    // 회복치가 결정론적으로 5 다. 다른 GAIN 들은 감점이 가변(R04 는 -8~-15)이라
+    // 근사가 불가피하지만, 여기서 4 를 쓰면 카드가 "+4" 라 말하고 시뮬레이션은
+    // 5 를 올리는, 확인 가능한 거짓이 된다.
+    public static final int GAIN_LESS_RICE       = 5;   // R10 쌍 · |R10_HIGH_CALORIE| 와 같다
 
     // ---- 나트륨 초과량 비례 감점 ----
     public static final int SODIUM_STEP_MG       = 500;  // 500mg 초과마다 1점 추가 감점
@@ -50,11 +54,12 @@ public final class RuleConstants {
 
     // ---- 영양 단계화 ----
     // 당류는 VERY_HIGH 에서 감점을 더한다. 25~40g 구간은 기존과 동일하다.
-    public static final int SUGAR_VERY_HIGH_G            = 40;
+    //
+    // 경계값(몇 g부터 많다고 보는가)은 여기 없다 — Nutrition 이 SODIUM/PROTEIN/
+    // SUGAR/CALORIES 임계값을 이미 전부 쥐고 있고, 단계 경계만 이리 떼어 오면
+    // "당류를 몇 g부터 많다고 보는가"의 답이 두 파일로 갈린다.
+    // 여기는 델타(몇 점 깎을지)만 둔다. Nutrition.isVeryHighSugar() 를 쓴다.
     public static final int R03_SUGAR_VERY_HIGH_EXTRA    = -4;
-    // 나트륨은 점수식(초과량 비례)을 그대로 두고 이 경계는 reason 문구에만 쓴다 —
-    // 이미 비례 감점이라 단계를 점수에 겹치면 같은 초과가 두 번 벌을 받는다.
-    public static final int SODIUM_VERY_HIGH_MG          = 2500;
 
     // ---- 점수 범위 ----
     public static final int MIN_SCORE = 0;

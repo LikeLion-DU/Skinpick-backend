@@ -135,14 +135,34 @@ class SkinPlateServiceTest {
     }
 
     @Test
-    @DisplayName("before 는 저장된 점수 그대로다 — 시뮬레이션이 원본 점수를 덮어쓰지 않는다")
-    void simulate_keepsStoredScoreAsBefore() {
+    @DisplayName("before 는 지금 룰로 다시 센 점수다 — 저장 점수와 같은 한 값도 같다")
+    void simulate_beforeScoreIsRecomputed() {
         givenPlate();
 
         PlateSimulateResponse response = simulate(PlateActionCode.HALVE_SOUP);
 
         assertThat(response.beforeScore()).isEqualTo(60);
         assertThat(response.plateId()).isEqualTo(PLATE_ID);
+    }
+
+    /**
+     * 룰을 고친 뒤 옛 기록을 시뮬레이션하면 저장 점수와 재계산 점수가 갈린다.
+     * 그때 저장값을 before 로 쓰면 한 응답이 두 규칙을 섞어 — 옛 룰의 70 옆에
+     * 새 룰의 after·removedRules 가 붙어 — 설명할 수 없는 카드가 나온다.
+     */
+    @Test
+    @DisplayName("저장 점수가 지금 룰과 어긋나도 before·after·removedRules 는 한 규칙으로 답한다")
+    void simulate_neverMixesStoredAndRecomputedRules() {
+        SkinPlate plate = givenPlate();
+        // 옛 룰로 매겨진 것처럼 저장 점수만 어긋나게 둔다(엔진은 여전히 60을 낸다).
+        ReflectionTestUtils.setField(plate, "plateScore", 70);
+
+        PlateSimulateResponse response = simulate(PlateActionCode.HALVE_SOUP);
+
+        assertThat(response.beforeScore()).isEqualTo(60);              // 저장값 70 이 아니다
+        assertThat(response.afterScore()).isEqualTo(68);
+        assertThat(response.afterScore() - response.beforeScore()).isPositive();
+        assertThat(response.removedRules()).containsExactly("R04");
     }
 
     @Test

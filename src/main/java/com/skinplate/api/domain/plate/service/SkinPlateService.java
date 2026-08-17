@@ -279,8 +279,16 @@ public class SkinPlateService {
         PlateEvaluation before = engine.evaluate(new PlateContext(skin, origin));
         PlateEvaluation after = engine.evaluate(new PlateContext(skin, simulated));
 
+        // beforeScore 는 저장된 plate_score 가 아니라 **지금 룰로 다시 센 점수**다.
+        // 룰이 바뀌지 않던 시절엔 둘이 같아서 저장값을 그대로 실었는데, 룰을 고친
+        // 뒤로는 그게 한 응답 안에서 두 규칙을 섞는다 — 옛 룰로 저장된 70 옆에
+        // 새 룰로 계산한 after 와 removedRules 가 붙어, "70 → 70 인데 R10 이
+        // 사라졌다" 같은 설명 불가능한 카드가 나온다.
+        // 저장 점수를 건드리지 않는다는 계약은 이 값이 아니라 원본 불변성이 지킨다
+        // (simulate_neverMutatesTheOriginal · readOnly 트랜잭션).
+        // simulateFromToken 도 같은 규칙이라 두 시뮬 경로가 한 정의를 쓴다.
         return PlateSimulateResponse.of(
-                plate.getId(), plate.getPlateScore(), after.score(),
+                plate.getId(), before.score(), after.score(),
                 actions, removedRules(before, after), buildActionSummary(actions));
     }
 

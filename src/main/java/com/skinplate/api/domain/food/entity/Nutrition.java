@@ -18,7 +18,13 @@ public class Nutrition {
     public static final int SODIUM_THRESHOLD_MG   = 1500;   // 초과 시 감점
     public static final int PROTEIN_THRESHOLD_G   = 20;     // 이상이면 가점
     public static final int SUGAR_THRESHOLD_G     = 25;     // 초과 시 감점
-    public static final int CALORIES_THRESHOLD    = 900;    // 초과 시 감점 (확장 룰)
+    public static final int CALORIES_THRESHOLD    = 900;    // 초과 시 감점 (R10)
+
+    // 단계화 경계. 임계값은 전부 이 클래스가 소유한다 — 룰이 제 안에 숫자를 들면
+    // "당류를 몇 g부터 많다고 보는가"의 답이 파일마다 달라진다.
+    // 델타(몇 점 깎을지)는 RuleConstants 몫이다. 그 둘은 다른 축이다.
+    public static final int SUGAR_VERY_HIGH_G     = 40;     // 초과 시 R03 추가 감점
+    public static final int SODIUM_VERY_HIGH_MG   = 2500;   // 초과 시 R04 문구만 강해진다
 
     @Column(name = "calories_kcal", nullable = false) private int caloriesKcal;
     @Column(name = "protein_g", nullable = false, precision = 6, scale = 2) private BigDecimal proteinG;
@@ -60,6 +66,12 @@ public class Nutrition {
     public boolean isHighSugar()   { return sugarG.compareTo(BigDecimal.valueOf(SUGAR_THRESHOLD_G)) > 0; }
     public boolean isHighProtein() { return proteinG.compareTo(BigDecimal.valueOf(PROTEIN_THRESHOLD_G)) >= 0; }
     public boolean isHighCalorie() { return caloriesKcal > CALORIES_THRESHOLD; }
+
+    /** isHighSugar 를 이미 통과한 뒤 한 단계 더 보는 값이다. 25~40g 은 false. */
+    public boolean isVeryHighSugar()  { return sugarG.compareTo(BigDecimal.valueOf(SUGAR_VERY_HIGH_G)) > 0; }
+
+    /** 점수에는 쓰지 않는다 — R04 는 이미 초과량 비례라, 문구의 수식어만 가른다. */
+    public boolean isVeryHighSodium() { return sodiumMg > SODIUM_VERY_HIGH_MG; }
 
     public int sodiumExcessMg() { return Math.max(0, sodiumMg - SODIUM_THRESHOLD_MG); }
 
