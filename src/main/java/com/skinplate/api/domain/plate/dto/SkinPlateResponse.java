@@ -4,6 +4,7 @@ import com.skinplate.api.domain.food.dto.FoodAnalysisDto;
 import com.skinplate.api.domain.plate.engine.RuleConstants;
 import com.skinplate.api.domain.plate.entity.SkinPlate;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -18,6 +19,14 @@ public record SkinPlateResponse(
          * 설계서 Part 3 계약 대조표도 함께 고쳤다.
          */
         Long skinAnalysisId,
+
+        /*
+         * 기준 시점은 오늘이 아니라 <b>기록 저장일</b> 대비다. 과거 기록을 다시 열어도
+         * "그날 기준으로 오늘 피부였나"가 그대로다 — 시간이 흐른다고 답이 변하면
+         * 같은 기록이 열 때마다 다른 라벨을 단다.
+         */
+        SkinBasis skinBasis,
+        LocalDate skinMeasuredAt,
 
         int plateScore,
         int baseScore,        // 항상 RuleConstants.BASE_SCORE(70). 계산 내역 카드 첫 줄
@@ -39,9 +48,14 @@ public record SkinPlateResponse(
      * DTO가 ObjectMapper를 들고 있지 않게 하기 위한 선택이다.
      */
     public static SkinPlateResponse from(SkinPlate entity, List<String> appliedRules) {
+        LocalDateTime skinMeasuredAt = entity.getSkinAnalysis().getCreatedAt();
+
         return new SkinPlateResponse(
                 entity.getId(),
                 entity.getSkinAnalysis().getId(),
+                SkinBasis.of(skinMeasuredAt,
+                        entity.getCreatedAt() == null ? null : entity.getCreatedAt().toLocalDate()),
+                skinMeasuredAt == null ? null : skinMeasuredAt.toLocalDate(),
                 entity.getPlateScore(),
                 RuleConstants.BASE_SCORE,
                 entity.getSummary(),
