@@ -245,6 +245,7 @@ app:
     timeout-seconds: 25            # 음식·문장용. 타임아웃은 재시도 없음. 429만 1회 재시도
     skin-max-tokens: ${SKIN_MAX_TOKENS:1400}      # 피부는 5지표+8축+근거라 출력이 크다
     skin-timeout-seconds: ${SKIN_TIMEOUT_SECONDS:28}   # 30 이면 429 재시도 시 클라이언트 상한(32초) 초과
+    report-timeout-seconds: ${REPORT_TIMEOUT_SECONDS:12}  # 주간 문장 전용. 실패해도 숫자는 나가므로 짧게 끊는다(코드 상한 15)
     mock: ${AI_MOCK:false}
 
 springdoc:

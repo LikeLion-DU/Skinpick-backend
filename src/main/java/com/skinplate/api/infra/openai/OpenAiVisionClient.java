@@ -73,6 +73,29 @@ public class OpenAiVisionClient implements VisionClient {
     private final Duration skinTimeout;
 
     /**
+     * 리포트 문장만 짧게 끊는다. 가르는 기준은 <b>"실패해도 화면이 남는가"</b>다.
+     *
+     * <p>주간 문장은 생성 실패를 이미 삼키고 있어서(WeeklyReportService.comment) 짧게
+     * 끊어도 잃는 것이 문장 하나다 — 점수·영양·고민·BEST DAY 는 그대로 나간다. 나머지
+     * 네 경로는 실패하면 그 기능 자체가 없으므로 같은 선택을 할 수 없다.
+     *
+     * <p>여기에 걸리는 것은 리포트가 <b>하루에도 여러 번 여는 조회 화면</b>이라는 점이다.
+     * 25초를 물려 두면 캐시가 빈 첫 조회에서 화면이 통째로 멎고, 앱이 GET 에 더 짧은
+     * 상한을 쓰면 사용자에겐 그냥 실패로 보인다.
+     *
+     * <p><b>12 는 상한이지 목표가 아니다.</b> PRD 는 AI 응답을 5~8초로 적고 있고 이 호출은
+     * 이미지 없는 텍스트 전용이라 그보다 가볍다. 8 로 잡았다가 12 로 올린 이유가 있다 —
+     * 이 경로의 실패는 조용하다. 문장만 사라지고 아무 화면도 안 깨져서, 대역이 좁은 날
+     * 기능이 통째로 없어진 것을 로그 없이는 모른다. 실측이 쌓이면 조인다.
+     *
+     * <p><b>429 재시도는 이 경로에서 사실상 죽는다.</b> 전체 마감이 값+2 인데 재시도
+     * 대기가 그중 2초를 그대로 먹어, 첫 시도가 늦게 429 를 받을수록 두 번째 시도에 남는
+     * 시간이 짧다. 알고 두는 것이다 — 여기서 재시도를 살리자고 예산을 늘리면 이 분리
+     * 자체가 무의미해지고, 문장 하나를 위해 조회 화면을 30초 세우게 된다.
+     */
+    private final Duration reportTimeout;
+
+    /**
      * gpt-5 계열은 요청 규약이 다르다. 실제로 던져 본 결과다.
      *   max_tokens        → 400 "Use 'max_completion_tokens' instead"
      *   temperature=0.2   → 400 "Only the default (1) value is supported"
@@ -87,15 +110,20 @@ public class OpenAiVisionClient implements VisionClient {
     private static final String REASONING_EFFORT = "low";
 
     /**
-     * 다섯 호출 경로가 같은 규칙을 쓴다. 피부만 막아 두면 음식·문장·인사이트·주간 문장에 0 이
+     * 다섯 호출 경로가 같은 규칙을 쓴다. 피부·리포트만 막아 두면 음식·문장·인사이트에 0 이
      * 들어갔을 때 그쪽만 조용히 죽는다 — 위쪽 상한보다 이 아래쪽이 나쁘다.
      * 아무 로그 없이 기능만 사라지기 때문이다.
+     *
+     * <p>상한은 인자로 받는다. 경로마다 상한의 <b>이유</b>가 다르기 때문이다 — 분석은
+     * "클라이언트 32초 안에 들어와야 한다"이고, 리포트는 "조회 화면이 그만큼 멎어도
+     * 되는가"다. 하나로 묶으면 리포트에 28 을 넣어도 통과하면서, 경고 문구는
+     * "허용 범위 안"이라 승인처럼 읽힌다.
      */
-    private static long clampTimeout(long seconds, String property) {
-        long clamped = Math.max(MIN_TIMEOUT_SECONDS, Math.min(seconds, MAX_TIMEOUT_SECONDS));
+    private static long clampTimeout(long seconds, long maxSeconds, String property) {
+        long clamped = Math.max(MIN_TIMEOUT_SECONDS, Math.min(seconds, maxSeconds));
         if (clamped != seconds) {
             log.warn("{}={} 는 허용 범위({}~{}초) 밖이라 {} 로 조정한다",
-                    property, seconds, MIN_TIMEOUT_SECONDS, MAX_TIMEOUT_SECONDS, clamped);
+                    property, seconds, MIN_TIMEOUT_SECONDS, maxSeconds, clamped);
         }
         return clamped;
     }
@@ -103,9 +131,16 @@ public class OpenAiVisionClient implements VisionClient {
     /** 429 재시도 대기. 전체 데드라인 계산에도 쓰인다. */
     private static final long RETRY_DELAY_SECONDS = 2;
 
-    /** 이 값 + 재시도 대기 2초 ≤ 클라이언트 상한 32초. 다섯 호출 경로에 모두 적용된다. */
+    /** 이 값 + 재시도 대기 2초 ≤ 클라이언트 상한 32초. 분석 네 경로에 적용된다. */
     private static final long MAX_TIMEOUT_SECONDS = 28;
     private static final long MIN_TIMEOUT_SECONDS = 1;
+
+    /**
+     * 리포트는 상한의 이유가 다르다. 32초 예산이 아니라 <b>"조회 화면이 그만큼 멎어도
+     * 되는가"</b>다. 28 을 그대로 허용하면 REPORT_TIMEOUT_SECONDS 오타 하나로 이 분리가
+     * 통째로 무효가 되는데, 경고 문구는 "허용 범위 안"이라 승인처럼 읽힌다.
+     */
+    private static final long MAX_REPORT_TIMEOUT_SECONDS = 15;
 
     /** 실측 출력이 442~554 토큰이다. 그 아래로 내려가면 전부 잘린다. */
     private static final int MIN_SKIN_MAX_TOKENS = 800;
@@ -115,11 +150,13 @@ public class OpenAiVisionClient implements VisionClient {
                               @Value("${app.ai.model}") String model,
                               @Value("${app.ai.timeout-seconds}") long timeoutSeconds,
                               @Value("${app.ai.skin-max-tokens}") int skinMaxTokens,
-                              @Value("${app.ai.skin-timeout-seconds}") long skinTimeoutSeconds) {
+                              @Value("${app.ai.skin-timeout-seconds}") long skinTimeoutSeconds,
+                              @Value("${app.ai.report-timeout-seconds}") long reportTimeoutSeconds) {
         this.openAiWebClient = openAiWebClient;
         this.objectMapper = objectMapper;
         this.model = model;
-        this.timeout = Duration.ofSeconds(clampTimeout(timeoutSeconds, "app.ai.timeout-seconds"));
+        this.timeout = Duration.ofSeconds(
+                clampTimeout(timeoutSeconds, MAX_TIMEOUT_SECONDS, "app.ai.timeout-seconds"));
         // 타임아웃과 같은 이유로 상한도 아래를 막는다. SKIN_MAX_TOKENS=100 (1000 오타)이면
         // reasoning 토큰이 예산을 다 먹어 모든 피부 분석이 finish_reason=length 로 죽는다.
         this.skinMaxTokens = Math.max(MIN_SKIN_MAX_TOKENS, skinMaxTokens);
@@ -135,7 +172,14 @@ public class OpenAiVisionClient implements VisionClient {
         // 되고, 아래로는 0 이 Duration.ZERO 가 되어 모든 분석이 즉시 타임아웃으로 죽는다.
         // 후자가 더 나쁘다. 아무 로그 없이 기능만 사라지기 때문이다.
         this.skinTimeout = Duration.ofSeconds(
-                clampTimeout(skinTimeoutSeconds, "app.ai.skin-timeout-seconds"));
+                clampTimeout(skinTimeoutSeconds, MAX_TIMEOUT_SECONDS, "app.ai.skin-timeout-seconds"));
+
+        // 같은 하한(1초)이 여기도 걸린다. 0 을 넣으면 Duration.ZERO 가 되어 주간 문장이
+        // 항상 타임아웃으로 죽는데, fail-soft 라 아무 화면도 깨지지 않고 문장만 영영
+        // 안 나온다 — 로그를 안 보면 기능이 사라진 것을 모른다.
+        this.reportTimeout = Duration.ofSeconds(
+                clampTimeout(reportTimeoutSeconds, MAX_REPORT_TIMEOUT_SECONDS,
+                        "app.ai.report-timeout-seconds"));
 
         // 재현성 레버가 사라진 것을 기동 로그에 남긴다. 모델 이름 한 줄로 조용히
         // 꺼지는 스위치라, 발표 전에 눈에 띄어야 한다. (CLAUDE.md — 재현성이 이 제품의 주장)
@@ -188,11 +232,14 @@ public class OpenAiVisionClient implements VisionClient {
                 List.of(text(userContext)), INSIGHT_MAX_TOKENS, timeout, SkinInsightSentences.class);
     }
 
-    /** 인사이트와 같이 한국어 문장이 넷이라 상한도 INSIGHT_MAX_TOKENS 를 같이 쓴다. */
+    /**
+     * 인사이트와 같이 한국어 문장이 넷이라 출력 상한은 INSIGHT_MAX_TOKENS 를 같이 쓴다.
+     * <b>타임아웃만 다르다</b> — reportTimeout(기본 12초, 재시도 포함 전체 마감 14초).
+     */
     @Override
     public WeeklyComment generateWeeklyComment(String userContext) {
         return call(WeeklyReportPrompt.SYSTEM, WeeklyReportPrompt.SCHEMA, "weekly_report",
-                List.of(text(userContext)), INSIGHT_MAX_TOKENS, timeout, WeeklyComment.class);
+                List.of(text(userContext)), INSIGHT_MAX_TOKENS, reportTimeout, WeeklyComment.class);
     }
 
     private static Map<String, Object> text(String value) {
