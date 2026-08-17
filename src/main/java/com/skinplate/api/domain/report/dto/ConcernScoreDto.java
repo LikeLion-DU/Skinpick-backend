@@ -13,15 +13,19 @@ import com.skinplate.api.domain.user.entity.SkinConcern;
  * <p>저장하지 않고 조회할 때마다 다시 센다. 그래서 <b>매핑표를 바꾸면 과거 리포트의
  * 이 값도 바뀐다</b> — 왜 스냅샷을 두지 않는지는 {@code ConcernRules} 주석에 있다.
  *
- * @param score  0~100. 높을수록 그 고민에 유리한 식단이다
- * @param change 기간 첫 기록일 대비 변화. 일일 리포트와 기록일이 하루뿐인 주간에서는
- *               null 이라 응답에서 키가 빠진다(non_null)
+ * @param score              0~100. <b>기간 평균</b>이다(일일이면 그날 값)
+ * @param changeFromFirstDay 기간의 <b>첫 기록일 → 마지막 기록일</b> 변화. 기록일이
+ *                           하나뿐이거나 일일 리포트면 null 이라 키가 빠진다(non_null).
+ *                           <p>이름을 길게 둔 이유가 있다 — {@code score} 와 축이 다르다.
+ *                           54·62·70 인 사흘은 {@code score=62, changeFromFirstDay=+16} 인데,
+ *                           이것을 "평균 대비 변화"로 읽으면 이전 값이 46 이었다는 뜻이 되고
+ *                           그런 날은 없었다
  */
 public record ConcernScoreDto(SkinConcern concern, String label, int score,
-                              SkinLevel status, Integer change) {
+                              SkinLevel status, Integer changeFromFirstDay) {
 
-    public static ConcernScoreDto of(SkinConcern concern, int score, Integer change) {
+    public static ConcernScoreDto of(SkinConcern concern, int score, Integer changeFromFirstDay) {
         return new ConcernScoreDto(concern, concern.getLabel(), score,
-                SkinLevel.of(score), change);
+                SkinLevel.of(score), changeFromFirstDay);
     }
 }

@@ -247,7 +247,7 @@ class WeeklyReportServiceTest {
         assertThat(concerns.get(0).concern()).isEqualTo(SkinConcern.PUFFINESS);
         assertThat(concerns.get(0).score()).isEqualTo(62);          // (54+62+70)/3
         assertThat(concerns.get(0).status()).isEqualTo(SkinLevel.GOOD);
-        assertThat(concerns.get(0).change()).isEqualTo(16);         // 70 - 54
+        assertThat(concerns.get(0).changeFromFirstDay()).isEqualTo(16);         // 70 - 54
     }
 
     @Test
@@ -255,7 +255,7 @@ class WeeklyReportServiceTest {
     void noChangeWithSingleDay() {
         givenDays(dayWithConcern(MONDAY, 72, SkinConcern.PUFFINESS, 54));
 
-        assertThat(weekly().concerns().get(0).change()).isNull();
+        assertThat(weekly().concerns().get(0).changeFromFirstDay()).isNull();
     }
 
     @Test
@@ -356,7 +356,7 @@ class WeeklyReportServiceTest {
         assertThat(report.concerns()).hasSize(1);
         assertThat(report.concerns().get(0).concern()).isEqualTo(SkinConcern.PUFFINESS);
         assertThat(report.concerns().get(0).score()).isEqualTo(62);   // 70 − 8, 이틀 모두
-        assertThat(report.concerns().get(0).change()).isZero();
+        assertThat(report.concerns().get(0).changeFromFirstDay()).isZero();
     }
 
     // ---- 픽스처 ----

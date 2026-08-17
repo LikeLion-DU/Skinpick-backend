@@ -144,7 +144,7 @@ class DailyReportServiceTest {
     }
 
     @Test
-    @DisplayName("영양값이 비어 있어도(0) 항목은 빠지지 않는다 — 화면의 막대 수가 날마다 달라지지 않는다")
+    @DisplayName("기록이 있으면 영양값이 0 이어도 여섯 항목이 다 온다 — 막대 수가 날마다 달라지지 않는다")
     void nutritionWithZeroValues() {
         given(skinPlateRepository.findInRange(anyLong(), any(), any())).willReturn(List.of(
                 plate(1L, "물", 70, DATE.atTime(12, 0),

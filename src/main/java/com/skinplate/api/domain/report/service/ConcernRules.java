@@ -2,6 +2,7 @@ package com.skinplate.api.domain.report.service;
 
 import com.skinplate.api.domain.user.entity.SkinConcern;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -28,8 +29,14 @@ import java.util.Set;
  *       고치는 것이 정상 경로다.</li>
  * </ol>
  *
- * <p>가점 룰을 반드시 함께 넣는다. 감점 룰만 매달면 그 고민 점수는 기준선(70)에서
- * 내려가기만 하고 절대 오르지 않아, 잘 챙긴 날에도 화면이 좋아지지 않는다.
+ * <p><b>가점 룰과 감점 룰을 반드시 함께 넣는다.</b> 감점만 매달면 그 고민 점수는
+ * 기준선(70)에서 내려가기만 하고 절대 오르지 않아, 잘 챙긴 날에도 화면이 좋아지지 않는다.
+ * 반대로 가점만 매달면 무엇을 먹어도 70 아래로 못 내려가는데, 70 은 GOOD 이라
+ * 하루 종일 튀김과 단 것을 먹은 사람의 색소침착 칸이 "좋음"으로 뜬다.
+ *
+ * <p><b>새 룰을 추가하면 이 표도 함께 본다.</b> 룰 추가가 {@code PlateRule} 구현 한 개로
+ * 끝난다는 규칙(CLAUDE.md)은 <b>점수 계산</b>에 대한 것이고, 여기 안 적힌 룰은 고민 점수에만
+ * 조용히 빠진다 — 아무것도 실패하지 않고 숫자만 틀린다.
  *
  * <p><b>DARK_CIRCLE 은 비어 있다.</b> 다크서클에 대응하는 식단 룰이 없다 —
  * 인사이트에서도 이 고민의 행동 문구는 화면 보는 시간이지 음식이 아니다.
@@ -46,8 +53,11 @@ public final class ConcernRules {
             SkinConcern.DRYNESS,      Set.of("R01", "R08", "R04"),  // 수분·오메가3 / 나트륨
             SkinConcern.OILINESS,     Set.of("R07", "R03", "R06"),
             SkinConcern.TEXTURE,      Set.of("R06", "R05", "R07"),
-            SkinConcern.PIGMENTATION, Set.of("R06", "R08"),
-            SkinConcern.ELASTICITY,   Set.of("R05", "R08", "R06"),
+            // 색소침착·탄력에 R03(당류 과다)·R07(튀김)을 함께 매단다. 가점 룰만 있으면
+            // 두 칸은 70 아래로 내려갈 수 없고, 다른 고민과 도달 범위가 달라 같은
+            // 뱃지가 다른 뜻이 된다. 당화·산화는 두 고민이 공유하는 축이다.
+            SkinConcern.PIGMENTATION, Set.of("R06", "R08", "R03", "R07"),
+            SkinConcern.ELASTICITY,   Set.of("R05", "R08", "R06", "R03", "R07"),
             SkinConcern.PUFFINESS,    Set.of("R04", "R01"),
             SkinConcern.DARK_CIRCLE,  Set.of());
 
@@ -57,7 +67,7 @@ public final class ConcernRules {
 
     /** 식단으로 설명할 수 있는 고민만 남긴다. 순서는 enum 선언 순서로 고정한다. */
     public static List<SkinConcern> scorable(Set<SkinConcern> concerns) {
-        return java.util.Arrays.stream(SkinConcern.values())
+        return Arrays.stream(SkinConcern.values())
                 .filter(concerns::contains)
                 .filter(concern -> !of(concern).isEmpty())
                 .toList();

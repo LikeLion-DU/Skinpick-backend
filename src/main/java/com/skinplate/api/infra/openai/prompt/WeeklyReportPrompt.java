@@ -4,6 +4,7 @@ import com.skinplate.api.domain.report.dto.ConcernScoreDto;
 import com.skinplate.api.domain.report.dto.DailyScoreDto;
 import com.skinplate.api.domain.report.dto.NutritionItemDto;
 import com.skinplate.api.domain.report.dto.WeeklyReportResponse;
+import com.skinplate.api.domain.skin.entity.SkinLevel;
 
 import java.util.List;
 import java.util.Map;
@@ -22,8 +23,14 @@ public final class WeeklyReportPrompt {
 
     private WeeklyReportPrompt() {}
 
+    /**
+     * <b>"이번 주"라고 쓰지 않는다.</b> 같은 엔드포인트가 최대 90일 구간을 받고 월간도
+     * 이 프롬프트를 탄다(PRD §18.11). 한 주로 못 박아 두면 31일치 표를 받고도
+     * "이번 주 잘한 점"을 쓴다 — 화면의 기간과 문장의 기간이 갈린다.
+     * 실제 폭은 유저 메시지의 [기간] 줄이 알려준다.
+     */
     public static final String SYSTEM = """
-            당신은 피부 관리 앱의 주간 리포트 작가입니다. 이미 집계된 한 주의 식단 데이터가
+            당신은 피부 관리 앱의 리포트 작가입니다. 이미 집계된 기간별 식단 데이터가
             주어지면, 그 결과를 자연스러운 한국어 문장으로 옮깁니다.
 
             규칙
@@ -31,26 +38,28 @@ public final class WeeklyReportPrompt {
             2. 입력에 없는 음식·영양소·피부 상태를 지어내지 않는다.
             3. 인과를 확정하지 않는다. "~때문에 ~해졌다"로 쓰지 말고
                "~가 함께 기록됐어요", "~도 영향을 줄 수 있어요"처럼 쓴다.
-            4. goodPoint: 이번 주 잘한 점 한 가지를 1~2문장으로 짚는다. 80자 이내.
-            5. improvePoint: 개선하면 좋을 점 한 가지를 1~2문장으로 짚는다. 80자 이내.
-            6. habit: 반복해서 나타난 식습관을 한 문장으로 짚는다. 80자 이내.
-            7. nextWeek: 다음 주에 해볼 만한 구체적인 행동 하나를 제안한다. 80자 이내.
-            8. 부드러운 존댓말(~해요체)을 쓴다. 느낌표는 문장 끝에 최대 한 번.
-            9. 의학적 진단·치료·질병 표현을 쓰지 않는다. 피부과 상담 권유도 하지 않는다.
-            10. 반드시 주어진 JSON 스키마로만 응답한다.""";
+            4. 기간은 [기간] 줄에 적힌 것을 따른다. 며칠짜리인지 모른 채
+               "이번 주"라고 단정하지 않는다 — "이번 기간"처럼 쓴다.
+            5. goodPoint: 이 기간에 잘한 점 한 가지를 1~2문장으로 짚는다. 80자 이내.
+            6. improvePoint: 개선하면 좋을 점 한 가지를 1~2문장으로 짚는다. 80자 이내.
+            7. habit: 반복해서 나타난 식습관을 한 문장으로 짚는다. 80자 이내.
+            8. nextWeek: 다음 기간에 해볼 만한 구체적인 행동 하나를 제안한다. 80자 이내.
+            9. 부드러운 존댓말(~해요체)을 쓴다. 느낌표는 문장 끝에 최대 한 번.
+            10. 의학적 진단·치료·질병 표현을 쓰지 않는다. 피부과 상담 권유도 하지 않는다.
+            11. 반드시 주어진 JSON 스키마로만 응답한다.""";
 
     /** strict Structured Outputs. 네 문장이 모두 필수라 "문장이 안 왔을 때" 분기가 없다. */
     public static final Map<String, Object> SCHEMA = Map.of(
             "type", "object",
             "properties", Map.of(
                     "goodPoint", Map.of("type", "string",
-                            "description", "이번 주 잘한 점. 80자 이내"),
+                            "description", "이 기간에 잘한 점. 80자 이내"),
                     "improvePoint", Map.of("type", "string",
                             "description", "개선할 점. 80자 이내"),
                     "habit", Map.of("type", "string",
                             "description", "반복적으로 나타난 식습관. 80자 이내"),
                     "nextWeek", Map.of("type", "string",
-                            "description", "다음 주 추천 행동. 80자 이내")),
+                            "description", "다음 기간에 해볼 행동 추천. 80자 이내")),
             "required", List.of("goodPoint", "improvePoint", "habit", "nextWeek"),
             "additionalProperties", false);
 
@@ -75,10 +84,10 @@ public final class WeeklyReportPrompt {
         text.append("[일별 피부 식단 점수] (0~100 · 높을수록 좋음)\n");
         for (DailyScoreDto day : report.dailyScores()) {
             text.append(day.date()).append(' ').append(day.dailyScore())
-                    .append(" (").append(day.grade()).append(")\n");
+                    .append(" (").append(gradeLabel(day.grade())).append(")\n");
         }
         text.append("평균 ").append(report.averageDailyScore())
-                .append(" (").append(report.grade()).append(")\n");
+                .append(" (").append(gradeLabel(report.grade())).append(")\n");
         if (report.bestDay() != null) {
             text.append("가장 높은 날 ").append(report.bestDay().date())
                     .append(' ').append(report.bestDay().dailyScore()).append("점 · ")
@@ -100,19 +109,25 @@ public final class WeeklyReportPrompt {
             text.append("\n[고민별 식단 점수] (0~100 · 높을수록 그 고민에 유리)\n");
             for (ConcernScoreDto concern : report.concerns()) {
                 text.append(concern.label()).append(' ').append(concern.score())
-                        .append(" (").append(concern.status()).append(')');
-                if (concern.change() != null) {
+                        .append(" (").append(gradeLabel(concern.status())).append(')');
+                if (concern.changeFromFirstDay() != null) {
                     text.append(", 첫 기록일 대비 ")
-                            .append(concern.change() >= 0 ? "+" : "").append(concern.change());
+                            .append(concern.changeFromFirstDay() >= 0 ? "+" : "")
+                            .append(concern.changeFromFirstDay());
                 }
                 text.append('\n');
             }
         }
 
-        // 단위를 제목에 적는다. 앞의 둘은 "그 문구가 뜬 날 수"이고 음식만 "끼니 수"다 —
-        // 안 적으면 모델이 셋을 같은 단위로 읽고 "라면을 5일 먹었다"를 지어낸다.
-        appendCounts(text, "[자주 기록된 좋은 점] (등장한 날 수)", topGoods);
-        appendCounts(text, "[자주 기록된 주의할 점] (등장한 날 수)", topCautions);
+        // 단위를 제목에 적는다. 안 적으면 모델이 셋을 같은 단위로 읽고 "라면을 5일
+        // 먹었다"를 지어낸다.
+        //
+        // ponytail: 앞의 둘은 "그 문구가 그날 상위 3에 든 날 수"다. 일일 리포트가 이미
+        // 하루 3개로 자른 목록을 세기 때문이고, 주간이 일일만 본다는 구조(PRD §18.11)의
+        // 대가다 — 늘 4등이던 문구는 AI 에게 안 보인다. 원문 피드백까지 세려면 주간이
+        // 기록을 다시 훑어야 하는데, 그러면 그 구조가 깨진다. 제목을 정확히 적어 둔다.
+        appendCounts(text, "[자주 기록된 좋은 점] (그날 상위에 든 날 수)", topGoods);
+        appendCounts(text, "[자주 기록된 주의할 점] (그날 상위에 든 날 수)", topCautions);
         appendCounts(text, "[자주 먹은 음식] (끼니 수)", topFoods);
 
         return text.toString();
@@ -126,6 +141,21 @@ public final class WeeklyReportPrompt {
         for (Map.Entry<String, Long> entry : counts) {
             text.append(entry.getKey()).append(" ×").append(entry.getValue()).append('\n');
         }
+    }
+
+    /**
+     * 등급도 한국어로 적는다. enum 이름을 그대로 넘기면 모델이 "이번 기간은 EXCELLENT
+     * 등급이었어요"처럼 영문 토큰을 문장에 그대로 옮긴다. 게다가 SEVERE·CAUTION 은
+     * 임상적으로 읽혀서, 진단 표현을 금지한 규칙 10과 정면으로 부딪친다.
+     */
+    private static String gradeLabel(SkinLevel level) {
+        return switch (level) {
+            case SEVERE -> "많이 아쉬움";
+            case CAUTION -> "아쉬움";
+            case NORMAL -> "보통";
+            case GOOD -> "좋음";
+            case EXCELLENT -> "아주 좋음";
+        };
     }
 
     /**

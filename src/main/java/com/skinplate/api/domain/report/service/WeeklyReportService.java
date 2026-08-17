@@ -6,12 +6,12 @@ import com.skinplate.api.domain.report.dto.DailyReportResponse;
 import com.skinplate.api.domain.report.dto.DailyScoreDto;
 import com.skinplate.api.domain.report.dto.NutrientType;
 import com.skinplate.api.domain.report.dto.NutritionItemDto;
+import com.skinplate.api.domain.report.dto.WeeklyCommentDto;
 import com.skinplate.api.domain.report.dto.WeeklyReportResponse;
 import com.skinplate.api.domain.skin.entity.SkinLevel;
 import com.skinplate.api.domain.user.entity.SkinConcern;
 import com.skinplate.api.global.common.DateRange;
 import com.skinplate.api.infra.openai.VisionClient;
-import com.skinplate.api.domain.report.dto.WeeklyCommentDto;
 import com.skinplate.api.infra.openai.prompt.WeeklyReportPrompt;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -201,10 +201,10 @@ public class WeeklyReportService {
                     int average = (int) Math.round(
                             scores.stream().mapToInt(Integer::intValue).average().orElseThrow());
 
-                    Integer change = days.size() < 2 ? null
+                    Integer changeFromFirstDay = days.size() < 2 ? null
                             : scoreOf(last, base.concern()) - base.score();
 
-                    return ConcernScoreDto.of(base.concern(), average, change);
+                    return ConcernScoreDto.of(base.concern(), average, changeFromFirstDay);
                 })
                 .toList();
     }
@@ -245,7 +245,11 @@ public class WeeklyReportService {
         try {
             WeeklyCommentDto generated =
                     WeeklyCommentDto.from(visionClient.generateWeeklyComment(userContext));
-            commentCache.put(key, generated);
+
+            // null 은 캐시하지 않는다. WebClient 의 block() 은 빈 응답에서 예외 없이
+            // null 을 주는데, 그걸 넣어 두면 LRU 한 칸을 먹고 살아 있는 문장을 밀어내면서
+            // 정작 다음 조회는 캐시 미스라 또 부른다 — 값은 0 인데 비용만 든다.
+            if (generated != null) commentCache.put(key, generated);
             return generated;
         } catch (Exception e) {
             log.warn("AI 주간 코멘트 생성 실패 — 문장 없이 응답한다", e);

@@ -1,6 +1,7 @@
 package com.skinplate.api.domain.report.dto;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 
 /**
  * 리포트의 영양 밸런스 항목. 하루 기준값과 방향을 서버가 쥔다.
@@ -52,7 +53,7 @@ public enum NutrientType {
     /** 기준 대비 비율(%). 반올림한 정수다 — 화면이 소수점을 쓰지 않는다. */
     public int percentOf(BigDecimal amount) {
         return amount.multiply(BigDecimal.valueOf(100))
-                .divide(BigDecimal.valueOf(dailyTarget), 0, java.math.RoundingMode.HALF_UP)
+                .divide(BigDecimal.valueOf(dailyTarget), 0, RoundingMode.HALF_UP)
                 .intValue();
     }
 

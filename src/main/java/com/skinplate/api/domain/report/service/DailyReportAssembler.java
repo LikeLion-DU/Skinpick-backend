@@ -4,7 +4,6 @@ import com.skinplate.api.domain.food.entity.Nutrition;
 import com.skinplate.api.domain.plate.dto.PlateHistoryItemDto;
 import com.skinplate.api.domain.plate.engine.RuleConstants;
 import com.skinplate.api.domain.plate.entity.FeedbackType;
-import com.skinplate.api.domain.plate.entity.MealType;
 import com.skinplate.api.domain.plate.entity.SkinPlate;
 import com.skinplate.api.domain.plate.entity.SkinPlateFeedback;
 import com.skinplate.api.domain.report.dto.ConcernScoreDto;
@@ -140,6 +139,10 @@ public final class DailyReportAssembler {
                         // ACTION 행은 delta 가 0 이라 합계에 영향이 없지만, 명시적으로
                         // 거른다 — "점수에 쓰이는 행은 GOOD/CAUTION 뿐"이 규칙이다.
                         .filter(feedback -> feedback.getType() != FeedbackType.ACTION)
+                        // rule_code 는 DDL 에서 NULL 을 허용한다(V1). Set.of(...) 는 크기와
+                        // 무관하게 contains(null) 에서 NPE 라, 그런 행이 하나만 있어도
+                        // 고민 점수가 아니라 리포트 전체가 500 이 된다.
+                        .filter(feedback -> feedback.getRuleCode() != null)
                         .filter(feedback -> ruleCodes.contains(feedback.getRuleCode()))
                         .mapToInt(SkinPlateFeedback::getScoreDelta)
                         .sum()))

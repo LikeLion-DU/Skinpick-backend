@@ -20,7 +20,8 @@ import java.util.List;
  * @param dailyScores       날짜 오름차순. 기록이 없는 날은 들어가지 않는다
  * @param nutrition         <b>기록이 있는 날의 하루 평균</b>. 합계가 아니다 —
  *                          하루 기준값과 견주는 화면이라 축을 맞춘다
- * @param concerns          고민별 기간 평균과 첫 기록일 대비 변화
+ * @param concerns          고민별 기간 평균과 첫 기록일 대비 변화. 두 숫자는 축이 다르다
+ *                          ({@link ConcernScoreDto#changeFromFirstDay} 참조)
  * @param bestDay           가장 높은 날. 동점이면 <b>이른 날짜</b>가 이긴다
  * @param worstDay          가장 낮은 날. 동점 규칙은 bestDay 와 같다
  * @param aiComment         집계된 숫자만 보고 쓴 문장 넷. 생성에 실패하면 키가 빠진다
