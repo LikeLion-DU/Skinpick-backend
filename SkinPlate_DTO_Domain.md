@@ -4445,6 +4445,8 @@ public class ProbioticRule implements PlateRule {
 ```
 
 > **R10(고열량, 확장)은 넣지 않았다.** 룰이 많아질수록 점수 설명이 길어지고, 해커톤 시연에서는 피드백 4~5개가 화면에 딱 맞는다. 필요하면 클래스 하나만 추가하면 된다 — 그게 이 구조의 요점이다.
+>
+> *(2026-08-17 갱신 — 예언대로 `HighCalorieRule` 클래스 하나로 구현됐다. 고정 -5 · 심각도 계수 없음 · `LESS_RICE` 행동 쌍. 이 절의 코드 블록은 그때의 기록이고, R02·R03·R07 은 스키마 v2 특성(spiciness·oiliness·당류 단계)을 읽도록 저장소 쪽이 더 최신이다 — PRD §18.6 참조.)*
 
 ### 1.21.6 검증 — 예시 계산 재현 테스트
 
@@ -6783,6 +6785,8 @@ if (_consecutiveFailures >= 3) {
 | `POST /plates/records`<br>`GET /plates/{id}` | `SkinPlateResponse` | `plateId` · **`skinAnalysisId`** · **`skinBasis`**(기록 저장일 대비 판정 — 과거 기록을 언제 열어도 불변) · **`skinMeasuredAt`** · `plateScore` · **`baseScore`** · `summary` · `food{...}` · `feedbacks{good,caution,action}` · `appliedRules[]` · **`aiTip`**(생성 실패 시 키 생략) · `createdAt` | `SkinPlateDto` |
 
 > **`food{...}` 관찰 특성 5종 (2026-08-17)** — `foodGroup` · `portionSize` · `spiciness` · `oiliness` · `processingLevel` 이 추가됐다. V7 이전 행도 키가 빠지지 않고 `UNKNOWN`/`ETC` 로 채워 내려간다("모른다"는 값이지 누락이 아니다). portionSize 는 표시·리포트 영양 환산 전용이고 점수와 무관하다 — 점수는 여전히 1인분 기준 결정론이다.
+>
+> **`feedbacks.good[]`·`caution[]` 에 `reason` 추가 (2026-08-17 · V8)** — "지금 붉은기가 높은 상태에서 강한 매운맛이 들어 있어 부담이 될 수 있어요" 같은 판정 이유 문장. AI 가 아니라 룰의 결정론 템플릿이다. V8 이전 행과 `action[]` 에는 없고, null 이면 키가 생략되니 앱은 키가 있을 때만 이유 줄을 그린다. `appliedRules[]` 에 **R10(고열량)** 이 새로 올 수 있고 행동 코드에 **`LESS_RICE`** 가 추가됐다.
 | `DELETE /plates/{id}` | — | 본문 없음(`204`) | 앱이 확인 창 뒤에 부른다 |
 | `POST /plates/{id}/simulate` | `PlateSimulateResponse` | `plateId` · `beforeScore` · `afterScore` · `appliedActions[]` · `removedRules[]` · `summary` | `PlateSimulationDto` |
 | `POST /plates/simulate` | `PlateAnalysisSimulateResponse` | `beforeScore` · `afterScore` · `appliedActions[]` · `removedRules[]` · `summary` — **`plateId` 없음(저장 전, analysisToken 이 대상을 지목)** | `PlateSimulationDto` |

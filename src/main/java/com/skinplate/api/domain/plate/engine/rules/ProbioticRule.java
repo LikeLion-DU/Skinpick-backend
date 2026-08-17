@@ -19,6 +19,7 @@ public class ProbioticRule implements PlateRule {
 
     @Override
     public RuleResult apply(PlateContext context) {
-        return RuleResult.good(code(), R09_PROBIOTIC, "발효식품 포함");
+        return RuleResult.good(code(), R09_PROBIOTIC, "발효식품 포함",
+                "발효식품이 포함돼 있어요. 꾸준히 챙기면 도움이 될 수 있어요.");
     }
 }

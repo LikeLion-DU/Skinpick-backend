@@ -70,6 +70,9 @@ public class SkinPlateService {
 
     private static final BigDecimal SUGAR_WITHOUT_DRINK = new BigDecimal("0.4");
 
+    /** 밥·면을 조금 줄인 한 끼의 열량 비율. R10(>900kcal)이 1200kcal 까지는 꺼진다. */
+    private static final double CALORIES_WITHOUT_EXTRA_RICE = 0.75;
+
     private final AppUserRepository userRepository;
     private final SkinAnalysisRepository skinAnalysisRepository;
     private final FoodAnalysisRepository foodAnalysisRepository;
@@ -396,8 +399,15 @@ public class SkinPlateService {
     /**
      * REMOVE_BATTER 는 영양값을 건드리지 않는다. 어떤 룰도 지방을 보지 않아
      * 점수에 영향이 0 이고, 실제 효과는 cookingMethod = GRILLED 로 R07 이 꺼지는 것뿐이다.
+     *
+     * LESS_RICE 도 같은 원칙으로 열량만 3/4 로 줄인다 — R10 이 보는 값이 그것뿐이다.
+     * 탄수까지 줄이면 정확해 보이지만, 어떤 룰도 안 보는 숫자를 고치는 것은 거짓 정밀함이다.
      */
     private Nutrition adjustNutrition(Nutrition nutrition, List<PlateActionCode> actions) {
+        int calories = actions.contains(PlateActionCode.LESS_RICE)
+                ? (int) Math.round(nutrition.getCaloriesKcal() * CALORIES_WITHOUT_EXTRA_RICE)
+                : nutrition.getCaloriesKcal();
+
         int sodium = actions.contains(PlateActionCode.HALVE_SOUP)
                 ? nutrition.getSodiumMg() / 2
                 : nutrition.getSodiumMg();
@@ -406,7 +416,7 @@ public class SkinPlateService {
                 ? nutrition.getSugarG().multiply(SUGAR_WITHOUT_DRINK)
                 : nutrition.getSugarG();
 
-        return Nutrition.of(nutrition.getCaloriesKcal(), nutrition.getProteinG(),
+        return Nutrition.of(calories, nutrition.getProteinG(),
                 nutrition.getFatG(), nutrition.getCarbG(), sodium, sugar);
     }
 

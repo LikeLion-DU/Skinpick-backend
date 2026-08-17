@@ -27,6 +27,14 @@ public class SkinPlateFeedback extends BaseTimeEntity {
     @Column(nullable = false, length = 200)
     private String message;
 
+    /**
+     * "왜 이 판정인가" — 피부 지표와 음식 특성을 잇는 결정론 템플릿 문장 (V8 · NULL 허용).
+     * message 는 리포트가 빈도로 집계하는 라벨이라 문장을 거기 넣을 수 없다.
+     * ACTION 행은 행동 문구 자체가 설명이라 null 이다.
+     */
+    @Column(length = 300)
+    private String reason;
+
     /** GOOD / CAUTION 행에서 사용 (± 점수) */
     @Column(nullable = false)
     private int scoreDelta;
@@ -42,23 +50,34 @@ public class SkinPlateFeedback extends BaseTimeEntity {
     private int displayOrder;
 
     public static SkinPlateFeedback good(String ruleCode, String message, int scoreDelta, int order) {
-        return of(FeedbackType.GOOD, ruleCode, message, scoreDelta, 0, order);
+        return good(ruleCode, message, null, scoreDelta, order);
+    }
+
+    public static SkinPlateFeedback good(String ruleCode, String message, String reason,
+                                         int scoreDelta, int order) {
+        return of(FeedbackType.GOOD, ruleCode, message, reason, scoreDelta, 0, order);
     }
 
     public static SkinPlateFeedback caution(String ruleCode, String message, int scoreDelta, int order) {
-        return of(FeedbackType.CAUTION, ruleCode, message, scoreDelta, 0, order);
+        return caution(ruleCode, message, null, scoreDelta, order);
+    }
+
+    public static SkinPlateFeedback caution(String ruleCode, String message, String reason,
+                                            int scoreDelta, int order) {
+        return of(FeedbackType.CAUTION, ruleCode, message, reason, scoreDelta, 0, order);
     }
 
     public static SkinPlateFeedback action(String ruleCode, String message, int expectedGain, int order) {
-        return of(FeedbackType.ACTION, ruleCode, message, 0, expectedGain, order);
+        return of(FeedbackType.ACTION, ruleCode, message, null, 0, expectedGain, order);
     }
 
     private static SkinPlateFeedback of(FeedbackType type, String ruleCode, String message,
-                                        int scoreDelta, int expectedGain, int order) {
+                                        String reason, int scoreDelta, int expectedGain, int order) {
         SkinPlateFeedback feedback = new SkinPlateFeedback();
         feedback.type = type;
         feedback.ruleCode = ruleCode;
         feedback.message = message;
+        feedback.reason = reason;
         feedback.scoreDelta = scoreDelta;
         feedback.expectedGain = expectedGain;
         feedback.displayOrder = order;

@@ -23,7 +23,8 @@ class PlateRuleEngineTest {
     private final PlateRuleEngine engine = new PlateRuleEngine(List.of(
             new SodiumRule(), new SpicyRednessRule(), new SugarTroubleRule(),
             new FriedOilRule(), new HydrationFoodRule(), new Omega3BarrierRule(),
-            new ProteinRule(), new VitaminRule(), new ProbioticRule()));
+            new ProteinRule(), new VitaminRule(), new ProbioticRule(),
+            new HighCalorieRule()));
 
     @Test
     @DisplayName("예시 A · 돼지고기 김치찌개 → 60점")
@@ -83,6 +84,159 @@ class PlateRuleEngineTest {
         int severe = engine.evaluate(new PlateContext(SkinMetrics.of(50, 50, 88, 30, 60), spicy)).score();
 
         assertThat(severe).isLessThan(mild);
+    }
+
+    // ---- 스키마 v2 · 음식 특성 강도 (2026-08-17) ----
+
+    /**
+     * 하위 호환의 핵심 불변식 — 특성이 없거나(UNKNOWN 포함) 전부 모르는 값이면
+     * 엔진은 특성이 생기기 전과 완전히 같은 점수를 낸다. 여기가 깨지면
+     * 과거 기록의 시뮬레이션 before 가 저장 점수와 갈라진다.
+     */
+    @Test
+    @DisplayName("특성이 전부 UNKNOWN 이면 특성이 없던 시절과 점수가 같다")
+    void unknownTraitsBehaveExactlyAsBefore() {
+        PlateEvaluation withoutTraits = engine.evaluate(new PlateContext(SKIN, demoStew()));
+
+        FoodAnalysis unknownTraits = demoStew();
+        unknownTraits.assignTraits(FoodTraits.of(FoodGroup.ETC, PortionSize.UNKNOWN,
+                Spiciness.UNKNOWN, Oiliness.UNKNOWN, ProcessingLevel.UNKNOWN));
+        PlateEvaluation withUnknown = engine.evaluate(new PlateContext(SKIN, unknownTraits));
+
+        assertThat(withoutTraits.score()).isEqualTo(60);
+        assertThat(withUnknown.score()).isEqualTo(60);
+        assertThat(withUnknown.appliedRuleCodes())
+                .containsExactlyElementsOf(withoutTraits.appliedRuleCodes());
+    }
+
+    @Test
+    @DisplayName("매운맛 강도가 R02 감점을 가른다 — MILD -8 · MEDIUM -12 · HOT -16")
+    void spicinessIntensityScalesR02() {
+        // 홍조 64 → 심각도 1.2. R02 만 걸리는 조합(나트륨·당·단백질 전부 임계 아래).
+        Nutrition mildNutrition = nutrition(500, "10.0", 1000, "5.0");
+
+        assertThat(scoreOfSpicy(mildNutrition, Spiciness.MILD)).isEqualTo(70 - 8);     // -10×1.2×0.7
+        assertThat(scoreOfSpicy(mildNutrition, Spiciness.MEDIUM)).isEqualTo(70 - 12);  // -10×1.2×1.0
+        assertThat(scoreOfSpicy(mildNutrition, Spiciness.HOT)).isEqualTo(70 - 16);     // -10×1.2×1.3
+        // UNKNOWN 은 MEDIUM 과 같다 — 구 데이터가 손해도 이득도 보지 않는다.
+        assertThat(scoreOfSpicy(mildNutrition, Spiciness.UNKNOWN)).isEqualTo(70 - 12);
+    }
+
+    @Test
+    @DisplayName("홍조가 임계 아래면 HOT 이어도 R02 는 안 걸린다 — 강도는 발동 조건이 아니다")
+    void spicinessDoesNotTriggerWithoutRedness() {
+        FoodAnalysis hotFood = withTraits(
+                food("불닭", CookingMethod.BOILED, true, nutrition(500, "10.0", 1000, "5.0"), List.of()),
+                Spiciness.HOT, Oiliness.UNKNOWN);
+
+        SkinMetrics calmSkin = SkinMetrics.of(50, 50, 50, 50, 50);
+
+        assertThat(engine.evaluate(new PlateContext(calmSkin, hotFood)).score()).isEqualTo(70);
+    }
+
+    @Test
+    @DisplayName("튀김이 아니어도 기름기 HIGH 면 R07 이 약하게 걸린다 — 삼겹살 구이가 사각지대였다")
+    void oilinessHighTriggersR07WithoutFrying() {
+        SkinMetrics oilySkin = SkinMetrics.of(50, 75, 50, 50, 50);   // 유분 75 → 심각도 1.2
+        Nutrition plain = nutrition(500, "10.0", 1000, "5.0");
+
+        FoodAnalysis grilledOily = withTraits(
+                food("삼겹살 구이", CookingMethod.GRILLED, false, plain, List.of()),
+                Spiciness.UNKNOWN, Oiliness.HIGH);
+        FoodAnalysis fried = food("치킨", CookingMethod.FRIED, false, plain, List.of());
+        FoodAnalysis grilledUnknown = food("닭가슴살 구이", CookingMethod.GRILLED, false, plain, List.of());
+
+        // 기름진 비튀김은 튀김보다 약하다: -10×1.2×0.7 = -8 vs 튀김 -10×1.2 = -12
+        assertThat(engine.evaluate(new PlateContext(oilySkin, grilledOily)).score()).isEqualTo(70 - 8);
+        assertThat(engine.evaluate(new PlateContext(oilySkin, fried)).score()).isEqualTo(70 - 12);
+        // UNKNOWN 은 발동하지 않는다 — 특성이 없던 시절과 동일.
+        assertThat(engine.evaluate(new PlateContext(oilySkin, grilledUnknown)).score()).isEqualTo(70);
+
+        // 튀김옷이 없으니 REMOVE_BATTER 행동 카드가 붙지 않는다.
+        PlateEvaluation evaluation = engine.evaluate(new PlateContext(oilySkin, grilledOily));
+        assertThat(evaluation.results()).noneMatch(RuleResult::hasAction);
+    }
+
+    @Test
+    @DisplayName("당류 40g 초과는 감점을 더한다 — 25~40g 구간은 기존 그대로다")
+    void sugarVeryHighAddsExtraPenalty() {
+        SkinMetrics troubledSkin = SkinMetrics.of(50, 50, 50, 65, 50);   // 트러블 65 → 심각도 1.2
+
+        FoodAnalysis high = food("케이크", CookingMethod.ETC, false,
+                nutrition(500, "5.0", 300, "30.0"), List.of());          // -12×1.2 = -14.4 → -14
+        FoodAnalysis veryHigh = food("허니콤보", CookingMethod.ETC, false,
+                nutrition(500, "5.0", 300, "45.0"), List.of());          // -16×1.2 = -19.2 → -19
+
+        assertThat(engine.evaluate(new PlateContext(troubledSkin, high)).score()).isEqualTo(70 - 14);
+        assertThat(engine.evaluate(new PlateContext(troubledSkin, veryHigh)).score()).isEqualTo(70 - 19);
+    }
+
+    @Test
+    @DisplayName("R10 — 900kcal 초과만 고정 -5 로 걸리고 밥 줄이기 행동이 붙는다")
+    void highCalorieRule() {
+        SkinMetrics neutral = SkinMetrics.of(50, 50, 50, 50, 50);
+
+        FoodAnalysis heavy = food("곱빼기", CookingMethod.ETC, false,
+                nutrition(950, "10.0", 1000, "5.0"), List.of());
+        FoodAnalysis boundary = food("보통", CookingMethod.ETC, false,
+                nutrition(900, "10.0", 1000, "5.0"), List.of());
+
+        PlateEvaluation evaluation = engine.evaluate(new PlateContext(neutral, heavy));
+        assertThat(evaluation.score()).isEqualTo(70 - 5);
+        assertThat(evaluation.appliedRuleCodes()).containsExactly("R10");
+        assertThat(evaluation.results().get(0).expectedGain()).isEqualTo(4);
+
+        assertThat(engine.evaluate(new PlateContext(neutral, boundary)).score()).isEqualTo(70);
+    }
+
+    /**
+     * reason 은 결정론 템플릿이다 — 같은 입력이면 같은 문장. 현재 피부 지표와 음식
+     * 특성을 잇되 인과를 단정하지 않는다("부담이 될 수 있어요"까지).
+     */
+    @Test
+    @DisplayName("판정 이유가 현재 피부 상태와 음식 특성을 잇는 문장으로 붙는다")
+    void reasonsConnectSkinStateAndFoodTraits() {
+        FoodAnalysis hotStew = withTraits(demoStew(), Spiciness.HOT, Oiliness.UNKNOWN);
+
+        PlateEvaluation evaluation = engine.evaluate(new PlateContext(SKIN, hotStew));
+
+        assertThat(reasonOf(evaluation, "R02"))
+                .contains("붉은기가 높은 상태").contains("강한 매운맛").contains("될 수 있어요");
+        assertThat(reasonOf(evaluation, "R04")).contains("나트륨이 높은 편");
+        // 피드백 엔티티까지 실려 내려간다 — DTO 배선은 FeedbackDto.from 이 잇는다.
+        assertThat(evaluation.toFeedbacks())
+                .filteredOn(feedback -> "R02".equals(feedback.getRuleCode())
+                        && feedback.getType() == com.skinplate.api.domain.plate.entity.FeedbackType.CAUTION)
+                .singleElement()
+                .satisfies(feedback -> assertThat(feedback.getReason()).contains("붉은기"));
+    }
+
+    private String reasonOf(PlateEvaluation evaluation, String ruleCode) {
+        return evaluation.results().stream()
+                .filter(result -> result.ruleCode().equals(ruleCode))
+                .findFirst().orElseThrow()
+                .reason();
+    }
+
+    private int scoreOfSpicy(Nutrition nutrition, Spiciness spiciness) {
+        FoodAnalysis spicyFood = withTraits(
+                food("라면", CookingMethod.BOILED, true, nutrition, List.of()),
+                spiciness, Oiliness.UNKNOWN);
+        return engine.evaluate(new PlateContext(SKIN, spicyFood)).score();
+    }
+
+    /** 예시 A 의 김치찌개 — 특성 없는 원형. */
+    private static FoodAnalysis demoStew() {
+        return food("돼지고기 김치찌개", CookingMethod.BOILED, true,
+                nutrition(520, "28.5", 1850, "6.2"),
+                List.of(FoodIngredient.of("김치", IngredientTag.PROBIOTIC),
+                        FoodIngredient.of("고춧가루", IngredientTag.CAPSAICIN)));
+    }
+
+    private static FoodAnalysis withTraits(FoodAnalysis food, Spiciness spiciness, Oiliness oiliness) {
+        food.assignTraits(FoodTraits.of(FoodGroup.ETC, PortionSize.UNKNOWN,
+                spiciness, oiliness, ProcessingLevel.UNKNOWN));
+        return food;
     }
 
     // ---- helpers ----

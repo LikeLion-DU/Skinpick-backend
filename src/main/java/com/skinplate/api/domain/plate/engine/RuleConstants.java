@@ -20,25 +20,41 @@ public final class RuleConstants {
     public static final int R04_SODIUM           = -8;   // 나트륨 과다
     public static final int R05_PROTEIN          =  6;   // 단백질 충분
     public static final int R06_VITAMIN          =  5;   // 비타민/항산화
-    public static final int R07_FRIED_OIL        = -10;  // 유분 × 튀김
+    public static final int R07_FRIED_OIL        = -10;  // 유분 × 튀김/기름진 음식
     public static final int R08_OMEGA3_BARRIER   =  7;   // 장벽 약화 × 오메가3
     public static final int R09_PROBIOTIC        =  4;   // 발효식품
-    // ---- R10(고열량)은 미구현이다. 델타와 회복 점수를 쌍으로 남겨둔다. ----
-    // 문서 §18.6 룰표가 R10을 "확장"으로 명시하고 있으므로 상수도 함께 남긴다.
-    // 나중에 넣을 때 값을 다시 정하지 않아도 되고, 지금 지우면 GAIN_LESS_RICE 만
-    // 고아가 되거나(둘은 한 쌍이다) 룰표와 코드가 또 어긋난다.
-    public static final int R10_HIGH_CALORIE     = -5;   // 고열량 (확장 · 미구현)
+    // 피부 지표와 직접 매지 않는 보조 룰이라 심각도 계수를 태우지 않는 고정 델타다.
+    // 시연 음식(520·610kcal)에는 걸리지 않아 예시 60·87 이 그대로다.
+    public static final int R10_HIGH_CALORIE     = -5;   // 고열량
 
     // ---- 추천 행동 시 회복 점수 ----
     public static final int GAIN_SOUP_HALF       = 8;
     public static final int GAIN_LESS_SPICY      = 6;
     public static final int GAIN_WATER_NOT_SODA  = 7;
     public static final int GAIN_REMOVE_BATTER   = 5;
-    public static final int GAIN_LESS_RICE       = 4;   // R10 쌍 (확장 · 미구현)
+    public static final int GAIN_LESS_RICE       = 4;   // R10 쌍
 
     // ---- 나트륨 초과량 비례 감점 ----
     public static final int SODIUM_STEP_MG       = 500;  // 500mg 초과마다 1점 추가 감점
     public static final int SODIUM_MAX_PENALTY   = 15;
+
+    // ---- 음식 특성 강도 계수 (스키마 v2) ----
+    // SeverityCalculator 의 피부 축과 직교로 곱는 음식 축이다.
+    // MEDIUM·UNKNOWN·NONE(캡사이신으로 발동한 경우)은 1.0 — 특성이 없던 시절과
+    // 완전히 같은 점수가 나온다(하위 호환 불변식). AI 유래 값이라 표준 테이블의
+    // 재현성 밖이므로 폭을 ±30% 로 상한한다 — 판정이 갈려도 점수가 뛰지 않게.
+    public static final double SPICINESS_MILD_FACTOR     = 0.7;
+    public static final double SPICINESS_HOT_FACTOR      = 1.3;
+    // 튀김이 아닌데 기름진 음식(삼겹살 구이)은 튀김보다 약하게 — R07 확장 트리거.
+    public static final double OILINESS_NON_FRIED_FACTOR = 0.7;
+
+    // ---- 영양 단계화 ----
+    // 당류는 VERY_HIGH 에서 감점을 더한다. 25~40g 구간은 기존과 동일하다.
+    public static final int SUGAR_VERY_HIGH_G            = 40;
+    public static final int R03_SUGAR_VERY_HIGH_EXTRA    = -4;
+    // 나트륨은 점수식(초과량 비례)을 그대로 두고 이 경계는 reason 문구에만 쓴다 —
+    // 이미 비례 감점이라 단계를 점수에 겹치면 같은 초과가 두 번 벌을 받는다.
+    public static final int SODIUM_VERY_HIGH_MG          = 2500;
 
     // ---- 점수 범위 ----
     public static final int MIN_SCORE = 0;

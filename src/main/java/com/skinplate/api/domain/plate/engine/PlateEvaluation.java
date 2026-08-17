@@ -27,13 +27,15 @@ public record PlateEvaluation(
         for (RuleResult result : results) {
             if (result.type() == FeedbackType.GOOD) {
                 feedbacks.add(SkinPlateFeedback.good(
-                        result.ruleCode(), result.message(), result.delta(), order++));
+                        result.ruleCode(), result.message(), result.reason(),
+                        result.delta(), order++));
             }
         }
         for (RuleResult result : results) {
             if (result.type() == FeedbackType.CAUTION) {
                 feedbacks.add(SkinPlateFeedback.caution(
-                        result.ruleCode(), result.message(), result.delta(), order++));
+                        result.ruleCode(), result.message(), result.reason(),
+                        result.delta(), order++));
             }
         }
         for (RuleResult result : results) {

@@ -9,9 +9,8 @@ public enum PlateActionCode {
     HALVE_SOUP    ("국물을 절반만 남기기"),
     LESS_SPICY    ("매운 양념 덜어내기"),
     NO_SUGAR_DRINK("단 음료 대신 물"),
-    REMOVE_BATTER ("튀김옷 일부 제거");
-    // LESS_RICE 는 넣지 않는다. R10(고열량)이 미구현이라 버튼이 붙을 카드가 없다.
-    // R10 을 구현하면 그때 함께 추가한다.
+    REMOVE_BATTER ("튀김옷 일부 제거"),
+    LESS_RICE     ("밥·면 조금 줄이기");   // R10(고열량) 쌍 — 2026-08-17 구현
 
     private final String label;
 
@@ -30,6 +29,7 @@ public enum PlateActionCode {
             case LESS_SPICY     -> "R02";
             case NO_SUGAR_DRINK -> "R03";
             case REMOVE_BATTER  -> "R07";
+            case LESS_RICE      -> "R10";
         };
     }
 }

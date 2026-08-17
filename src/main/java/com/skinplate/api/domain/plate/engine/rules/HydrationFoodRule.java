@@ -24,6 +24,10 @@ public class HydrationFoodRule implements PlateRule {
         int delta = SeverityCalculator.apply(
                 R01_HYDRATION_FOOD, context.skin().getHydration(), false);
 
-        return RuleResult.good(code(), delta, "수분 보충 재료");
+        String hydrationLevel = SeverityCalculator.isSevere(context.skin().getHydration(), false)
+                ? "많이 부족한" : "부족한";
+
+        return RuleResult.good(code(), delta, "수분 보충 재료",
+                "지금 수분이 " + hydrationLevel + " 상태라 수분을 채워 주는 재료가 도움이 될 수 있어요.");
     }
 }

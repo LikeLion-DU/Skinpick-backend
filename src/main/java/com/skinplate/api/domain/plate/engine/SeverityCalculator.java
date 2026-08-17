@@ -39,7 +39,23 @@ public final class SeverityCalculator {
      * 절댓값으로 반올림한 뒤 부호를 되돌리면 "감점 상수는 짝수로 유지" 같은 관례가 필요 없어진다.
      */
     public static int apply(int delta, int metricValue, boolean higherIsWorse) {
-        double raw = delta * of(metricValue, higherIsWorse);
+        return apply(delta, metricValue, higherIsWorse, 1.0);
+    }
+
+    /**
+     * 피부 축(심각도)과 직교인 <b>음식 축(강도)</b>을 함께 곱는다 — 스키마 v2 의
+     * spiciness·oiliness 가 여기로 들어온다. 강도 1.0 이면 위 3인자와 완전히 같다.
+     */
+    public static int apply(int delta, int metricValue, boolean higherIsWorse, double intensity) {
+        double raw = delta * of(metricValue, higherIsWorse) * intensity;
         return (int) (raw < 0 ? -Math.round(-raw) : Math.round(raw));
+    }
+
+    /**
+     * reason 문장의 수식어("많이 높은"/"높은")를 가르는 데 쓴다. 문장을 위해 임계값을
+     * 룰마다 다시 적으면 of() 의 경계와 어긋나는 날이 온다 — 판정과 문장은 같은 경계를 쓴다.
+     */
+    public static boolean isSevere(int metricValue, boolean higherIsWorse) {
+        return of(metricValue, higherIsWorse) == SEVERE;
     }
 }

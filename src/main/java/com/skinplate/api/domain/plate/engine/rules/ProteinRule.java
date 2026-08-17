@@ -18,6 +18,7 @@ public class ProteinRule implements PlateRule {
 
     @Override
     public RuleResult apply(PlateContext context) {
-        return RuleResult.good(code(), R05_PROTEIN, "단백질 충분");
+        return RuleResult.good(code(), R05_PROTEIN, "단백질 충분",
+                "단백질이 충분한 한 끼예요. 피부 컨디션 유지에 도움이 될 수 있어요.");
     }
 }

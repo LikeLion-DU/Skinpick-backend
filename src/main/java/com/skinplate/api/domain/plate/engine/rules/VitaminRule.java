@@ -20,6 +20,7 @@ public class VitaminRule implements PlateRule {
 
     @Override
     public RuleResult apply(PlateContext context) {
-        return RuleResult.good(code(), R06_VITAMIN, "비타민 풍부");
+        return RuleResult.good(code(), R06_VITAMIN, "비타민 풍부",
+                "비타민·항산화 재료가 들어 있어 도움이 될 수 있어요.");
     }
 }
