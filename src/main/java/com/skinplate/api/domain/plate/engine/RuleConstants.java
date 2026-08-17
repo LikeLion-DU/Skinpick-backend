@@ -32,10 +32,11 @@ public final class RuleConstants {
     public static final int GAIN_LESS_SPICY      = 6;
     public static final int GAIN_WATER_NOT_SODA  = 7;
     public static final int GAIN_REMOVE_BATTER   = 5;
-    // R10 은 고정 -5 이고 LESS_RICE 가 1200kcal 아래에서는 반드시 그 룰을 끈다 —
-    // 회복치가 결정론적으로 5 다. 다른 GAIN 들은 감점이 가변(R04 는 -8~-15)이라
-    // 근사가 불가피하지만, 여기서 4 를 쓰면 카드가 "+4" 라 말하고 시뮬레이션은
-    // 5 를 올리는, 확인 가능한 거짓이 된다.
+    // R10 은 고정 -5 다. LESS_RICE 가 열량을 3/4 로 줄여 900 아래로 내리면 회복이
+    // 정확히 5 이고, 900~1200kcal 이 그 구간이다. **1200 을 넘으면 줄여도 900 위라
+    // 실제 회복은 0 이다** — 그건 GAIN_SOUP_HALF 와 같은 종류의 근사다(감점이 가변인
+    // R04 는 애초에 정확할 수 없다). 4 를 쓰면 그 근사와 무관하게 일반적인 구간에서도
+    // 카드가 "+4" 라 말하고 시뮬레이션은 5 를 올리는, 확인 가능한 거짓이 된다.
     public static final int GAIN_LESS_RICE       = 5;   // R10 쌍 · |R10_HIGH_CALORIE| 와 같다
 
     // ---- 나트륨 초과량 비례 감점 ----
