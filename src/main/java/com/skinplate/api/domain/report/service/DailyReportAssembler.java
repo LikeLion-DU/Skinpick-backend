@@ -89,6 +89,10 @@ public final class DailyReportAssembler {
     /**
      * 기록된 끼니의 영양 합계. 안 찍은 끼니는 세지 않는다 — 서버는 사용자가 굶은
      * 것인지 안 찍은 것인지 알 방법이 없고, 추정해서 채우면 그 순간 숫자가 거짓이 된다.
+     *
+     * <p><b>섭취량 환산은 여기서만 한다.</b> 저장된 영양값은 1인분 기준이고(점수의
+     * 재현성이 그 위에 서 있다), 리포트의 "얼마나 먹었나"만 portionSize 계수를 곱한다.
+     * V7 이전 행·UNKNOWN 은 계수 1.0 이라 기존 합계와 동일하다.
      */
     private static List<NutritionItemDto> nutrition(List<SkinPlate> plates) {
         BigDecimal calories = BigDecimal.ZERO;
@@ -100,12 +104,13 @@ public final class DailyReportAssembler {
 
         for (SkinPlate plate : plates) {
             Nutrition value = plate.getFoodAnalysis().getNutrition();
-            calories = calories.add(BigDecimal.valueOf(value.getCaloriesKcal()));
-            carb     = carb.add(value.getCarbG());
-            protein  = protein.add(value.getProteinG());
-            fat      = fat.add(value.getFatG());
-            sodium   = sodium.add(BigDecimal.valueOf(value.getSodiumMg()));
-            sugar    = sugar.add(value.getSugarG());
+            BigDecimal portion = plate.getFoodAnalysis().getTraits().getPortionSize().getFactor();
+            calories = calories.add(BigDecimal.valueOf(value.getCaloriesKcal()).multiply(portion));
+            carb     = carb.add(value.getCarbG().multiply(portion));
+            protein  = protein.add(value.getProteinG().multiply(portion));
+            fat      = fat.add(value.getFatG().multiply(portion));
+            sodium   = sodium.add(BigDecimal.valueOf(value.getSodiumMg()).multiply(portion));
+            sugar    = sugar.add(value.getSugarG().multiply(portion));
         }
 
         return List.of(

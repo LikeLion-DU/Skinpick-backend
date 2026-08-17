@@ -5,9 +5,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.skinplate.api.domain.food.entity.CookingMethod;
 import com.skinplate.api.domain.food.entity.FoodAnalysis;
+import com.skinplate.api.domain.food.entity.FoodGroup;
 import com.skinplate.api.domain.food.entity.FoodIngredient;
+import com.skinplate.api.domain.food.entity.FoodTraits;
 import com.skinplate.api.domain.food.entity.IngredientTag;
 import com.skinplate.api.domain.food.entity.Nutrition;
+import com.skinplate.api.domain.food.entity.Oiliness;
+import com.skinplate.api.domain.food.entity.PortionSize;
+import com.skinplate.api.domain.food.entity.ProcessingLevel;
+import com.skinplate.api.domain.food.entity.Spiciness;
 import com.skinplate.api.domain.user.entity.AppUser;
 import com.skinplate.api.global.exception.BusinessException;
 import com.skinplate.api.global.exception.ErrorCode;
@@ -138,8 +144,31 @@ public class FoodAnalysisService {
                 spicy,
                 toJson(aiResult, jti));
 
+        // 관찰 특성 5종. 구 토큰(30분 창)에는 이 필드가 없어 null 로 온다 —
+        // 모르는 값과 함께 전부 UNKNOWN 으로 흡수해야 저장이 500 으로 죽지 않는다.
+        food.assignTraits(FoodTraits.of(
+                toEnum(FoodGroup.class, aiResult.foodGroup(), FoodGroup.ETC),
+                toEnum(PortionSize.class, aiResult.portionSize(), PortionSize.UNKNOWN),
+                toEnum(Spiciness.class, aiResult.spiciness(), Spiciness.UNKNOWN),
+                toEnum(Oiliness.class, aiResult.oiliness(), Oiliness.UNKNOWN),
+                toEnum(ProcessingLevel.class, aiResult.processingLevel(), ProcessingLevel.UNKNOWN)));
+
         food.addIngredients(toIngredients(aiResult.ingredients(), standard.orElse(null)));
         return food;
+    }
+
+    /**
+     * toIngredientTag·toCookingMethod 와 같은 이유의 일반형 — 스키마의 enum 강제는
+     * OpenAI 쪽 약속이고, 모르는 값 하나에 유료 호출을 버릴 수 없다.
+     */
+    private <E extends Enum<E>> E toEnum(Class<E> type, String value, E fallback) {
+        if (value == null) return fallback;
+        try {
+            return Enum.valueOf(type, value);
+        } catch (IllegalArgumentException e) {
+            log.warn("모르는 {} 값: {}", type.getSimpleName(), value);
+            return fallback;
+        }
     }
 
     /**

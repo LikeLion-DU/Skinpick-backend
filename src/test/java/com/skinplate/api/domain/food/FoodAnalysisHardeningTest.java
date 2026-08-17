@@ -3,7 +3,12 @@ package com.skinplate.api.domain.food;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.skinplate.api.domain.food.entity.CookingMethod;
 import com.skinplate.api.domain.food.entity.FoodAnalysis;
+import com.skinplate.api.domain.food.entity.FoodGroup;
 import com.skinplate.api.domain.food.entity.Nutrition;
+import com.skinplate.api.domain.food.entity.Oiliness;
+import com.skinplate.api.domain.food.entity.PortionSize;
+import com.skinplate.api.domain.food.entity.ProcessingLevel;
+import com.skinplate.api.domain.food.entity.Spiciness;
 import com.skinplate.api.domain.food.service.FoodAnalysisService;
 import com.skinplate.api.domain.food.service.StandardFoodTable;
 import com.skinplate.api.global.exception.BusinessException;
@@ -113,6 +118,59 @@ class FoodAnalysisHardeningTest {
                 .isSpicy()).isFalse();
     }
 
+    // ---- 관찰 특성 (스키마 v2) ----
+    //
+    // 특성은 표준 테이블 밖이라 AI 답이 그대로 실린다. 세 경로 — 정상값·null(구 토큰)·
+    // 모르는 값 — 이 전부 UNKNOWN 흡수를 지나야 유료 호출이 안 버려진다.
+
+    @Test
+    @DisplayName("특성 5종이 enum 으로 변환돼 엔티티에 실린다")
+    void traits_validValues_persist() {
+        FoodAnalysis food = foodAnalysisService.toEntity(null, aiResultWithTraits(
+                "SOUP_STEW", "LARGE", "HOT", "HIGH", "PROCESSED"));
+
+        assertThat(food.getTraits().getFoodGroup()).isEqualTo(FoodGroup.SOUP_STEW);
+        assertThat(food.getTraits().getPortionSize()).isEqualTo(PortionSize.LARGE);
+        assertThat(food.getTraits().getSpiciness()).isEqualTo(Spiciness.HOT);
+        assertThat(food.getTraits().getOiliness()).isEqualTo(Oiliness.HIGH);
+        assertThat(food.getTraits().getProcessingLevel()).isEqualTo(ProcessingLevel.PROCESSED);
+    }
+
+    @Test
+    @DisplayName("구 토큰처럼 특성이 전부 null 이어도 UNKNOWN 으로 저장된다 — 500 이 아니다")
+    void traits_nullFieldsFromOldToken_fallBackToUnknown() {
+        // aiResult(이름, 조리법, spicy) 헬퍼가 특성 null — 배포 경계 30분 창의 구 토큰 모양이다.
+        FoodAnalysis food = foodAnalysisService.toEntity(null, aiResult("부대찌개", "BOILED", true));
+
+        assertThat(food.getTraits().getFoodGroup()).isEqualTo(FoodGroup.ETC);
+        assertThat(food.getTraits().getPortionSize()).isEqualTo(PortionSize.UNKNOWN);
+        assertThat(food.getTraits().getSpiciness()).isEqualTo(Spiciness.UNKNOWN);
+        assertThat(food.getTraits().getOiliness()).isEqualTo(Oiliness.UNKNOWN);
+        assertThat(food.getTraits().getProcessingLevel()).isEqualTo(ProcessingLevel.UNKNOWN);
+    }
+
+    @Test
+    @DisplayName("모르는 특성 값은 UNKNOWN 으로 흘린다 — 스키마의 enum 강제는 상대편 약속이다")
+    void traits_unknownValues_fallBackToUnknown() {
+        FoodAnalysis food = foodAnalysisService.toEntity(null, aiResultWithTraits(
+                "KOREAN_FOOD", "EXTRA_LARGE", "MEGA_SPICY", "OILY", "RAW_FOOD"));
+
+        assertThat(food.getTraits().getFoodGroup()).isEqualTo(FoodGroup.ETC);
+        assertThat(food.getTraits().getPortionSize()).isEqualTo(PortionSize.UNKNOWN);
+        assertThat(food.getTraits().getSpiciness()).isEqualTo(Spiciness.UNKNOWN);
+        assertThat(food.getTraits().getOiliness()).isEqualTo(Oiliness.UNKNOWN);
+        assertThat(food.getTraits().getProcessingLevel()).isEqualTo(ProcessingLevel.UNKNOWN);
+    }
+
+    private static OpenAiFoodResult aiResultWithTraits(String foodGroup, String portionSize,
+                                                       String spiciness, String oiliness,
+                                                       String processingLevel) {
+        return new OpenAiFoodResult(true, "부대찌개", "한식", "BOILED", true,
+                List.of(), new OpenAiFoodResult.Nutrition(111, new BigDecimal("1.1"),
+                new BigDecimal("1.1"), new BigDecimal("1.1"), 111, new BigDecimal("1.1")),
+                foodGroup, portionSize, spiciness, oiliness, processingLevel);
+    }
+
     // ---- 영양값 범위 ----
 
     @Test
@@ -216,13 +274,19 @@ class FoodAnalysisHardeningTest {
     private static OpenAiFoodResult aiResult(boolean detected, String foodName) {
         return new OpenAiFoodResult(detected, foodName, "한식/찌개", "BOILED", true,
                 List.of(), new OpenAiFoodResult.Nutrition(520, new BigDecimal("28.5"),
-                new BigDecimal("24.0"), new BigDecimal("32.0"), 1850, new BigDecimal("6.2")));
+                new BigDecimal("24.0"), new BigDecimal("32.0"), 1850, new BigDecimal("6.2")),
+                "SOUP_STEW", "MEDIUM", "MEDIUM", "MEDIUM", "MINIMALLY_PROCESSED");
     }
 
-    /** 영양값은 표준 DB 와 겹치지 않는 숫자로 둔다 — 어느 쪽이 이겼는지 보이게. */
+    /**
+     * 영양값은 표준 DB 와 겹치지 않는 숫자로 둔다 — 어느 쪽이 이겼는지 보이게.
+     * 특성 5종은 일부러 null 이다 — 구 토큰(30분 창)이 정확히 이 모양으로 오고,
+     * 이 경로들이 전부 UNKNOWN 흡수를 지나가야 한다.
+     */
     private static OpenAiFoodResult aiResult(String foodName, String cookingMethod, boolean spicy) {
         return new OpenAiFoodResult(true, foodName, "한식", cookingMethod, spicy,
                 List.of(), new OpenAiFoodResult.Nutrition(111, new BigDecimal("1.1"),
-                new BigDecimal("1.1"), new BigDecimal("1.1"), 111, new BigDecimal("1.1")));
+                new BigDecimal("1.1"), new BigDecimal("1.1"), 111, new BigDecimal("1.1")),
+                null, null, null, null, null);
     }
 }

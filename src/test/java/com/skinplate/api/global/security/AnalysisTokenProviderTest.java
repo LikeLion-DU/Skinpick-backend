@@ -203,7 +203,8 @@ class AnalysisTokenProviderTest {
                 List.of(new OpenAiFoodResult.Ingredient("돼지고기", "PROTEIN"),
                         new OpenAiFoodResult.Ingredient("김치", "VEGETABLE")),
                 new OpenAiFoodResult.Nutrition(520, new BigDecimal("28.5"),
-                        new BigDecimal("24.0"), new BigDecimal("32.0"), 1850, new BigDecimal("6.2")));
+                        new BigDecimal("24.0"), new BigDecimal("32.0"), 1850, new BigDecimal("6.2")),
+                "SOUP_STEW", "MEDIUM", "MEDIUM", "MEDIUM", "MINIMALLY_PROCESSED");
     }
 
     /** AnalysisTokenProvider 생성자와 같은 방식으로 파생 키를 다시 계산한다 (iss/aud 위조 테스트 전용). */

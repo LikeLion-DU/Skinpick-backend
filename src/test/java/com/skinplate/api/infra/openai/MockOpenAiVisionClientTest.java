@@ -108,6 +108,18 @@ class MockOpenAiVisionClientTest {
     }
 
     @Test
+    @DisplayName("Mock 음식의 특성이 채워져 있고 spiciness 는 MEDIUM 이다 — HOT 이면 60점이 무너진다")
+    void mockFoodFillsTraits() {
+        OpenAiFoodResult food = client.analyzeFood("무시된다", "image/jpeg");
+
+        assertThat(food.foodGroup()).isEqualTo("SOUP_STEW");
+        assertThat(food.portionSize()).isEqualTo("MEDIUM");
+        assertThat(food.spiciness()).isEqualTo("MEDIUM");   // R02 강도 계수 1.0 — 60점의 전제
+        assertThat(food.oiliness()).isEqualTo("MEDIUM");
+        assertThat(food.processingLevel()).isEqualTo("MINIMALLY_PROCESSED");
+    }
+
+    @Test
     @DisplayName("같은 입력에 항상 같은 값 — 무대에서 두 번 찍어도 같아야 한다")
     void isDeterministic() {
         assertThat(client.analyzeSkin(PHOTOS))
