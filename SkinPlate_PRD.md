@@ -1381,9 +1381,6 @@ src/main/java/com/skinplate/api/
     │   │   ├── FoodAnalysisPrompt.java
     │   │   ├── PlateCommentPrompt.java
     │   │   └── SkinInsightPrompt.java          # v1.8 — 인사이트 문장 (§18.10)
-    │   ├── schema/
-    │   │   ├── skin-analysis-schema.json       # Structured Outputs
-    │   │   └── food-analysis-schema.json
     │   ├── dto/
     │   │   ├── OpenAiSkinResult.java
     │   │   └── OpenAiFoodResult.java
@@ -1516,6 +1513,7 @@ erDiagram
         bigint skin_plate_id FK
         varchar type "GOOD/CAUTION/ACTION"
         varchar message
+        varchar reason "판정 이유 문장 · V8 · NULL 허용(ACTION·V8 이전 행)"
         int score_delta "GOOD/CAUTION 행"
         int expected_gain "ACTION 행 회복 점수"
         varchar rule_code
@@ -1917,6 +1915,9 @@ public class SkinPlateFeedback extends BaseTimeEntity {
 
     @Column(nullable = false, length = 200)
     private String message;
+
+    @Column(length = 300)
+    private String reason;       // 판정 이유 문장 (V8 · GOOD/CAUTION 만, NULL 허용)
 
     private int scoreDelta;      // GOOD / CAUTION 행에서 사용 (± 점수)
 
@@ -3655,20 +3656,20 @@ public class PlateRuleEngine {
 
 > **핵심** — 룰을 추가하려면 `PlateRule`을 구현한 `@Component` 클래스를 하나 만들면 끝이다. 엔진 코드도, 기존 룰도 건드리지 않는다. 이것이 "확장 가능한 아키텍처"의 실질적 의미다.
 
-### 18.6 룰 정의표 (MVP 9종 + 확장 1종)
+### 18.6 룰 정의표 (10종 — R10 은 2026-08-17 구현)
 
 | 코드 | 조건 (피부 × 음식) | Δ | 타입 | 메시지 | 추천 행동 |
 |---|---|---|---|---|---|
 | **R01** | 건조(hydration<40) × 수분/오메가3 재료 | **+8** | GOOD | 수분 보충 재료 | — |
 | **R02** | 홍조(redness>60) × 매운 음식/CAPSAICIN | **-10** × 강도 | CAUTION | 매운맛 자극 | 매운 양념을 덜어내고 드셔보세요 (+6) |
-| **R03** | 트러블(trouble>60) × 당류>25g (**40g 초과 시 -4 추가**) | **-12** | CAUTION | 당류 과다 | 단 음료 대신 물을 곁들이세요 (+7) |
+| **R03** | 트러블(trouble>60) × 당류>25g (**40g 초과 시 기본 델타에 -4** · 심각도 곱하기 전) | **-12** | CAUTION | 당류 과다 | 단 음료 대신 물을 곁들이세요 (+7) |
 | **R04** | 나트륨 > 1500mg | **-8** | CAUTION | 나트륨 과다 | **국물을 절반만 남기면 점수가 상승합니다 (+8)** |
 | **R05** | 단백질 ≥ 20g | **+6** | GOOD | 단백질 충분 | — |
 | **R06** | VITAMIN_C / **VITAMIN_A** / ANTIOXIDANT 재료 포함 | **+5** | GOOD | 비타민 풍부 | — |
 | **R07** | 유분(oil>70) × 튀김(FRIED) **또는 관찰 기름기 HIGH** | **-10** (비튀김 ×0.7) | CAUTION | 튀김 조리 / 기름진 음식 | 튀김옷을 일부 제거해 보세요 (+5 · 튀김만) |
 | **R08** | 장벽 약화(barrier<40) × OMEGA3 | **+7** | GOOD | 오메가3 함유 | — |
 | **R09** | PROBIOTIC 재료 포함 (김치·된장·요거트) | **+4** | GOOD | 발효식품 포함 | — |
-| **R10** | 칼로리 > 900kcal | **-5** (고정) | CAUTION | 열량이 높음 | 밥이나 면 양을 조금 줄여보세요 (+4) |
+| **R10** | 칼로리 > 900kcal | **-5** (고정) | CAUTION | 열량이 높음 | 밥이나 면 양을 조금 줄여보세요 (+5) |
 
 > **강도 계수 (2026-08-17)** — 최종 델타 = `기본 델타 × 심각도(피부 축) × 강도(음식 축)`. 심각도는 기존 SeverityCalculator(1.0/1.2/1.5) 그대로이고, 강도는 스키마 v2 의 관찰값에서 온다: spiciness `MILD 0.7 / MEDIUM 1.0 / HOT 1.3`, R07 의 비튀김 기름기 `0.7`. **UNKNOWN 은 전부 1.0** — 특성이 없던 시절 기록·구 토큰과 완전히 같은 점수가 나온다. R10 은 피부 지표와 직접 매지 않는 보조 룰이라 계수 없이 고정 -5 이고, ConcernRules(고민 점수)에도 매지 않는다. 나트륨은 이미 초과량 비례 감점이라 단계(VERY_HIGH 2500mg)를 점수에 겹치지 않고 문장에만 쓴다. §18.7 예시 A=60 · B=87 은 강도 1.0 조합이라 그대로다.
 >

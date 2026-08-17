@@ -2100,6 +2100,8 @@ declared OILY ≠ observed DRY  →  SPECIAL["OILY→DRY"]
 
 ## 1.13 domain/food
 
+> *(2026-08-17 — 아래 코드 블록은 그때의 기록이다. 저장소가 더 최신이다: `FoodTraits`(관찰 특성 5종 @Embeddable)·`FoodAnalysis.assignTraits/getTraits`·`Nutrition.isVeryHighSugar/isVeryHighSodium` 가 빠져 있다. 실제 코드는 `domain/food/entity/` 를 본다.)*
+
 **`domain/food/entity/CookingMethod.java`**
 
 ```java
@@ -2126,7 +2128,7 @@ package com.skinplate.api.domain.food.entity;
  *
  * AI가 태그를 자유롭게 만들면 룰이 아무것도 매칭하지 못한다.
  * 그래서 OpenAI JSON Schema에서도 이 목록을 enum으로 강제한다.
- * 값을 추가할 때는 스키마(food-analysis-schema.json)도 함께 고쳐야 한다.
+ * 값을 추가할 때는 스키마(`FoodAnalysisPrompt.SCHEMA_JSON`)도 함께 고쳐야 한다.
  */
 public enum IngredientTag {
     VITAMIN_C,      // 키위, 브로콜리, 파프리카
@@ -2377,6 +2379,8 @@ public interface FoodAnalysisRepository extends JpaRepository<FoodAnalysis, Long
 ---
 
 ## 1.14 domain/plate
+
+> *(2026-08-17 — 아래 코드 블록은 그때의 기록이다. 저장소가 더 최신이다: `SkinPlateFeedback.reason`(V8)·`PlateActionCode.LESS_RICE` 가 빠져 있다. 실제 코드는 `domain/plate/entity/` 를 본다.)*
 
 **`domain/plate/entity/FeedbackType.java`**
 
@@ -3311,6 +3315,8 @@ public record SkinAgeDto(int estimatedSkinAge, List<ScoredItemDto> axes, String 
 
 ## 1.18 DTO — 음식 · Skin Plate
 
+> *(2026-08-17 — 아래 코드 블록은 그때의 기록이다. 저장소가 더 최신이다: `FoodAnalysisDto` 의 특성 5종·`FeedbackDto.reason`·`SkinPlateResponse.skinBasis/skinMeasuredAt` 가 빠져 있다. 실제 코드는 `domain/food/dto/ · domain/plate/dto/` 를 본다.)*
+
 **`domain/food/dto/NutritionDto.java`**
 
 ```java
@@ -3586,9 +3592,9 @@ public enum PlateActionCode {
     HALVE_SOUP    ("국물을 절반만 남기기"),
     LESS_SPICY    ("매운 양념 덜어내기"),
     NO_SUGAR_DRINK("단 음료 대신 물"),
-    REMOVE_BATTER ("튀김옷 일부 제거");
-    // LESS_RICE 는 넣지 않는다. R10(고열량)이 미구현이라 버튼이 붙을 카드가 없다.
-    // R10 을 구현하면 그때 함께 추가한다.
+    REMOVE_BATTER ("튀김옷 일부 제거"),
+    // 2026-08-17 — R10(고열량)을 구현하면서 예고대로 함께 들어왔다.
+    LESS_RICE     ("밥·면 조금 줄이기");   // → R10 · caloriesKcal × 0.75
 
     private final String label;
 
@@ -3738,6 +3744,8 @@ private Nutrition adjustNutrition(Nutrition n, List<PlateActionCode> actions) {
 
 ## 1.20 DTO — OpenAI 응답 매핑
 
+> *(2026-08-17 — 아래 코드 블록은 그때의 기록이다. 저장소가 더 최신이다: `OpenAiFoodResult` 의 특성 5종(String·nullable)이 빠져 있다. 실제 코드는 `infra/openai/dto/OpenAiFoodResult.java` 를 본다.)*
+
 **`infra/openai/dto/OpenAiSkinResult.java`**
 
 ```java
@@ -3854,18 +3862,16 @@ public final class RuleConstants {
     public static final int R07_FRIED_OIL        = -10;  // 유분 × 튀김
     public static final int R08_OMEGA3_BARRIER   =  7;   // 장벽 약화 × 오메가3
     public static final int R09_PROBIOTIC        =  4;   // 발효식품
-    // ---- R10(고열량)은 미구현이다. 델타와 회복 점수를 쌍으로 남겨둔다. ----
-    // 문서 §18.6 룰표가 R10을 "확장"으로 명시하고 있으므로 상수도 함께 남긴다.
-    // 나중에 넣을 때 값을 다시 정하지 않아도 되고, 지금 지우면 GAIN_LESS_RICE 만
-    // 고아가 되거나(둘은 한 쌍이다) 룰표와 코드가 또 어긋난다.
-    public static final int R10_HIGH_CALORIE     = -5;   // 고열량 (확장 · 미구현)
+    // 2026-08-17 구현됨. 피부 지표와 직접 매지 않는 보조 룰이라 심각도 계수를
+    // 태우지 않는 고정 델타다(HighCalorieRule · ConcernRules 에도 매지 않는다).
+    public static final int R10_HIGH_CALORIE     = -5;   // 고열량
 
     // ---- 추천 행동 시 회복 점수 ----
     public static final int GAIN_SOUP_HALF       = 8;
     public static final int GAIN_LESS_SPICY      = 6;
     public static final int GAIN_WATER_NOT_SODA  = 7;
     public static final int GAIN_REMOVE_BATTER   = 5;
-    public static final int GAIN_LESS_RICE       = 4;   // R10 쌍 (확장 · 미구현)
+    public static final int GAIN_LESS_RICE       = 5;   // R10 쌍 · |R10_HIGH_CALORIE| 와 같다
 
     // ---- 나트륨 초과량 비례 감점 ----
     public static final int SODIUM_STEP_MG       = 500;  // 500mg 초과마다 1점 추가 감점
@@ -3878,6 +3884,8 @@ public final class RuleConstants {
 ```
 
 ### 1.21.2 심각도 계수
+
+> *(2026-08-17 — 아래 코드 블록은 그때의 기록이다. 저장소가 더 최신이다: 음식 축 강도를 곱하는 4인자 `apply(...)` 와 `isSevere(...)` 가 빠져 있다. 실제 코드는 `plate/engine/SeverityCalculator.java` 를 본다.)*
 
 **`domain/plate/engine/SeverityCalculator.java`**
 
@@ -3938,6 +3946,8 @@ public final class SeverityCalculator {
 ```
 
 ### 1.21.3 입력 · 출력 타입
+
+> *(2026-08-17 — 아래 코드 블록은 그때의 기록이다. 저장소가 더 최신이다: `RuleResult.reason` 과 그 팩토리 오버로드가 빠져 있다. 실제 코드는 `plate/engine/RuleResult.java · PlateEvaluation.java` 를 본다.)*
 
 **`domain/plate/engine/PlateContext.java`**
 
@@ -4154,7 +4164,7 @@ public class PlateRuleEngine {
 }
 ```
 
-### 1.21.5 룰 구현 (9종)
+### 1.21.5 룰 구현 (10종 — R10 `HighCalorieRule` 은 2026-08-17 추가)
 
 **`domain/plate/engine/rules/SodiumRule.java`** — R04
 
@@ -4449,6 +4459,8 @@ public class ProbioticRule implements PlateRule {
 > *(2026-08-17 갱신 — 예언대로 `HighCalorieRule` 클래스 하나로 구현됐다. 고정 -5 · 심각도 계수 없음 · `LESS_RICE` 행동 쌍. 이 절의 코드 블록은 그때의 기록이고, R02·R03·R07 은 스키마 v2 특성(spiciness·oiliness·당류 단계)을 읽도록 저장소 쪽이 더 최신이다 — PRD §18.6 참조.)*
 
 ### 1.21.6 검증 — 예시 계산 재현 테스트
+
+> *(2026-08-17 — 아래 코드 블록은 그때의 기록이다. 저장소가 더 최신이다: 엔진 목록에 `HighCalorieRule` 이 빠져 있다. 실제 코드는 `test/.../PlateRuleEngineTest.java` 를 본다.)*
 
 **`src/test/java/com/skinplate/api/domain/plate/engine/PlateRuleEngineTest.java`**
 
@@ -6783,19 +6795,19 @@ if (_consecutiveFailures >= 3) {
 | `POST /skin/analyses`<br>`GET /skin/analyses/latest`<br>`GET /skin/analyses/{id}` | `SkinAnalysisResponse` | `skinAnalysisId` · `skinScore` · `metrics{5}` · **`metricDetails[{key,score,level,evidence[]}]`** · **`skinType{primary,traits[],label}`**(예전 분석이면 키 생략) · **`skinAge{estimatedSkinAge,axes[7],assessment}`**(예전 분석이면 키 생략) · `summary` · `highlights[{label,status}]` · **`skinTypeGap{declared,observed,matched,message}`**(미선택 시 키 생략) · `analyzedAt` | `SkinAnalysisDto` |
 | `POST /plates/analyze` | `PlateAnalysisResponse` | **`analysisToken`** · `skinAnalysisId` · **`skinBasis`**(`TODAY`/`RECENT` — 기준 피부가 오늘(KST) 측정인지) · **`skinMeasuredAt`** · `plateScore` · `baseScore` · `summary` · `food{...}`(**`foodAnalysisId` 없음**) · `feedbacks{good,caution,action}` · `appliedRules[]` — **`plateId`·`createdAt` 없음(저장 전)** | `PlateAnalysisDto` |
 | `POST /plates/records`<br>`GET /plates/{id}` | `SkinPlateResponse` | `plateId` · **`skinAnalysisId`** · **`skinBasis`**(기록 저장일 대비 판정 — 과거 기록을 언제 열어도 불변) · **`skinMeasuredAt`** · `plateScore` · **`baseScore`** · `summary` · `food{...}` · `feedbacks{good,caution,action}` · `appliedRules[]` · **`aiTip`**(생성 실패 시 키 생략) · `createdAt` | `SkinPlateDto` |
-
-> **`food{...}` 관찰 특성 5종 (2026-08-17)** — `foodGroup` · `portionSize` · `spiciness` · `oiliness` · `processingLevel` 이 추가됐다. V7 이전 행도 키가 빠지지 않고 `UNKNOWN`/`ETC` 로 채워 내려간다("모른다"는 값이지 누락이 아니다). portionSize 는 표시·리포트 영양 환산 전용이고 점수와 무관하다 — 점수는 여전히 1인분 기준 결정론이다.
->
-> **`feedbacks.good[]`·`caution[]` 에 `reason` 추가 (2026-08-17 · V8)** — "지금 붉은기가 높은 상태에서 강한 매운맛이 들어 있어 부담이 될 수 있어요" 같은 판정 이유 문장. AI 가 아니라 룰의 결정론 템플릿이다. V8 이전 행과 `action[]` 에는 없고, null 이면 키가 생략되니 앱은 키가 있을 때만 이유 줄을 그린다. `appliedRules[]` 에 **R10(고열량)** 이 새로 올 수 있고 행동 코드에 **`LESS_RICE`** 가 추가됐다.
 | `DELETE /plates/{id}` | — | 본문 없음(`204`) | 앱이 확인 창 뒤에 부른다 |
 | `POST /plates/{id}/simulate` | `PlateSimulateResponse` | `plateId` · `beforeScore` · `afterScore` · `appliedActions[]` · `removedRules[]` · `summary` | `PlateSimulationDto` |
 | `POST /plates/simulate` | `PlateAnalysisSimulateResponse` | `beforeScore` · `afterScore` · `appliedActions[]` · `removedRules[]` · `summary` — **`plateId` 없음(저장 전, analysisToken 이 대상을 지목)** | `PlateSimulationDto` |
 | `GET /plates?from=&to=` | `PlateHistoryResponse` | `days[{date, skinScore, **plateScore**, **targetScore**, **aiComment**(없으면 키 생략), plates[{plateId, foodName, plateScore, **mealType**, recordedAt}]}]` — **기록 없는 날은 `days[]` 에 항목 자체가 없다** | `PlateHistoryDto` |
 | ~~`GET /reports?period=`~~ | — | **삭제됨(2026-08-17)** — 앱이 `/reports/daily`·`/reports/weekly` 로 옮겨 가 읽는 곳이 없어졌다. `averagePlateScore`(끼니 평균)와 `averageDailyScore`(일 평균의 평균)는 정의가 달라 함께 두면 화면마다 다른 숫자가 뜬다 | — |
-| `GET /reports/daily?date=` | `DailyReportResponse` | `date` · `dailyScore`(기록 없으면 키 생략) · `grade` · `recordCount` · `nutrition[{nutrient,label,unit,amount,target,percent,status,higherIsWorse}]` · `concerns[{concern,label,score,status}]` · `meals[{plateId,foodName,plateScore,mealType,recordedAt}]` · `aiComment`(없으면 키 생략) · `goodPoints[]` · `improvePoints[]` — **`date` 생략 시 서버의 오늘(KST)** | `DailyReportDto` → `DailyReport` |
+| `GET /reports/daily?date=` | `DailyReportResponse` | `date` · `dailyScore`(기록 없으면 키 생략) · `grade` · `recordCount` · `nutrition[{nutrient,label,unit,amount,target,percent,status,higherIsWorse}]`(**`amount` 는 `portionSize` 환산 후 합계 · UNKNOWN=1.0**) · `concerns[{concern,label,score,status}]` · `meals[{plateId,foodName,plateScore,mealType,recordedAt}]` · `aiComment`(없으면 키 생략) · `goodPoints[]` · `improvePoints[]` — **`date` 생략 시 서버의 오늘(KST)** | `DailyReportDto` → `DailyReport` |
 | `GET /reports/weekly?from=&to=` | `WeeklyReportResponse` | `from` · `to` · `averageDailyScore`(기록 없으면 키 생략) · `grade` · `totalDays` · `recordedDays` · `recordCount` · `dailyScores[{date,dailyScore,grade}]` · `nutrition[]`(일일과 같은 모양 · **기록일 하루 평균**) · `concerns[{…,changeFromFirstDay}]`(기록일 1일이면 키 생략 · **`score`(기간 평균)와 축이 다르다**) · `bestDay` · `worstDay` · `aiComment{goodPoint,improvePoint,habit,nextWeek}`(생성 실패 시 키 생략) — **둘 다 생략 시 오늘 포함 7일 · 기록 없는 날은 `dailyScores[]` 에 없다** | `WeeklyReportDto` → `WeeklyReport` |
 | `GET /recommendations` | `RecommendationResponse` | `skinAnalysisId` · `recommend[]` · `avoid[]` · `generatedAt` | `RecommendationDto` |
 | `GET /skin-insights` | `SkinInsightResponse` | `skinAnalysisId` · `summary` · **`changes{hydration,oil,redness,trouble,barrier,skinScore}`**(직전 분석 없으면 키 생략) · `insights[{category,**priority**,title,description}]` · `todayActions[{category,title}]` · `generatedAt` | *(앱 미구현)* |
+
+> **`food{...}` 관찰 특성 5종 (2026-08-17)** — `foodGroup` · `portionSize` · `spiciness` · `oiliness` · `processingLevel` 이 추가됐다. V7 이전 행도 키가 빠지지 않고 `UNKNOWN`/`ETC` 로 채워 내려간다("모른다"는 값이지 누락이 아니다). portionSize 는 표시·리포트 영양 환산 전용이고 점수와 무관하다 — 점수는 여전히 1인분 기준 결정론이다.
+>
+> **`feedbacks.good[]`·`caution[]` 에 `reason` 추가 (2026-08-17 · V8)** — "지금 붉은기가 높은 상태에서 강한 매운맛이 들어 있어 부담이 될 수 있어요" 같은 판정 이유 문장. AI 가 아니라 룰의 결정론 템플릿이다. V8 이전 행과 `action[]` 에는 없고, null 이면 키가 생략되니 앱은 키가 있을 때만 이유 줄을 그린다. `appliedRules[]` 에 **R10(고열량)** 이 새로 올 수 있고 행동 코드에 **`LESS_RICE`** 가 추가됐다.
 
 > **표준 영양값은 이제 공공데이터에서 온다.** 시연 음식 3종만 손으로 박아 두던 표를 `전국통합식품영양성분정보(음식)표준데이터`(식약처) 기반 1,452종 테이블로 교체했다. 원본은 그대로 못 쓴다 — 기준량이 100g 이라 `식품중량` 으로 1인분을 환산하고, 같은 음식이 여러 행이라 중앙값을 쓰며, 그중 '산출'(레시피 계산)은 나트륨이 실제의 1/4 까지 낮게 나와 '분석·수집'(실측)을 먼저 쓴다. **영양값만이 아니라 조리법·매운맛·재료 태그까지 고정한다** — 영양만 고정하면 R02(매운맛)·R07(튀김)이 여전히 AI 추정에 흔들려 재현성이 반쪽이 된다. 다만 **조리법·매운맛은 이름에서 뽑은 값이라 확실할 때만 AI 를 이긴다**: `ETC` 와 `spicy=false` 는 "아니다"가 아니라 "이름만 봐서는 모르겠다"이므로 사진을 본 AI 의 답을 지우지 않는다(§1.22.1 표). 조회는 2단계다: 정확한 이름(`김치찌개_참치`) → 없으면 **뒤 낱말부터** 기본명 매칭. 앞 낱말을 먼저 보면 "돼지고기 김치찌개" 가 돼지고기로 잡혀 찌개에 고기구이 영양값이 들어간다. 테이블을 다시 만들려면 `tools/build_standard_food.py` 를 돌린다.
 >
