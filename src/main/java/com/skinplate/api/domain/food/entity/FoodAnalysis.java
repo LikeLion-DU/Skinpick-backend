@@ -42,6 +42,14 @@ public class FoodAnalysis extends BaseTimeEntity {
     @Column(name = "is_spicy", nullable = false)
     private boolean spicy;
 
+    /**
+     * AI 관찰 특성 5종 (V7). create() 시그니처를 늘리지 않고 {@link #assignTraits} 로
+     * 한 번만 붙인다 — 기존 호출부·테스트가 그대로 남고, 안 붙인 엔티티는
+     * {@link #getTraits()}가 UNKNOWN 으로 읽어 기존과 동일하게 동작한다.
+     */
+    @Embedded
+    private FoodTraits traits;
+
     @OneToMany(mappedBy = "foodAnalysis", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<FoodIngredient> ingredients = new ArrayList<>();
 
@@ -71,6 +79,19 @@ public class FoodAnalysis extends BaseTimeEntity {
         food.spicy = spicy;
         food.rawAiResponse = rawAiResponse;
         return food;
+    }
+
+    /** 생성 직후 한 번만 부른다. null 을 넣어도 getTraits() 가 UNKNOWN 으로 흡수한다. */
+    public void assignTraits(FoodTraits traits) {
+        this.traits = traits;
+    }
+
+    /**
+     * null 을 반환하지 않는다. V7 이전 행·구 토큰·트레이트를 안 붙인 픽스처는
+     * 전부 UNKNOWN 으로 읽혀 룰·리포트가 기존과 동일하게 동작한다.
+     */
+    public FoodTraits getTraits() {
+        return traits == null ? FoodTraits.UNKNOWN : traits;
     }
 
     // ---- 연관관계 ----

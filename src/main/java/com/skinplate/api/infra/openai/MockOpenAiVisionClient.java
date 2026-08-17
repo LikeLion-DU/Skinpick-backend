@@ -105,6 +105,10 @@ public class MockOpenAiVisionClient implements VisionClient {
         return new OpenAiSkinResult.Axis(score, List.of(evidence));
     }
 
+    /**
+     * spiciness 는 <b>MEDIUM</b> 이어야 한다 — R02 강도 계수가 1.0 이라 무대의 60점이
+     * 그대로 나온다. HOT 으로 바꾸면 56점이 되고 테스트가 먼저 깨진다.
+     */
     @Override
     public OpenAiFoodResult analyzeFood(String base64Image, String mediaType) {
         return new OpenAiFoodResult(
@@ -118,7 +122,8 @@ public class MockOpenAiVisionClient implements VisionClient {
                         new OpenAiFoodResult.Ingredient("두부", "ETC"),
                         new OpenAiFoodResult.Ingredient("고춧가루", "CAPSAICIN")),
                 new OpenAiFoodResult.Nutrition(520, new BigDecimal("28.5"), new BigDecimal("24.0"),
-                        new BigDecimal("32.0"), 1850, new BigDecimal("6.2")));
+                        new BigDecimal("32.0"), 1850, new BigDecimal("6.2")),
+                "SOUP_STEW", "MEDIUM", "MEDIUM", "MEDIUM", "MINIMALLY_PROCESSED");
     }
 
     /** 60점 김치찌개 시나리오에 맞는 고정 문장. 무대에서 읽어도 어색하지 않아야 한다. */

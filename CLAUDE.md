@@ -51,7 +51,7 @@ HTTPS 는 자동이 아니다 — 리버스 프록시가 인증서와 **본문 �
 - 시뮬레이션은 **detached 복사본**으로만 계산한다. 관리 엔티티를 만지면 `orphanRemoval`이 재료를 DELETE 한다
 
 **AI 경계** — AI는 인식, 점수는 Backend.
-- `IngredientTag` / `CookingMethod`를 바꾸면 `food-analysis-schema.json`도 같이 바꾼다
+- 음식 스키마의 원본은 파일이 아니라 **`FoodAnalysisPrompt.SCHEMA_JSON`** 이다. `IngredientTag` / `CookingMethod` / `FoodGroup` / `PortionSize` / `Spiciness` / `Oiliness` / `ProcessingLevel`을 바꾸면 그 스키마도 같이 바꾼다 — 값 일치는 `FoodAnalysisPromptTest`가 깨져서 알려준다
 - Mock 스위치는 **`app.ai.mock` 프로퍼티 하나**. `@Profile("mock")` 금지
 - 타임아웃은 재시도 없는 단발. 음식·문장 25초 / **피부 28초**(상한 — 429 재시도가 끼면 최악 30.1초라 클라이언트 32초 안에 들어와야 한다) / **조회 문장 12초**(상한 15 — 주간 코멘트·인사이트. GET 이 동기로 기다리므로 그 시간이 화면이 멎는 시간이다). 429만 1회 재시도, `TimeoutException`은 `AI_TIMEOUT`으로 분기
 - 피부는 **정면·좌·우 3장을 한 번의 Vision 호출**로. 장당 호출 후 평균 금지 — 각도마다 점수가 달라진다
