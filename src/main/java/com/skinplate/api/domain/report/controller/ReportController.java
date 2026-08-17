@@ -20,8 +20,6 @@ import java.time.LocalDate;
 @RequiredArgsConstructor
 public class ReportController {
 
-    // @RequiredArgsConstructor 가 필드 선언 순서로 생성자를 만든다. 순서를 바꾸면
-    // 테스트의 new ReportController(...) 인자 순서가 조용히 어긋난다.
     private final DailyReportService dailyReportService;
     private final WeeklyReportService weeklyReportService;
 

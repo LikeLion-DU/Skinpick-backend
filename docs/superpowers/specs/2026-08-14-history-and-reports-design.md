@@ -309,7 +309,14 @@ List<SkinAnalysis> findByUserIdAndCreatedAtGreaterThanEqualAndCreatedAtLessThanO
 
 > **2026-08-17 갱신** — 과거 임의 날짜·임의 구간 리포트는 `GET /reports/daily?date=` · `GET /reports/weekly?from=&to=` 로 범위에 들어왔다(PRD §18.11). 이 문서의 §4.1 "기준일은 서버의 오늘(KST) 이다 · 과거 임의 날짜 조회는 범위 밖" 은 **그 시점의 `GET /reports?period=` 에만** 해당한다.
 >
-> **그리고 그 엔드포인트는 같은 날 삭제됐다.** 앱이 새 두 엔드포인트로 옮겨 가면서 읽는 곳이 없어졌고, 두 응답의 "이번 주 평균"이 정의가 달라(끼니 평균 vs 일 평균의 평균) 함께 두면 화면마다 다른 숫자가 뜬다. §4.1 은 **그때의 기록**으로 남긴다 — 지우면 왜 그렇게 만들었다가 왜 접었는지가 사라진다.
+> **그리고 그 엔드포인트는 같은 날 삭제됐다.** 앱이 새 두 엔드포인트로 옮겨 가면서 읽는 곳이 없어졌고, 두 응답의 "이번 주 평균"이 정의가 달라(끼니 평균 vs 일 평균의 평균) 함께 두면 화면마다 다른 숫자가 뜬다.
+>
+> **이 문서 전체가 그때의 기록이다.** 지우면 왜 그렇게 만들었다가 왜 접었는지가 사라지므로 본문은 손대지 않는다. 다만 **아래 절들은 더 이상 구현 지시가 아니다** — 그대로 따라 하면 방금 지운 500줄이 되살아난다:
+>
+> - **§4.1** `GET /reports?period=` 계약 — 엔드포인트 자체가 없다
+> - **§5** 지표 계산 규칙 중 `averagePlateScore` · `skinScoreTrend` · `penalties` · `meals` — 전부 삭제된 응답의 필드다. 살아 있는 계약은 `SkinPlate_DTO_Domain.md` 계약 대조표의 `/reports/daily` · `/reports/weekly` 두 행이다
+> - **§8 구현 범위**의 `ReportService` · `ReportResponse` · `PenaltyDto` · `MealDto` · `TrendPointDto` — 전부 삭제됨
+> - **§8.1** "`SkinPlate_PRD.md` §14.2 에 `GET /reports` 행 추가" — 그 행은 삭제 표시로 바뀌었다
 
 ## 10. 난이도 · 작업량
 

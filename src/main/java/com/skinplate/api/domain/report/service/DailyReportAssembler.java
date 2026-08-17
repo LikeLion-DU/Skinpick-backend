@@ -33,7 +33,7 @@ public final class DailyReportAssembler {
 
     private DailyReportAssembler() {}
 
-    /** 화면이 감당하는 줄 수. ReportService 의 감점 목록과 같은 기준이다. */
+    /** 화면이 감당하는 줄 수. 늘리면 반복되는 문구가 목록으로 보이기 시작한다. */
     private static final int TOP_MESSAGE_COUNT = 3;
 
     public static DailyReportResponse of(LocalDate date, List<SkinPlate> plates,
@@ -158,7 +158,7 @@ public final class DailyReportAssembler {
 
     /**
      * 그날 가장 자주 붙은 문구. 새로 쓰지 않고 저장된 피드백의 message 를 그대로 쓴다 —
-     * 9개 룰이 모두 짧은 라벨을 리터럴로 돌려주고 그 값이 기록돼 있다. (ReportService 와 같은 방식)
+     * 9개 룰이 모두 짧은 라벨을 리터럴로 돌려주고 그 값이 기록돼 있다.
      */
     private static List<String> topMessages(List<SkinPlate> plates, FeedbackType type) {
         return topCounts(plates.stream()

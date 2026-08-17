@@ -6812,7 +6812,7 @@ if (_consecutiveFailures >= 3) {
 | 8 | `skinType`(AI 관찰) 과 `skinTypeGap.observed`(규칙 도출) | **다른 값이고 갈릴 수 있다.** 갭 카드는 `observed` 를, 타입 칩은 `skinType` 을 쓴다 |
 | 9 | `skinType` · `skinAge` 키가 **없는 것** | 이 기능 이전에 저장된 분석이거나 AI 응답이 쓸 수 없는 경우다. 두 카드를 통째로 숨긴다 — 빈 값으로 그리지 않는다 |
 | 10 | `metricDetails[].level` 과 `highlights[].status` | 같은 지표라도 <b>등급은 5단, 뱃지는 3단</b>이라 경계가 정확히 40·60 인 한 점에서 한 칸 어긋난다. 의도된 것이고, 앱은 둘을 각자 그리면 된다 |
-| 7 | `days[].skinScore`(그 날 분석이 없으면 그 날 첫 Plate 채점 당시 점수로 폴백돼 **항상 존재**) ↔ `skinScoreTrend[]`(분석이 있는 날짜만) | 히스토리엔 점수가 있는데 트렌드 그래프엔 그 날짜가 없는 게 정상이다. 앱은 history 의 skinScore 를 "그날의 측정"이 아니라 **기준(baseline) 점수**로 라벨링한다 |
+| 7 | `days[].skinScore`(그 날 분석이 없으면 그 날 첫 Plate 채점 당시 점수로 폴백돼 **항상 존재**) | 앱은 history 의 skinScore 를 "그날의 측정"이 아니라 **기준(baseline) 점수**로 라벨링한다. ~~`skinScoreTrend[]` 와의 대조~~ 는 없어졌다 — 그 배열을 내려보내던 `GET /reports?period=` 가 삭제됐다(2026-08-17). 피부 점수 추이를 다시 그려야 하면 새 엔드포인트를 만드는 것이지, 없는 필드를 찾을 일이 아니다 |
 
 ---
 
