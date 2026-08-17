@@ -1,5 +1,13 @@
 # 히스토리 · 리포트 백엔드 구현 계획
 
+> ### ⚠️ 이 계획은 완료됐고, 리포트 부분은 그 뒤 삭제됐다 (2026-08-17)
+>
+> **다시 실행하지 마라.** 이 문서에 통째로 실린 `ReportService` · `ReportResponse` · `ReportPeriod` · `PenaltyDto` · `MealDto` · `TrendPointDto` · `ReportServiceTest` 와 `DateRange.today()` 는 **전부 삭제된 코드**다. 앱이 `GET /reports/daily` · `GET /reports/weekly` 로 옮겨 가면서 `GET /reports?period=` 를 읽는 곳이 없어졌고, 두 응답의 "이번 주 평균"이 정의가 달라(끼니 평균 vs 일 평균의 평균) 함께 두면 화면마다 다른 숫자가 뜬다.
+>
+> 이 문서의 `Create:` 단계를 그대로 따르면 지운 500줄이 되살아난다. **살아 있는 계약은 `SkinPlate_DTO_Domain.md` 계약 대조표**이고, 현재 구조는 PRD §18.11 에 있다. 히스토리(`GET /plates?from=&to=`) 부분은 그대로 유효하다.
+>
+> 본문은 그때의 기록으로 남긴다 — 지우면 왜 그렇게 만들었다가 왜 접었는지가 사라진다.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 이미 저장된 데이터만으로 히스토리·오늘의 기록·리포트를 서빙하는 조회 전용 API 두 개를 만든다.

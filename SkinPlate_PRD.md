@@ -2040,7 +2040,7 @@ public class Recommendation extends BaseTimeEntity {
 | 11-b | **GET** | **`/skin-insights`** | ✅ | **개인화 피부 인사이트 (지표 × 생활 습관)** | **P1** |
 | 12 | GET | `/health` | — | 헬스체크 | P0 |
 | 13 | GET | `/plates?from=&to=` | ✅ | 날짜별 식단 기록 (히스토리) | P1 |
-| 14 | GET | `/reports?period=` | ✅ | 오늘·이번 주 리포트 (구 기록 화면용 · 유지) | P1 |
+| ~~14~~ | ~~GET~~ | ~~`/reports?period=`~~ | — | **삭제됨(2026-08-17)** — 앱이 `/reports/daily`·`/reports/weekly` 로 옮겨 가 읽는 곳이 없어졌다. 두 응답의 "이번 주 평균"은 정의가 달라(끼니 평균 vs 일 평균의 평균) 함께 두면 화면마다 다른 숫자가 뜬다 | — |
 | 14-b | **GET** | **`/reports/daily?date=`** | ✅ | **일일 리포트 (생략 시 오늘 KST)** | **P1** |
 | 14-c | **GET** | **`/reports/weekly?from=&to=`** | ✅ | **주간 리포트 — 일일 리포트를 집계한다 (생략 시 최근 7일)** | **P1** |
 

@@ -6785,7 +6785,7 @@ if (_consecutiveFailures >= 3) {
 | `POST /plates/{id}/simulate` | `PlateSimulateResponse` | `plateId` · `beforeScore` · `afterScore` · `appliedActions[]` · `removedRules[]` · `summary` | `PlateSimulationDto` |
 | `POST /plates/simulate` | `PlateAnalysisSimulateResponse` | `beforeScore` · `afterScore` · `appliedActions[]` · `removedRules[]` · `summary` — **`plateId` 없음(저장 전, analysisToken 이 대상을 지목)** | `PlateSimulationDto` |
 | `GET /plates?from=&to=` | `PlateHistoryResponse` | `days[{date, skinScore, **plateScore**, **targetScore**, **aiComment**(없으면 키 생략), plates[{plateId, foodName, plateScore, **mealType**, recordedAt}]}]` — **기록 없는 날은 `days[]` 에 항목 자체가 없다** | `PlateHistoryDto` |
-| `GET /reports?period=` | `ReportResponse` | `period` · `from` · `to` · `latestSkinScore` · `skinScoreTrend[]` · `recordCount` · `averagePlateScore` · `penalties[]` · `meals[]` | *(앱 미사용 — 주간 화면이 `/reports/weekly` 로 옮겨 갔다. `averagePlateScore`(끼니 평균)와 `averageDailyScore`(일 평균의 평균)는 정의가 달라 함께 쓰면 화면마다 다른 숫자가 뜬다)* |
+| ~~`GET /reports?period=`~~ | — | **삭제됨(2026-08-17)** — 앱이 `/reports/daily`·`/reports/weekly` 로 옮겨 가 읽는 곳이 없어졌다. `averagePlateScore`(끼니 평균)와 `averageDailyScore`(일 평균의 평균)는 정의가 달라 함께 두면 화면마다 다른 숫자가 뜬다 | — |
 | `GET /reports/daily?date=` | `DailyReportResponse` | `date` · `dailyScore`(기록 없으면 키 생략) · `grade` · `recordCount` · `nutrition[{nutrient,label,unit,amount,target,percent,status,higherIsWorse}]` · `concerns[{concern,label,score,status}]` · `meals[{plateId,foodName,plateScore,mealType,recordedAt}]` · `aiComment`(없으면 키 생략) · `goodPoints[]` · `improvePoints[]` — **`date` 생략 시 서버의 오늘(KST)** | `DailyReportDto` → `DailyReport` |
 | `GET /reports/weekly?from=&to=` | `WeeklyReportResponse` | `from` · `to` · `averageDailyScore`(기록 없으면 키 생략) · `grade` · `totalDays` · `recordedDays` · `recordCount` · `dailyScores[{date,dailyScore,grade}]` · `nutrition[]`(일일과 같은 모양 · **기록일 하루 평균**) · `concerns[{…,changeFromFirstDay}]`(기록일 1일이면 키 생략 · **`score`(기간 평균)와 축이 다르다**) · `bestDay` · `worstDay` · `aiComment{goodPoint,improvePoint,habit,nextWeek}`(생성 실패 시 키 생략) — **둘 다 생략 시 오늘 포함 7일 · 기록 없는 날은 `dailyScores[]` 에 없다** | `WeeklyReportDto` → `WeeklyReport` |
 | `GET /recommendations` | `RecommendationResponse` | `skinAnalysisId` · `recommend[]` · `avoid[]` · `generatedAt` | `RecommendationDto` |
@@ -6812,7 +6812,7 @@ if (_consecutiveFailures >= 3) {
 | 8 | `skinType`(AI 관찰) 과 `skinTypeGap.observed`(규칙 도출) | **다른 값이고 갈릴 수 있다.** 갭 카드는 `observed` 를, 타입 칩은 `skinType` 을 쓴다 |
 | 9 | `skinType` · `skinAge` 키가 **없는 것** | 이 기능 이전에 저장된 분석이거나 AI 응답이 쓸 수 없는 경우다. 두 카드를 통째로 숨긴다 — 빈 값으로 그리지 않는다 |
 | 10 | `metricDetails[].level` 과 `highlights[].status` | 같은 지표라도 <b>등급은 5단, 뱃지는 3단</b>이라 경계가 정확히 40·60 인 한 점에서 한 칸 어긋난다. 의도된 것이고, 앱은 둘을 각자 그리면 된다 |
-| 7 | `days[].skinScore`(그 날 분석이 없으면 그 날 첫 Plate 채점 당시 점수로 폴백돼 **항상 존재**) ↔ `skinScoreTrend[]`(분석이 있는 날짜만) | 히스토리엔 점수가 있는데 트렌드 그래프엔 그 날짜가 없는 게 정상이다. 앱은 history 의 skinScore 를 "그날의 측정"이 아니라 **기준(baseline) 점수**로 라벨링한다 |
+| 7 | `days[].skinScore`(그 날 분석이 없으면 그 날 첫 Plate 채점 당시 점수로 폴백돼 **항상 존재**) | 앱은 history 의 skinScore 를 "그날의 측정"이 아니라 **기준(baseline) 점수**로 라벨링한다. ~~`skinScoreTrend[]` 와의 대조~~ 는 없어졌다 — 그 배열을 내려보내던 `GET /reports?period=` 가 삭제됐다(2026-08-17). 피부 점수 추이를 다시 그려야 하면 새 엔드포인트를 만드는 것이지, 없는 필드를 찾을 일이 아니다 |
 
 ---
 

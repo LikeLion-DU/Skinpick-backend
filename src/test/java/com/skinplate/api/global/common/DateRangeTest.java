@@ -41,12 +41,6 @@ class DateRangeTest {
     }
 
     @Test
-    @DisplayName("오늘은 KST 기준이다 — 시스템 시간대를 따르지 않는다")
-    void todayIsKst() {
-        assertThat(DateRange.today().fromDate()).isEqualTo(LocalDate.now(DateRange.KST));
-    }
-
-    @Test
     @DisplayName("from 이 to 보다 뒤면 400 이다 — 조용히 빈 배열을 주지 않는다")
     void reversedRangeIsRejected() {
         assertThatThrownBy(() -> DateRange.of(LocalDate.of(2026, 8, 14), LocalDate.of(2026, 8, 8)))

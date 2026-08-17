@@ -2,11 +2,8 @@ package com.skinplate.api.domain.report;
 
 import com.skinplate.api.domain.report.controller.ReportController;
 import com.skinplate.api.domain.report.dto.DailyReportResponse;
-import com.skinplate.api.domain.report.dto.ReportPeriod;
-import com.skinplate.api.domain.report.dto.ReportResponse;
 import com.skinplate.api.domain.report.dto.WeeklyReportResponse;
 import com.skinplate.api.domain.report.service.DailyReportService;
-import com.skinplate.api.domain.report.service.ReportService;
 import com.skinplate.api.domain.report.service.WeeklyReportService;
 import com.skinplate.api.domain.skin.entity.SkinLevel;
 import com.skinplate.api.global.exception.GlobalExceptionHandler;
@@ -34,46 +31,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 class ReportControllerTest {
 
-    private final ReportService reportService = mock(ReportService.class);
     private final DailyReportService dailyReportService = mock(DailyReportService.class);
     private final WeeklyReportService weeklyReportService = mock(WeeklyReportService.class);
 
     private final MockMvc mockMvc = MockMvcBuilders
-            .standaloneSetup(new ReportController(
-                    reportService, dailyReportService, weeklyReportService))
+            .standaloneSetup(new ReportController(dailyReportService, weeklyReportService))
             .setCustomArgumentResolvers(new StubCurrentUserResolver())
             .setControllerAdvice(new GlobalExceptionHandler())
             .build();
-
-    @Test
-    @DisplayName("period=WEEK 이면 주간 집계를 부르고 봉투에 담아 돌려준다")
-    void weekReport() throws Exception {
-        given(reportService.get(eq(1L), eq(ReportPeriod.WEEK))).willReturn(
-                new ReportResponse(ReportPeriod.WEEK, LocalDate.of(2026, 8, 8),
-                        LocalDate.of(2026, 8, 14), 72, List.of(), 12, 68, List.of(), List.of()));
-
-        mockMvc.perform(get("/api/v1/reports").param("period", "WEEK"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.data.recordCount").value(12))
-                .andExpect(jsonPath("$.data.averagePlateScore").value(68));
-    }
-
-    @Test
-    @DisplayName("period 가 없으면 400 이다")
-    void missingPeriod() throws Exception {
-        mockMvc.perform(get("/api/v1/reports"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error.code").value("INVALID_INPUT"));
-    }
-
-    @Test
-    @DisplayName("모르는 period 는 400 이다 — 500 으로 새지 않는다")
-    void unknownPeriod() throws Exception {
-        mockMvc.perform(get("/api/v1/reports").param("period", "MONTH"))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error.code").value("INVALID_INPUT"));
-    }
 
     @Test
     @DisplayName("date 를 생략하면 서비스에 null 이 그대로 넘어간다 — 오늘 판정은 서버가 한다")
