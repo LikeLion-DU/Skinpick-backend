@@ -51,6 +51,20 @@ public final class StandardFoodTable {
      */
     private static final Map<String, StandardFood> TABLE = new HashMap<>();
 
+    /**
+     * 같은 음식의 흔한 표기 차이. AI 는 "돈까스"라고 답하는데 공공데이터는 "돈가스"만 있고,
+     * 그러면 조회가 뒤 낱말로 밀려 <b>재료 이름("돼지고기")에 걸린다</b> — 돈가스가 고기구이
+     * 영양값(650kcal)을 받는다. 실사진 E2E 에서 실제로 그렇게 됐다.
+     *
+     * <p><b>판정이 아니라 철자다.</b> 여기에 다른 음식을 이어 붙이지 마라 — "라멘 → 라면"은
+     * 표기 차이가 아니라 다른 음식이고, 그 줄이 생기는 순간 이 표는 앱이 만든 판정 규칙이 된다.
+     */
+    private static final Map<String, String> SPELLINGS = Map.of(
+            "돈까스", "돈가스",
+            "돈카츠", "돈가스",
+            "떡뽁이", "떡볶이",
+            "떡뽀끼", "떡볶이");
+
     static {
         load();
     }
@@ -161,7 +175,7 @@ public final class StandardFoodTable {
     public static Optional<StandardFood> find(String foodName) {
         if (foodName == null || foodName.isBlank()) return Optional.empty();
 
-        String trimmed = foodName.trim();
+        String trimmed = normalizeSpelling(foodName.trim());
 
         StandardFood exact = TABLE.get(trimmed);
         if (exact != null) return Optional.of(exact);
@@ -172,7 +186,11 @@ public final class StandardFoodTable {
         // 회차마다 다른 영양값을 받는다. 나열의 첫 조각이 본체다.
         String head = trimmed.split("(와|과)\\s|,")[0].trim();
         if (!head.equals(trimmed)) {
-            Optional<StandardFood> byHead = findInPhrase(head);
+            // 첫 조각에서는 **마지막 낱말만** 본다. 앞 낱말까지 훑으면 "소스가 뿌려진
+            // 돼지고기 돈까스" 가 돈가스를 못 찾았을 때 "돼지고기"(고기구이 650kcal)로
+            // 떨어진다 — 못 찾는 것보다 나쁘다. 못 찾으면 아래에서 이름 전체를 훑는다.
+            String[] headWords = head.split("\\s+");
+            Optional<StandardFood> byHead = findSuffix(headWords[headWords.length - 1]);
             if (byHead.isPresent()) return byHead;
         }
 
@@ -188,15 +206,31 @@ public final class StandardFoodTable {
     private static Optional<StandardFood> findInPhrase(String phrase) {
         String[] words = phrase.split("\\s+");
         for (int i = words.length - 1; i >= 0; i--) {
-            // 접미사를 긴 쪽부터 찍어 본다. "김치찌개"와 "찌개"가 둘 다 있으면 긴 쪽이
-            // 먼저 나오므로, 모든 찌개가 같은 값을 받는 일이 없다.
-            String word = words[i];
-            for (int start = 0; start < word.length(); start++) {
-                StandardFood hit = TABLE.get(word.substring(start));
-                if (hit != null) return Optional.of(hit);
-            }
+            Optional<StandardFood> hit = findSuffix(words[i]);
+            if (hit.isPresent()) return hit;
         }
         return Optional.empty();
+    }
+
+    /**
+     * 접미사를 긴 쪽부터 찍어 본다. "김치찌개"와 "찌개"가 둘 다 있으면 긴 쪽이 먼저
+     * 나오므로, 모든 찌개가 같은 값을 받는 일이 없다.
+     */
+    private static Optional<StandardFood> findSuffix(String word) {
+        for (int start = 0; start < word.length(); start++) {
+            StandardFood hit = TABLE.get(word.substring(start));
+            if (hit != null) return Optional.of(hit);
+        }
+        return Optional.empty();
+    }
+
+    /** 표기 차이를 표준 이름으로 되돌린다. 낱말 단위로만 바꾼다. */
+    private static String normalizeSpelling(String name) {
+        String normalized = name;
+        for (Map.Entry<String, String> spelling : SPELLINGS.entrySet()) {
+            normalized = normalized.replace(spelling.getKey(), spelling.getValue());
+        }
+        return normalized;
     }
 
     /** 조회 가능한 이름의 수. 기동 로그와 적재 테스트가 본다. */

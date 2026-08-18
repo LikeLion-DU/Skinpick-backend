@@ -68,6 +68,23 @@ class FoodAnalysisHardeningTest {
                 .contains("김치찌개");
     }
 
+    /**
+     * AI 는 "돈까스"라고 답하는데 공공데이터에는 "돈가스"만 있다. 그러면 조회가 뒤 낱말로
+     * 밀려 재료 이름에 걸린다 — 돈가스가 고기구이 영양값(650kcal)을 받는다.
+     * 실사진 E2E 에서 실제로 그렇게 됐고, 같은 사진이 59점과 66점을 오갔다.
+     */
+    @Test
+    @DisplayName("표기가 달라도 같은 음식을 찾고, 못 찾을 때 재료 이름으로 떨어지지 않는다")
+    void spellingVariants_resolveWithoutFallingBackToIngredients() {
+        assertThat(StandardFoodTable.find("돈까스").orElseThrow().name()).contains("돈가스");
+        assertThat(StandardFoodTable.find("소스가 뿌려진 돼지고기 돈까스와 양배추 샐러드")
+                .orElseThrow().name()).contains("돈가스");
+
+        // 첫 조각의 마지막 낱말만 본다 — 앞 낱말(재료)로 떨어지면 완전히 다른 음식이 된다.
+        assertThat(StandardFoodTable.find("돼지고기 정체불명요리와 샐러드")
+                .orElseThrow().name()).doesNotContain("돼지고기");
+    }
+
     @Test
     @DisplayName("낱말 가운데에 키가 들어간 다른 음식은 잡지 않는다 — 부대찌개가 라면 값을 받으면 안 된다")
     void otherDishes_areNotSubstituted() {
