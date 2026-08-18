@@ -2126,7 +2126,11 @@ declared OILY ≠ observed DRY  →  SPECIAL["OILY→DRY"]
 
 ## 1.13 domain/food
 
-> *(2026-08-17 — 아래 코드 블록은 그때의 기록이다. 저장소가 더 최신이다: `FoodTraits`(관찰 특성 5종 @Embeddable)·`FoodAnalysis.assignTraits/getTraits`·`Nutrition.isVeryHighSugar/isVeryHighSodium` 가 빠져 있다. 실제 코드는 `domain/food/entity/` 를 본다.)*
+> *(2026-08-18 재캘리브레이션 — 아래 코드 블록은 2026-08-17 시점의 기록이다. 저장소가 더 최신이다.*
+> *① `FoodTraits`(관찰 특성 5종 @Embeddable)·`FoodAnalysis.assignTraits/getTraits` 가 빠져 있다.*
+> *② **아래 `Nutrition` 의 임계값 셋은 전부 옛 값이다** — 나트륨 1500→**1150**, 당류 25→**15**, 열량 900→**660** 으로 내려갔고 셋 다 단계형이 됐다(`sodiumTierOf`·`sugarTierOf`·`calorieTierOf`). 비례 감점용 `sodiumExcessMg()` 는 없어졌다.*
+> *③ 표준 영양 확장 다섯(`saturatedFatG`·`fiberG`·`vitaminAUg`·`vitaminCMg`·`zincMg`)과 `withMicronutrients` 가 빠져 있다.*
+> ***이 블록의 숫자를 그대로 옮기면 재캘리브레이션이 되돌아간다.** 임계값은 PRD §18.6 과 `domain/food/entity/Nutrition.java` 가 원본이다.)*
 
 **`domain/food/entity/CookingMethod.java`**
 
@@ -2228,6 +2232,12 @@ public class Nutrition {
 ```
 
 > **영양 임계값을 `Nutrition` 안에 둔 이유** — `RuleConstants`에 몰아넣을 수도 있지만, "나트륨이 많은가"는 영양 정보 자신이 대답할 수 있는 질문이다. 룰은 판단(감점 몇 점, 무슨 문구)에 집중하고, 사실 확인은 값 객체가 한다.
+
+> *(2026-08-18 결정론 개편 — 아래 `FoodIngredient`·`FoodAnalysis` 블록은 그 이전 기록이다.
+> 저장소가 더 최신이다: `FoodIngredient.fromStandard`(+`fromStandardTable`/`copyOf`),
+> `FoodAnalysis.standardFoodName`·`isStandardMatched()`·`scoringTraits()` 가 빠져 있고,
+> **`hasTag()` 의 의미가 정반대다** — 지금은 표준 유래 재료만 본다(§1.22.1).
+> 이 블록의 `hasTag` 를 그대로 옮기면 AI 태그가 다시 점수에 섞인다.)*
 
 **`domain/food/entity/FoodIngredient.java`**
 
@@ -3710,7 +3720,7 @@ public record PlateSimulateResponse(
 | `LESS_SPICY` | `food.getIngredients().removeIf(i -> i.getTag() == CAPSAICIN)` | `orphanRemoval = true` 이므로 커밋 시 **`food_ingredient`에서 고춧가루 행이 DELETE** 된다 |
 | `HALVE_SOUP` | `nutrition.sodiumMg /= 2` | `@Embedded` 필드라 **`food_analysis.sodium_mg`가 925로 영구 변경** 된다 |
 
-무대에서 **[매운 양념 덜어내기]를 누르면 60 → 72가 뜨고, 뒤로 갔다 다시 들어오면 원래 점수가 72다.** 시연 데이터가 조용히 파괴되고, 원인을 그 자리에서 찾을 수 없다.
+무대에서 **[매운 양념 덜어내기]를 누르면 58 → 70이 뜨고, 뒤로 갔다 다시 들어오면 원래 점수가 70이다.** 시연 데이터가 조용히 파괴되고, 원인을 그 자리에서 찾을 수 없다.
 
 **반드시 detached 복사본으로 계산한다.**
 
@@ -3757,7 +3767,7 @@ private FoodAnalysis simulate(FoodAnalysis origin, List<PlateActionCode> actions
             !lessSpicy && origin.isSpicy(),
             "{}");
 
-    origin.getIngredients().stream()
+    origin.getIngredients().stream()   // ← 실제 코드는 FoodIngredient.copyOf 를 쓴다(출처 보존)
             .filter(i -> !(lessSpicy && i.getTag() == IngredientTag.CAPSAICIN))
             .forEach(i -> copy.addIngredient(FoodIngredient.of(i.getName(), i.getTag())));
 
@@ -3776,7 +3786,9 @@ private Nutrition adjustNutrition(Nutrition n, List<PlateActionCode> actions) {
 
 > **`readOnly = true`가 핵심 안전망이다.** 누군가 실수로 원본을 건드려도 Hibernate가 `FlushMode.MANUAL`로 동작해 변경이 DB로 나가지 않는다. 주석에 "저장하지 않는다"라고 적어두는 것만으로는 부족하다 — **문제는 저장 여부가 아니라 관리 엔티티를 만지는 것 자체**다.
 >
-> `REMOVE_BATTER`의 영양 조정에서 `fatG`는 손대지 않았다. **어떤 룰도 `fatG`를 보지 않기 때문에 점수에 영향이 0이다.** 실제 효과는 `cookingMethod = GRILLED`로 R07이 꺼지는 것뿐이다. 없는 효과를 문서에 적어두면 나중에 "왜 지방을 줄였는데 점수가 그대로냐"를 디버깅하게 된다.
+> `REMOVE_BATTER`의 영양 조정에서 지방은 손대지 않는다. 2026-08-18 이전에는 "어떤 룰도 지방을 보지 않아 영향이 0"이 이유였지만, 지금은 **R11이 포화지방을 본다**. 그래도 안 건드리는 이유가 바뀌었을 뿐이다 — 튀김옷을 걷어낸 뒤의 포화지방을 이 앱이 알 방법이 없다. 없는 숫자를 지어내 깎는 것보다 안 건드리는 편이 설명 가능하다. 실제 효과는 `cookingMethod = GRILLED`로 R07이 꺼지는 것뿐이다.
+>
+> **확장 영양 다섯 개(V9)는 사본으로 그대로 옮긴다.** 빠뜨리면 시뮬레이션의 `beforeScore`가 저장 점수와 갈라진다 — 원본에 포화지방이 있는데 사본은 0이라 R11이 통째로 사라진다.
 
 ---
 
@@ -3874,6 +3886,8 @@ public record OpenAiFoodResult(
 ### 1.21.1 상수
 
 **`domain/plate/engine/RuleConstants.java`**
+
+> *(2026-08-18 재캘리브레이션 — 아래 블록은 2026-08-17 시점의 기록이다. 저장소가 더 최신이다: 나트륨·열량이 계단형이 되고 R11(포화지방)·R12(정제 탄수)·R14(오메가3)·R15(식이섬유)가 들어왔으며, `GAIN_SOUP_HALF`·`GAIN_LESS_RICE` 는 상수가 아니라 룰이 단계 변화로 계산한다. **최종 룰표는 PRD §18.6, 실제 코드는 `plate/engine/RuleConstants.java` 를 본다.**)*
 
 ```java
 package com.skinplate.api.domain.plate.engine;
@@ -4623,14 +4637,14 @@ class PlateRuleEngineTest {
 > **바뀐 이력** — 처음에는 시연 3종만 든 `StandardNutrition`(하드코딩 `LinkedHashMap`)이었다.
 > 지금은 공공데이터 **1,452종**이다. `StandardNutrition` 은 **삭제됐다** — 다시 만들지 마라.
 
-**왜 필요한가.** 룰 엔진은 `nutrition.sodiumMg` 를 1500과 비교한다. 그런데 그 1850mg 은
+**왜 필요한가.** 룰 엔진은 `nutrition.sodiumMg` 를 1150/1700/2300 단계와 비교한다. 그런데 그 1850mg 은
 AI가 사진을 보고 추정한 값이라 호출할 때마다 흔들린다.
 
 | AI 추정 나트륨 | 결과 |
 |---|---|
-| 1400 | R04 미발동 → 68점 |
-| 1850 | 60점 |
-| 2100 | 59점 |
+| 1000 | R04 미발동 → 66점 |
+| 1850 | 2단계 −8 → 58점 |
+| 2400 | 3단계 −12 → 54점 |
 
 같은 사진, 같은 사람, 세 번 다른 점수다. 심사위원의 첫 질문이 이것이고, 현장에서 두 번 찍으면 들킨다.
 
@@ -4653,14 +4667,20 @@ AI가 사진을 보고 추정한 값이라 호출할 때마다 흔들린다.
 부대찌개에 라면 영양값이 들어가기 때문이다. 접미사를 긴 쪽부터 보므로 `Map` 순회 순서에
 기대지 않는다(구 N10 리스크 해소).
 
-**AI 와 표준값 중 누가 이기는가 — 필드마다 다르다.**
+**AI 와 표준값 중 누가 이기는가 — 2026-08-18 부터 표준 DB 가 전부 이긴다.**
 
-| 필드 | 이기는 쪽 | 왜 |
+예전에는 필드마다 달랐다. 조리법은 `ETC` 면 AI 가 이기고, 매운맛은 둘의 OR 이고, 재료 태그는
+둘 다 점수에 섰다. 그 틈이 정확히 **같은 사진이 다른 점수를 내는 통로**였다 — 실사진 E2E 에서
+떡볶이 한 장이 50 · 54 · 55 · 58 점을 냈고, 원인은 AI 태그(ANTIOXIDANT ±5 · PROBIOTIC ±4)와
+관찰 강도(HOT↔MEDIUM ±4)였다.
+
+| 필드 | 표준 DB 에서 찾았을 때 | 못 찾았을 때 |
 |---|---|---|
-| 영양값 | **표준 DB 항상** | 룰이 비교하는 숫자가 그것뿐이다. 원본에 없는 항목만 AI 추정치로 남는다 |
-| 조리법 | 표준 DB — 단 `ETC` 면 AI | `ETC` 는 "아니다"가 아니라 "이름만 봐서는 모르겠다"다. 비빔국수·막국수처럼 국물 여부를 이름으로 못 가리는 것은 스크립트가 일부러 `ETC` 로 둔다 |
-| 매운맛 | 둘의 OR | `spicy=false` 는 이름에 매운 낱말이 없다는 뜻이지 안 맵다는 증거가 아니다 |
-| 재료 태그 | 둘 다 — AI 먼저, 표준이 보탬 | 사진에는 이름에 없는 재료가 보이고(두부), 이름에는 AI 가 놓치는 태그가 있다(김치→발효) |
+| 영양값 | **표준 DB** (원본에 없는 항목만 AI 추정치) | AI 추정치 |
+| 조리법 | **표준 DB** — `ETC` 여도 AI 답을 쓰지 않는다 | AI |
+| 매운맛 | **표준 DB** — OR 하지 않는다 | AI |
+| 재료 태그 | **표준 DB 태그만 점수에 선다.** AI 재료는 화면·AI 코멘트에 그대로 남는다 | 태그 룰 전부 꺼짐 |
+| 강도 계수(spiciness·oiliness) | **쓰지 않는다** (`scoringTraits()` → UNKNOWN) | AI 관찰값 |
 
 ```java
 // FoodAnalysisService.toEntity()
@@ -4668,10 +4688,25 @@ Optional<StandardFood> standard = StandardFoodTable.find(foodName);
 
 Nutrition nutrition = standard.map(food -> food.toNutrition(aiNutrition)).orElse(aiNutrition);
 CookingMethod cookingMethod = standard.map(StandardFood::cookingMethod)
-        .filter(method -> method != CookingMethod.ETC)
         .orElseGet(() -> toCookingMethod(aiResult.cookingMethod()));
-boolean spicy = standard.map(StandardFood::spicy).orElse(false) || aiResult.spicy();
+boolean spicy = standard.map(StandardFood::spicy).orElseGet(aiResult::spicy);
+
+// 매칭된 이름을 남긴다 — 엔티티 혼자 "점수가 표준표에서 왔는가"를 알 수 있어야
+// 저장된 기록을 다시 평가하는 시뮬레이션도 같은 판단을 한다.
+standard.ifPresent(matched -> food.assignStandardFoodName(matched.name()));
 ```
+
+**점수용 태그와 표시용 재료를 가른다.** `FoodIngredient.fromStandard` 가 그 표시다.
+`FoodAnalysis.hasTag()` 는 표준 유래 재료만 보고, 화면·DTO 는 전부 본다. 같은 태그를 둘 다
+알면 그 줄을 표준 확정으로 **승격**해 이름은 AI 쪽("쌀떡")을 유지한다 — 지우고 표준 이름으로
+새로 넣으면 화면의 재료 이름이 음식 이름으로 바뀐다. 표준 태그에는 재료 개수 상한을 걸지
+않는다. 상한에 막혀 잘리면 그 룰이 꺼져 점수가 "AI 가 재료를 몇 개 적었는가"에 다시 매달린다.
+
+> **이름 조회의 두 함정.** 뒤 낱말부터 보는 규칙은 나열("돈가스와 양배추 샐러드")에서
+> 곁들임이 본체를 이기게 만들고, 첫 조각을 믿는 규칙은 수식절("돼지고기와 채소가 들어간
+> 김치찌개")에서 재료가 본체를 이기게 만든다. 둘 다 실제로 겪었다 — 후자는 김치찌개에
+> 돼지고기 650kcal 을 물린다. 수식 표지(`들어간`·`곁들인`·`넣은` …)가 보이면 첫 조각
+> 지름길을 쓰지 않는 것이 지금 규칙이다. 표기 차이(`돈까스`→`돈가스`)는 별도 표로 흡수한다.
 
 **정직성.** 숨기지 않는다. 화면에 "표준 영양 DB 기준"이라고 표기하고, "AI는 무슨 음식인지
 판단하고, 영양값은 표준 DB에서 가져옵니다"라고 설명한다. 오히려 이게 강점이 된다 —
@@ -6023,9 +6058,9 @@ class SkinPlate {
   /// 여기에 potentialScore(= plateScore + expectedGain 합산) 같은 게터를 만들지 마라.
   /// 합산은 실제 재계산과 일치하지 않는다.
   ///
-  ///   예시 A 합산: 60 + 8 + 6 = 74   ← 어디에도 없는 숫자
-  ///   실제 재계산: 국물만 절반 → 68  (나트륨 925mg이 되어 R04가 아예 미발동)
-  ///                둘 다 실행  → 80
+  ///   예시 A 합산: 58 + 8 + 6 = 72   ← 어디에도 없는 숫자
+  ///   실제 재계산: 국물만 절반 → 66  (나트륨 925mg이 되어 R04가 아예 미발동)
+  ///                둘 다 실행  → 78
   ///
   /// "실행하면 몇 점"은 POST /plates/{id}/simulate 로 서버에 물어본다.
 }

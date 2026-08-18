@@ -51,6 +51,88 @@ class FoodAnalysisHardeningTest {
                 .contains("라면");
     }
 
+    /**
+     * AI 는 접시 전체를 나열해 답하기도 한다. 그때 뒤 낱말부터 보는 규칙만 있으면
+     * 곁들임이 본체를 이긴다 — 실사진 E2E 에서 돈가스 한 장이 회차에 따라 704kcal(돈가스)과
+     * 293kcal(샐러드)을 오갔고, 그게 59점과 68점의 차이였다.
+     */
+    @Test
+    @DisplayName("곁들임을 나열한 이름은 본체를 찾는다 — 돈가스가 샐러드 값을 받으면 안 된다")
+    void garnishPhrases_resolveToTheMainDish() {
+        assertThat(StandardFoodTable.find("소스가 뿌려진 돼지고기 돈가스와 양배추 샐러드")
+                .orElseThrow().name()).contains("돈가스");
+        assertThat(StandardFoodTable.find("김치찌개와 공기밥").orElseThrow().name())
+                .contains("김치찌개");
+        // 나열이 없으면 규칙은 그대로다 — 핵심 낱말은 여전히 뒤에 온다.
+        assertThat(StandardFoodTable.find("돼지고기 김치찌개").orElseThrow().name())
+                .contains("김치찌개");
+    }
+
+    /**
+     * 나열("A와 B")과 수식절("A와 B가 들어간 C")은 정반대다 — 앞이 본체인 쪽과 뒤가 본체인
+     * 쪽. 수식절에서 첫 조각을 믿으면 김치찌개가 돼지고기(650kcal) 영양값을 받고,
+     * 그 뒤로는 표준 매칭이 확정돼 AI 태그까지 눌려 틀린 답이 결정론적으로 굳는다.
+     */
+    @Test
+    @DisplayName("수식절은 나열이 아니다 — 재료가 앞에 와도 뒤의 본체를 찾는다")
+    void modifierClauses_resolveToTheTrailingDish() {
+        assertThat(StandardFoodTable.find("돼지고기와 채소가 들어간 김치찌개")
+                .orElseThrow().name()).contains("김치찌개");
+        assertThat(StandardFoodTable.find("두부와 돼지고기를 넣은 김치찌개")
+                .orElseThrow().name()).contains("김치찌개");
+        assertThat(StandardFoodTable.find("양배추와 소스를 곁들인 돈가스")
+                .orElseThrow().name()).contains("돈가스");
+
+        // 나열은 그대로 첫 조각이 본체다.
+        assertThat(StandardFoodTable.find("돈가스와 양배추 샐러드")
+                .orElseThrow().name()).contains("돈가스");
+
+        // **수식 표지는 첫 조각 뒤에서만 찾는다.** 이름 전체에서 찾으면 앞을 꾸미는 말까지
+        // 지름길을 꺼서, 곁들임인 샐러드(293kcal)가 다시 본체 돈가스(704kcal)를 이긴다.
+        assertThat(StandardFoodTable.find("소스가 올라간 돈가스와 양배추 샐러드")
+                .orElseThrow().name()).contains("돈가스");
+        assertThat(StandardFoodTable.find("치즈가 얹은 돈가스와 샐러드")
+                .orElseThrow().name()).contains("돈가스");
+    }
+
+    /**
+     * AI 는 "돈까스"라고 답하는데 공공데이터에는 "돈가스"만 있다. 그러면 조회가 뒤 낱말로
+     * 밀려 재료 이름에 걸린다 — 돈가스가 고기구이 영양값(650kcal)을 받는다.
+     * 실사진 E2E 에서 실제로 그렇게 됐고, 같은 사진이 59점과 66점을 오갔다.
+     */
+    @Test
+    @DisplayName("표기가 달라도 같은 음식을 찾고, 못 찾을 때 재료 이름으로 떨어지지 않는다")
+    void spellingVariants_resolveWithoutFallingBackToIngredients() {
+        assertThat(StandardFoodTable.find("돈까스").orElseThrow().name()).contains("돈가스");
+        assertThat(StandardFoodTable.find("소스가 뿌려진 돼지고기 돈까스와 양배추 샐러드")
+                .orElseThrow().name()).contains("돈가스");
+
+        // 첫 조각의 마지막 낱말만 본다 — 앞 낱말(재료)로 떨어지면 완전히 다른 음식이 된다.
+        assertThat(StandardFoodTable.find("돼지고기 정체불명요리와 샐러드")
+                .orElseThrow().name()).doesNotContain("돼지고기");
+    }
+
+    /**
+     * 실사진 E2E 에서 돈가스 사진 한 장에 AI 가 붙인 이름 전부다. 다섯 가지로 불렸고
+     * 그중 둘이 다른 음식(샐러드 293kcal · 돼지고기 650kcal)으로 잡혀 같은 사진이
+     * 59 · 66 · 68 점을 오갔다. 이름이 흔들려도 같은 표준 음식에 닿아야 점수가 하나로 모인다.
+     */
+    @Test
+    @DisplayName("같은 사진에 붙은 이름이 다섯 가지여도 전부 같은 표준 음식에 닿는다")
+    void observedNameVariants_allResolveToTheSameDish() {
+        List<String> observed = List.of(
+                "돈가스 정식",
+                "소스 돈가스",
+                "소스가 뿌려진 돼지고기 돈가스",
+                "소스 돈가스와 양배추 샐러드",
+                "소스가 뿌려진 돼지고기 돈까스와 양배추 샐러드");
+
+        assertThat(observed)
+                .allSatisfy(name -> assertThat(StandardFoodTable.find(name).orElseThrow().name())
+                        .as(name)
+                        .isEqualTo("돈가스"));
+    }
+
     @Test
     @DisplayName("낱말 가운데에 키가 들어간 다른 음식은 잡지 않는다 — 부대찌개가 라면 값을 받으면 안 된다")
     void otherDishes_areNotSubstituted() {
@@ -94,28 +176,36 @@ class FoodAnalysisHardeningTest {
     }
 
     @Test
-    @DisplayName("표준 DB 의 ETC 는 '아니다'가 아니라 '모르겠다' — 사진을 본 AI 답을 지우지 않는다")
-    void cookingMethod_etcDoesNotOverwriteAi() {
+    @DisplayName("표준 DB 에서 찾으면 조리법도 표준값이 이긴다 — ETC 여도 AI 답을 쓰지 않는다")
+    void cookingMethod_standardWinsEvenWhenEtc() {
         // 가지나물은 이름 규칙으로 조리법이 안 잡혀 ETC 다.
+        // 예전에는 ETC 를 "모르겠다"로 읽어 AI 답(RAW)을 남겼는데, 그 틈으로 같은 사진이
+        // 회차마다 다른 조리법을 얻어 R07 이 켜졌다 꺼졌다. 결정론이 먼저다 —
+        // 이름에 안 드러나는 튀김은 실측 포화지방을 보는 R11 이 메운다.
         FoodAnalysis food = foodAnalysisService.toEntity(null,
                 aiResult("가지나물", "RAW", false));
 
         assertThat(StandardFoodTable.find("가지나물").orElseThrow().cookingMethod())
                 .isEqualTo(CookingMethod.ETC);
-        assertThat(food.getCookingMethod()).isEqualTo(CookingMethod.RAW);
+        assertThat(food.getCookingMethod()).isEqualTo(CookingMethod.ETC);
     }
 
     @Test
-    @DisplayName("표준 DB 의 spicy=false 는 AI 의 매운맛을 지우지 않는다 — 이름에 없을 뿐이다")
-    void spicy_standardNeverClearsAi() {
-        // 부대찌개는 이름에 매운맛 낱말이 없어 표준값이 false 다. 덮어쓰면 홍조 룰(R02)이
-        // 진짜 매운 음식에서 조용히 빠진다.
+    @DisplayName("표준 DB 에서 찾으면 매운맛도 표준값이 이긴다 — AI 가 뭐라 하든 같은 값이다")
+    void spicy_standardWinsWhenMatched() {
+        // 부대찌개는 이름에 매운맛 낱말이 없어 표준값이 false 다.
+        // 예전에는 AI 와 OR 로 묶어 AI 가 true 를 주는 회차에만 R02 가 켜졌다 —
+        // 같은 사진이 다른 점수를 내는 통로였다. 이제 AI 답과 무관하게 같은 값이 나온다.
         assertThat(StandardFoodTable.find("부대찌개").orElseThrow().spicy()).isFalse();
 
         assertThat(foodAnalysisService.toEntity(null, aiResult("부대찌개", "BOILED", true))
-                .isSpicy()).isTrue();
+                .isSpicy()).isFalse();
         assertThat(foodAnalysisService.toEntity(null, aiResult("부대찌개", "BOILED", false))
                 .isSpicy()).isFalse();
+
+        // 표준 DB 에서 못 찾으면 다른 단서가 없으므로 AI 답을 그대로 쓴다.
+        assertThat(foodAnalysisService.toEntity(null, aiResult("정체불명의 새 음식", "BOILED", true))
+                .isSpicy()).isTrue();
     }
 
     // ---- 관찰 특성 (스키마 v2) ----

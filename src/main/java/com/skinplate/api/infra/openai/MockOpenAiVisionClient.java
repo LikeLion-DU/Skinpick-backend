@@ -22,8 +22,9 @@ import java.util.Map;
  * 스위치는 프로퍼티 하나다 — @Profile("mock") 과 섞으면 발표장에서
  * AI_MOCK=true 를 넣고 재기동해도 아무 일이 일어나지 않는다.
  *
- * 값은 문서의 시연 예시 그대로다. 이 값이 룰 엔진을 통과하면 60점이 나오고,
- * 그게 무대에서 말할 숫자다. 바꾸려면 테스트가 먼저 깨진다.
+ * 값은 문서의 시연 예시 그대로다. 이 값이 룰 엔진을 통과하면 58점이 나오고,
+ * 그게 무대에서 말할 숫자다(2026-08-18 재캘리브레이션 전에는 60점이었다).
+ * 바꾸려면 테스트가 먼저 깨진다.
  */
 @Primary
 @Component
@@ -67,7 +68,7 @@ public class MockOpenAiVisionClient implements VisionClient {
                     "수분 섭취가 부족하다고 기록되고 있어요. 물 한두 잔을 더 챙기는 것부터 시작해 보세요."));
 
     /**
-     * 사진이 몇 장이든 같은 값을 돌려준다. 시연에서 필요한 건 재현 가능한 60점이다.
+     * 사진이 몇 장이든 같은 값을 돌려준다. 시연에서 필요한 건 재현 가능한 58점이다.
      *
      * 피부 타입은 여기서 말하지 않는다 — 서버가 이 지표에서 규칙으로 낸다.
      * 시연 지표(수분 38 · 유분 52)면 <b>건성</b>이고, 상태는 붉어짐 64(임계 60 초과)라
@@ -101,8 +102,9 @@ public class MockOpenAiVisionClient implements VisionClient {
     }
 
     /**
-     * spiciness 는 <b>MEDIUM</b> 이어야 한다 — R02 강도 계수가 1.0 이라 무대의 60점이
-     * 그대로 나온다. HOT 으로 바꾸면 56점이 되고 테스트가 먼저 깨진다.
+     * spiciness 는 <b>MEDIUM</b> 으로 둔다. 표준 음식표가 확정한 한 끼는 관찰 강도를
+     * 점수에 쓰지 않으므로(2026-08-18) 이제 어느 값이든 58점이지만, 화면과 AI 코멘트가
+     * 이 값을 읽으므로 시연 대본과 맞는 값을 남긴다.
      */
     @Override
     public OpenAiFoodResult analyzeFood(String base64Image, String mediaType) {
@@ -121,7 +123,7 @@ public class MockOpenAiVisionClient implements VisionClient {
                 "SOUP_STEW", "MEDIUM", "MEDIUM", "MEDIUM", "MINIMALLY_PROCESSED");
     }
 
-    /** 60점 김치찌개 시나리오에 맞는 고정 문장. 무대에서 읽어도 어색하지 않아야 한다. */
+    /** 58점 김치찌개 시나리오에 맞는 고정 문장. 무대에서 읽어도 어색하지 않아야 한다. */
     @Override
     public PlateComments generateComments(String userContext) {
         return new PlateComments(

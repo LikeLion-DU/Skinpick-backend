@@ -68,10 +68,14 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class SkinPlateService {
 
-    private static final BigDecimal SUGAR_WITHOUT_DRINK = new BigDecimal("0.4");
+    /** R03 이 카드에 싣는 회복치와 같은 값을 써야 한다 — 원본은 RuleConstants 다. */
+    private static final BigDecimal SUGAR_WITHOUT_DRINK = RuleConstants.SUGAR_AFTER_NO_DRINK;
 
-    /** 밥·면을 조금 줄인 한 끼의 열량 비율. R10(>900kcal)이 1200kcal 까지는 꺼진다. */
-    private static final double CALORIES_WITHOUT_EXTRA_RICE = 0.75;
+    /**
+     * 밥·면을 조금 줄인 한 끼의 열량 비율. <b>R10 이 카드에 싣는 회복치와 같은 값을 써야</b>
+     * 광고한 점수와 시뮬레이션 결과가 같아진다 — 그래서 RuleConstants 가 원본을 쥔다.
+     */
+    private static final double CALORIES_WITHOUT_EXTRA_RICE = RuleConstants.CALORIES_AFTER_LESS_RICE;
 
     private final AppUserRepository userRepository;
     private final SkinAnalysisRepository skinAnalysisRepository;
@@ -368,8 +372,8 @@ public class SkinPlateService {
      *
      * 원본을 그 자리에서 고치면 LESS_SPICY 가 orphanRemoval 컬렉션에서 CAPSAICIN 을
      * 지우는 순간 food_ingredient 행이 DELETE 되고, HALVE_SOUP 은 sodium_mg 를
-     * 영구히 절반으로 바꾼다. 무대에서 버튼을 누르면 68 이 뜨고, 뒤로 갔다 다시
-     * 들어오면 원래 점수가 68 이다.
+     * 영구히 절반으로 바꾼다. 무대에서 버튼을 누르면 66 이 뜨고, 뒤로 갔다 다시
+     * 들어오면 원래 점수가 66 이다.
      */
     private FoodAnalysis detachedCopy(FoodAnalysis origin, List<PlateActionCode> actions) {
         boolean lessSpicy = actions.contains(PlateActionCode.LESS_SPICY);
@@ -396,20 +400,37 @@ public class SkinPlateService {
                 removeBatter ? Oiliness.MEDIUM : originTraits.getOiliness(),
                 originTraits.getProcessingLevel()));
 
+        // 표준 매칭 여부를 그대로 옮긴다. 빠뜨리면 사본이 "매칭 실패" 로 읽혀 점수용 태그가
+        // 통째로 꺼지고 강도 계수만 되살아난다 — before 가 저장 점수와 갈라진다.
+        copy.assignStandardFoodName(origin.getStandardFoodName());
+
+        // 재료도 출처까지 옮긴다. copyOf 가 아니라 of 를 쓰면 표준 유래 태그가 전부
+        // AI 유래로 바뀌어 R06·R09·R14 가 사본에서만 사라진다.
         origin.getIngredients().stream()
                 .filter(ingredient -> !(lessSpicy && ingredient.getTag() == IngredientTag.CAPSAICIN))
-                .forEach(ingredient -> copy.addIngredient(
-                        FoodIngredient.of(ingredient.getName(), ingredient.getTag())));
+                .forEach(ingredient -> copy.addIngredient(FoodIngredient.copyOf(ingredient)));
 
         return copy;
     }
 
     /**
-     * REMOVE_BATTER 는 영양값을 건드리지 않는다. 어떤 룰도 지방을 보지 않아
-     * 점수에 영향이 0 이고, 실제 효과는 cookingMethod = GRILLED 로 R07 이 꺼지는 것뿐이다.
+     * REMOVE_BATTER 는 영양값을 건드리지 않는다. 실제 효과는 cookingMethod = GRILLED 로
+     * R07 이 꺼지는 것뿐이다 — 튀김옷을 걷어낸 뒤의 포화지방을 이 앱이 알 방법이 없어
+     * R11 은 그대로 둔다. 없는 숫자를 지어내 깎는 것보다 안 건드리는 편이 설명 가능하다.
      *
-     * LESS_RICE 도 같은 원칙으로 열량만 3/4 로 줄인다 — R10 이 보는 값이 그것뿐이다.
-     * 탄수까지 줄이면 정확해 보이지만, 어떤 룰도 안 보는 숫자를 고치는 것은 거짓 정밀함이다.
+     * LESS_RICE 는 열량만 3/4 로 줄인다. 탄수까지 줄이면 정확해 보이지만, 그 숫자를 보는
+     * R12 는 <b>정제 탄수 재료가 있는가</b>를 함께 묻는 룰이라 밥을 덜 먹었다고 재료가
+     * 사라지지 않는다.
+     *
+     * <b>열량을 줄이면 R15·R06 의 영양 밀도가 함께 올라간다.</b> 밥에는 식이섬유도 비타민도
+     * 거의 없으므로 분모만 줄어드는 것이 맞다 — 표준 음식표에서 그렇게 단계가 새로 켜지는
+     * 음식이 R10 대상 144종 중 6종 있다(간자장·마라탕 등). 그때 총점은 R10 카드가 광고한
+     * 값보다 더 오른다. 카드의 expectedGain 은 <b>그 룰 하나가 되돌리는 점수</b>라는 정의
+     * 그대로이고 방향도 사용자에게 유리하므로 그대로 둔다 — 다만 "R10 이 보는 값이 열량뿐"
+     * 이라는 옛 설명은 이제 거짓이라 여기 적어 둔다.
+     *
+     * <b>확장 영양 다섯 개는 그대로 옮긴다.</b> 빠뜨리면 시뮬레이션의 before 가 저장 점수와
+     * 갈라진다 — 원본에 포화지방이 있는데 사본에는 0 이라 R11 이 통째로 사라지기 때문이다.
      */
     private Nutrition adjustNutrition(Nutrition nutrition, List<PlateActionCode> actions) {
         int calories = actions.contains(PlateActionCode.LESS_RICE)
@@ -425,7 +446,9 @@ public class SkinPlateService {
                 : nutrition.getSugarG();
 
         return Nutrition.of(calories, nutrition.getProteinG(),
-                nutrition.getFatG(), nutrition.getCarbG(), sodium, sugar);
+                        nutrition.getFatG(), nutrition.getCarbG(), sodium, sugar)
+                .withMicronutrients(nutrition.getSaturatedFatG(), nutrition.getFiberG(),
+                        nutrition.getVitaminAUg(), nutrition.getVitaminCMg(), nutrition.getZincMg());
     }
 
     /** 행동으로 사라진 감점 룰. S07 에서 "나트륨 과다 카드가 없어졌다"를 보여주는 데 쓴다. */

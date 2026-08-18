@@ -14,6 +14,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 /**
  * 공공데이터 기반 표준 음식 테이블. 조회 전용이고 첫 조회 때 한 번 읽는다.
@@ -50,6 +51,27 @@ public final class StandardFoodTable {
      * 그다음 낱말의 접미사를 긴 쪽부터 보므로, 둘을 갈라 둘 필요가 없다.
      */
     private static final Map<String, StandardFood> TABLE = new HashMap<>();
+
+    /**
+     * "A와 B가 <b>들어간</b> C" 처럼 앞이 재료고 뒤가 본체인 표현. 이 표지가 보이면
+     * 나열이 아니라 수식절이라, 첫 조각을 본체로 믿으면 안 된다.
+     */
+    private static final Pattern MODIFIER_CLAUSE =
+            Pattern.compile("(들어간|들어있는|들어 있는|곁들인|곁들여|올라간|얹은|넣은|넣어)\\s");
+
+    /**
+     * 같은 음식의 흔한 표기 차이. AI 는 "돈까스"라고 답하는데 공공데이터는 "돈가스"만 있고,
+     * 그러면 조회가 뒤 낱말로 밀려 <b>재료 이름("돼지고기")에 걸린다</b> — 돈가스가 고기구이
+     * 영양값(650kcal)을 받는다. 실사진 E2E 에서 실제로 그렇게 됐다.
+     *
+     * <p><b>판정이 아니라 철자다.</b> 여기에 다른 음식을 이어 붙이지 마라 — "라멘 → 라면"은
+     * 표기 차이가 아니라 다른 음식이고, 그 줄이 생기는 순간 이 표는 앱이 만든 판정 규칙이 된다.
+     */
+    private static final Map<String, String> SPELLINGS = Map.of(
+            "돈까스", "돈가스",
+            "돈카츠", "돈가스",
+            "떡뽁이", "떡볶이",
+            "떡뽀끼", "떡볶이");
 
     static {
         load();
@@ -102,6 +124,11 @@ public final class StandardFoodTable {
                 decimalOrNull(node, "carbG"),
                 intOrNull(node, "sodiumMg"),
                 decimalOrNull(node, "sugarG"),
+                decimalOrNull(node, "saturatedFatG"),
+                decimalOrNull(node, "fiberG"),
+                intOrNull(node, "vitaminAUg"),
+                decimalOrNull(node, "vitaminCMg"),
+                decimalOrNull(node, "zincMg"),
                 toCookingMethod(node.path("cookingMethod").asText()),
                 node.path("spicy").asBoolean(false),
                 List.copyOf(tags),
@@ -156,26 +183,79 @@ public final class StandardFoodTable {
     public static Optional<StandardFood> find(String foodName) {
         if (foodName == null || foodName.isBlank()) return Optional.empty();
 
-        String trimmed = foodName.trim();
+        String trimmed = normalizeSpelling(foodName.trim());
 
         StandardFood exact = TABLE.get(trimmed);
         if (exact != null) return Optional.of(exact);
 
-        // **뒤 낱말부터 본다.** 한국어 음식 이름은 핵심 낱말이 끝에 온다 —
-        // "돼지고기 김치찌개" 의 정체는 김치찌개지 돼지고기가 아니다.
-        // 모든 낱말을 동등하게 훑으면 앞의 재료가 먼저 걸려서, 찌개에 고기구이
-        // 영양값이 들어간다(650kcal·나트륨 334mg). 화면에도 로그에도 안 드러난다.
-        String[] words = trimmed.split("\\s+");
+        // **곁들임을 먼저 떼어 낸다.** AI 는 접시 전체를 나열해 답하기도 한다 —
+        // "소스가 뿌려진 돼지고기 돈가스와 양배추 샐러드". 아래 규칙은 뒤 낱말부터 보므로
+        // 그대로 두면 곁들임(샐러드, 293kcal)이 본체(돈가스, 704kcal)를 이겨서 같은 사진이
+        // 회차마다 다른 영양값을 받는다. 나열의 첫 조각이 본체다.
+        //
+        // **단, 수식절이면 정반대다.** "돼지고기와 채소가 들어간 김치찌개" 에서 앞은 재료고
+        // 본체는 끝에 있다. 첫 조각을 믿으면 김치찌개가 돼지고기(650kcal) 영양값을 받는데,
+        // 그 뒤로는 표준 매칭이 확정돼 AI 태그까지 눌리므로 틀린 답이 결정론적으로 굳는다 —
+        // 못 찾는 것보다 나쁘다. 뒤에 수식 표지가 있으면 지름길을 쓰지 않는다.
+        //
+        // **표지는 첫 조각 뒤에서만 찾는다.** 이름 전체에서 찾으면 첫 조각 안에 든 수식
+        // ("소스가 올라간 돈가스와 양배추 샐러드")까지 지름길을 껐고, 그러면 곁들임인
+        // 샐러드(293kcal)가 다시 본체 돈가스(704kcal)를 이겼다. 앞을 꾸미는 말과
+        // 뒤를 가리키는 말은 자리가 다르다.
+        String firstChunk = trimmed.split("(와|과)\\s|,")[0];
+        String head = firstChunk.trim();
+        String rest = trimmed.substring(firstChunk.length());
+        if (!head.equals(trimmed) && !MODIFIER_CLAUSE.matcher(rest).find()) {
+            // 첫 조각에서는 **마지막 낱말만** 본다. 앞 낱말까지 훑으면 "소스가 뿌려진
+            // 돼지고기 돈까스" 가 돈가스를 못 찾았을 때 "돼지고기"(고기구이 650kcal)로
+            // 떨어진다 — 못 찾는 것보다 나쁘다. 못 찾으면 아래에서 이름 전체를 훑는다.
+            String[] headWords = head.split("\\s+");
+            Optional<StandardFood> byHead = findSuffix(headWords[headWords.length - 1]);
+            if (byHead.isPresent()) return byHead;
+        }
+
+        return findInPhrase(trimmed);
+    }
+
+    /**
+     * **뒤 낱말부터 본다.** 한국어 음식 이름은 핵심 낱말이 끝에 온다 —
+     * "돼지고기 김치찌개" 의 정체는 김치찌개지 돼지고기가 아니다.
+     * 모든 낱말을 동등하게 훑으면 앞의 재료가 먼저 걸려서, 찌개에 고기구이
+     * 영양값이 들어간다(650kcal·나트륨 334mg). 화면에도 로그에도 안 드러난다.
+     */
+    private static Optional<StandardFood> findInPhrase(String phrase) {
+        String[] words = phrase.split("\\s+");
         for (int i = words.length - 1; i >= 0; i--) {
-            // 접미사를 긴 쪽부터 찍어 본다. "김치찌개"와 "찌개"가 둘 다 있으면 긴 쪽이
-            // 먼저 나오므로, 모든 찌개가 같은 값을 받는 일이 없다.
-            String word = words[i];
-            for (int start = 0; start < word.length(); start++) {
-                StandardFood hit = TABLE.get(word.substring(start));
-                if (hit != null) return Optional.of(hit);
-            }
+            Optional<StandardFood> hit = findSuffix(words[i]);
+            if (hit.isPresent()) return hit;
         }
         return Optional.empty();
+    }
+
+    /**
+     * 접미사를 긴 쪽부터 찍어 본다. "김치찌개"와 "찌개"가 둘 다 있으면 긴 쪽이 먼저
+     * 나오므로, 모든 찌개가 같은 값을 받는 일이 없다.
+     */
+    private static Optional<StandardFood> findSuffix(String word) {
+        for (int start = 0; start < word.length(); start++) {
+            StandardFood hit = TABLE.get(word.substring(start));
+            if (hit != null) return Optional.of(hit);
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * 표기 차이를 표준 이름으로 되돌린다. 부분 문자열 치환이라 <b>키가 서로를 품으면 안 된다</b> —
+     * 지금 넷은 서로 겹치지 않아 순서와 무관하게 같은 답이 나온다. 한 키의 결과가 다른 키를
+     * 품는 순간 {@code Map.of} 의 순회 순서(JVM 마다 다르다)가 답을 가르고, 결정론이 목적인
+     * 이 파일에서 재기동만으로 점수가 달라진다.
+     */
+    private static String normalizeSpelling(String name) {
+        String normalized = name;
+        for (Map.Entry<String, String> spelling : SPELLINGS.entrySet()) {
+            normalized = normalized.replace(spelling.getKey(), spelling.getValue());
+        }
+        return normalized;
     }
 
     /** 조회 가능한 이름의 수. 기동 로그와 적재 테스트가 본다. */

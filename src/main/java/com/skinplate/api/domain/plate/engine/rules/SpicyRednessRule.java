@@ -21,14 +21,17 @@ public class SpicyRednessRule implements PlateRule {
     public RuleResult apply(PlateContext context) {
         // 발동은 spicy/CAPSAICIN(표준 테이블이 이긴다), 강도는 AI 관찰값이 정한다.
         // UNKNOWN·NONE(캡사이신으로만 발동)은 1.0 — 특성이 없던 시절과 같은 점수다.
-        Spiciness spiciness = context.food().getTraits().getSpiciness();
+        Spiciness spiciness = context.food().scoringTraits().getSpiciness();
         int delta = SeverityCalculator.apply(
                 R02_SPICY_REDNESS, context.skin().getRedness(), true, intensityOf(spiciness));
 
+        // LESS_SPICY 는 spicy 를 끄고 CAPSAICIN 을 빼므로 이 룰이 통째로 사라진다 —
+        // 회복치는 곧 이 감점의 절댓값이다. 고정값 6 을 싣던 시절에는 홍조 64 에서
+        // 실제로 12 가 올랐고, 강도가 HOT 이면 16 이었다. 카드가 확인 가능한 거짓이었다.
         return RuleResult.caution(code(), delta,
                 "매운맛 자극",
                 reason(context, spiciness),
-                "매운 양념을 덜어내고 드셔보세요.", GAIN_LESS_SPICY);
+                "매운 양념을 덜어내고 드셔보세요.", -delta);
     }
 
     private static double intensityOf(Spiciness spiciness) {

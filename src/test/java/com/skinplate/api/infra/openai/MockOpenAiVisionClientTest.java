@@ -26,7 +26,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Mock 은 네트워크가 끊긴 무대에서 쓰는 백업 플랜이다.
- * 그래서 "값이 나온다"로는 부족하다 — 그 값이 발표에서 말할 60점을 만들어야 한다.
+ * 그래서 "값이 나온다"로는 부족하다 — 그 값이 발표에서 말할 58점을 만들어야 한다.
  */
 class MockOpenAiVisionClientTest {
 
@@ -40,11 +40,14 @@ class MockOpenAiVisionClientTest {
     private final FoodAnalysisService foodAnalysisService =
             new FoodAnalysisService(client, new ObjectMapper());
 
+    // **프로덕션과 같은 목록이어야 한다.** 하나라도 빠지면 이 테스트가 무대에 없는
+    // 숫자를 "발표에서 말할 점수"로 고정한다 — 실제 컨텍스트는 @Component 를 전부 모은다.
     private final PlateRuleEngine engine = new PlateRuleEngine(List.of(
             new SodiumRule(), new SpicyRednessRule(), new SugarTroubleRule(),
             new FriedOilRule(), new HydrationFoodRule(), new Omega3BarrierRule(),
             new ProteinRule(), new VitaminRule(), new ProbioticRule(),
-            new HighCalorieRule()));
+            new HighCalorieRule(), new SaturatedFatRule(), new RefinedCarbRule(),
+            new Omega3FoodRule(), new FiberRule()));
 
     @Test
     @DisplayName("피부 응답은 문서의 시연 지표를 그대로 돌려준다")
@@ -93,7 +96,7 @@ class MockOpenAiVisionClientTest {
     }
 
     @Test
-    @DisplayName("Mock 응답을 룰 엔진에 넣으면 발표에서 말할 60점이 나온다")
+    @DisplayName("Mock 응답을 룰 엔진에 넣으면 발표에서 말할 58점이 나온다")
     void mockFoodReproducesDemoScore() {
         OpenAiSkinResult skin = client.analyzeSkin(PHOTOS);
         OpenAiFoodResult food = client.analyzeFood("무시된다", "image/jpeg");
@@ -102,7 +105,7 @@ class MockOpenAiVisionClientTest {
                 skin.redness(), skin.trouble(), skin.barrier());
 
         // 시연 음식이 표준 테이블에 실제로 있어야 한다. Mock 의 AI 추정값과 표준값이
-        // 일부러 같은 숫자라, 이 확인이 없으면 테이블이 통째로 안 실려도 60 이 나온다.
+        // 일부러 같은 숫자라, 이 확인이 없으면 테이블이 통째로 안 실려도 58 이 나온다.
         assertThat(StandardFoodTable.find(food.foodName())).isPresent();
 
         // 서비스를 통해 만든다. 손으로 Nutrition 을 조립하면 표준 음식 테이블을 건너뛰어,
@@ -110,17 +113,17 @@ class MockOpenAiVisionClientTest {
         // 실제 무대는 이 경로로 흐른다.
         FoodAnalysis analysis = foodAnalysisService.toEntity(null, food);
 
-        assertThat(engine.evaluate(new PlateContext(metrics, analysis)).score()).isEqualTo(60);
+        assertThat(engine.evaluate(new PlateContext(metrics, analysis)).score()).isEqualTo(58);
     }
 
     @Test
-    @DisplayName("Mock 음식의 특성이 채워져 있고 spiciness 는 MEDIUM 이다 — HOT 이면 60점이 무너진다")
+    @DisplayName("Mock 음식의 특성이 채워져 있고 spiciness 는 MEDIUM 이다 — 화면·AI 문장이 이 값을 읽는다")
     void mockFoodFillsTraits() {
         OpenAiFoodResult food = client.analyzeFood("무시된다", "image/jpeg");
 
         assertThat(food.foodGroup()).isEqualTo("SOUP_STEW");
         assertThat(food.portionSize()).isEqualTo("MEDIUM");
-        assertThat(food.spiciness()).isEqualTo("MEDIUM");   // R02 강도 계수 1.0 — 60점의 전제
+        assertThat(food.spiciness()).isEqualTo("MEDIUM");   // 표준 매칭 뒤엔 점수에 안 쓰인다
         assertThat(food.oiliness()).isEqualTo("MEDIUM");
         assertThat(food.processingLevel()).isEqualTo("MINIMALLY_PROCESSED");
     }
