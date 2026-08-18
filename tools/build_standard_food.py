@@ -82,11 +82,17 @@ MILD_WORDS = ['풋고추', '고추냉이']
 #     시연 음식은 돼지고기가 들어간 쪽이고, 그 차이가 R05(단백질 20g 이상 가점)를
 #     가른다. 기본형에 얹혀 가면 무대에서 말할 60점이 54점이 된다.
 # 조리법·매운맛·태그는 같은 이름 규칙으로 뽑는다.
+#
+# saturatedFatG 는 **지방 조성비**로 낸다 — 원본의 같은 계열 100g 중앙값에서 포화/총지방
+# 비율을 구해 위 fatG 에 곱한 값이다(연어 1.14/7.24, 김치찌개 0.42/1.67). 조성비는 1인분
+# 크기와 무관하게 재료가 정하므로 이 두 줄만은 지어낸 숫자가 아니다.
+# 식이섬유·비타민·아연은 일부러 비워 둔다 — 열량으로 환산하면 국물 요리에서 12배가 되어
+# "김치찌개 한 그릇 식이섬유 17g" 같은 값이 나온다. 비어 있으면 가점이 안 붙을 뿐이다.
 MANUAL_FOODS = [
     {'name': '연어구이', 'caloriesKcal': 610, 'proteinG': 32.0, 'fatG': 28.0,
-     'carbG': 45.0, 'sodiumMg': 1600, 'sugarG': 4.0},
+     'carbG': 45.0, 'sodiumMg': 1600, 'sugarG': 4.0, 'saturatedFatG': 4.4},
     {'name': '돼지고기 김치찌개', 'caloriesKcal': 520, 'proteinG': 28.5, 'fatG': 24.0,
-     'carbG': 32.0, 'sodiumMg': 1850, 'sugarG': 6.2},
+     'carbG': 32.0, 'sodiumMg': 1850, 'sugarG': 6.2, 'saturatedFatG': 6.0},
 ]
 
 # 재료 태그. 이름에 등장하면 붙인다.
@@ -119,7 +125,26 @@ NUTRIENT_COLUMNS = {
     'carbG': '탄수화물(g)',
     'sodiumMg': '나트륨(mg)',
     'sugarG': '당류(g)',
+    # ---- 2026-08-18 확장 ----
+    # 원본은 160 컬럼인데 위 여섯 개만 가져오고 있었다. 그래서 룰이
+    #   · 포화지방을 못 봐서 연어와 삼겹살을 같은 지방으로 취급했고
+    #   · 채소를 못 알아봐서 콩나물무침과 감자튀김이 똑같이 70점이었다.
+    # 아래 다섯은 **요리 계열 2,589행 기준 결측률을 재고 고른 것**이다.
+    # 비타민E(46%)·오메가3 지방산(46%)·트랜스지방(77%)·셀레늄(82%)은 뺐다 —
+    # 결측이 많으면 "없어서 안 걸림"과 "적어서 안 걸림"이 구분되지 않는다.
+    'saturatedFatG': '포화지방산(g)',      # 결측 0%
+    'fiberG': '식이섬유(g)',               # 결측 6%
+    'vitaminCMg': '비타민 C(mg)',          # 결측 6%
+    'vitaminAUg': '비타민A(μg RAE)',       # 결측 11%
+    'zincMg': '아연(mg)',                  # 결측 28% — 가점 룰에만 쓴다
 }
+
+# 정수로 저장할 항목. 소수점이 화면에도 룰에도 의미가 없다.
+INTEGER_COLUMNS = ('caloriesKcal', 'sodiumMg', 'vitaminAUg')
+
+# 소수 두 자리가 필요한 항목. 아연은 1인분 중앙값이 1.4mg 이라 한 자리로 자르면
+# 단계 경계(p50/p75)가 같은 값으로 뭉갠다.
+DECIMAL2_COLUMNS = ('zincMg',)
 
 
 def serving_grams(row):
@@ -217,7 +242,9 @@ def is_one_serving(record):
 
 def median_of(entries, key):
     values = [entry[key] for entry in entries if key in entry]
-    return round(statistics.median(values), 1) if values else None
+    if not values:
+        return None
+    return round(statistics.median(values), 2 if key in DECIMAL2_COLUMNS else 1)
 
 
 def aggregate(name, measured, computed):
@@ -234,17 +261,37 @@ def aggregate(name, measured, computed):
     for key in NUTRIENT_COLUMNS:
         value = median_of(entries, key)
         if value is not None:
-            # 칼로리·나트륨은 정수로 쓴다. 소수점은 화면에서 의미가 없다.
-            record[key] = int(round(value)) if key in ('caloriesKcal', 'sodiumMg') else value
+            record[key] = int(round(value)) if key in INTEGER_COLUMNS else value
     record['cookingMethod'] = cooking_method(name)
     record['spicy'] = is_spicy(name)
     record['tags'] = tags(name)
     return record
 
 
+def read_rows(path):
+    """원본은 배포처에 따라 xlsx 로도, cp949/utf-8 csv 로도 온다.
+
+    셋 다 여기서 받는다. 변환을 사람 손에 맡기면 "이 JSON 을 어떻게 만들었는가"가
+    재현되지 않고, 그 순간 표준 영양값의 출처를 아무도 증명할 수 없게 된다."""
+    if path.lower().endswith('.xlsx'):
+        import openpyxl                                     # 이 경로에서만 필요하다
+        sheet = openpyxl.load_workbook(path, read_only=True).worksheets[0]
+        stream = sheet.iter_rows(values_only=True)
+        header = ['' if cell is None else str(cell).strip() for cell in next(stream)]
+        return [dict(zip(header, ['' if cell is None else str(cell) for cell in row]))
+                for row in stream]
+
+    for encoding in ('utf-8-sig', 'cp949'):
+        try:
+            with io.open(path, encoding=encoding, newline='') as handle:
+                return list(csv.DictReader(handle))
+        except UnicodeDecodeError:
+            continue
+    raise SystemExit(f'{path} 를 utf-8 로도 cp949 로도 읽지 못했다')
+
+
 def main(csv_path, json_path):
-    with io.open(csv_path, encoding='cp949', newline='') as handle:
-        rows = list(csv.DictReader(handle))
+    rows = read_rows(csv_path)
 
     dishes = [row for row in rows if row.get('식품대분류명') in DISH_CATEGORIES]
 
