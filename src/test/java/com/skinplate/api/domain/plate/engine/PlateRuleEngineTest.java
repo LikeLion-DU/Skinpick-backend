@@ -12,8 +12,11 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * PRD v1.4 §18.7 예시 계산을 그대로 재현한다.
+ * PRD §18.7 예시 계산을 그대로 재현한다.
  * 룰 임계값을 튜닝할 때 이 테스트가 깨지면 문서도 함께 고쳐야 한다는 신호다.
+ *
+ * <p>영양값은 표준 음식 테이블의 실제 값을 쓴다(포화지방 포함). 사용자가 사진을 찍었을 때
+ * 나오는 숫자와 이 테스트가 같은 것을 봐야 "재현" 이라 부를 수 있다.
  */
 class PlateRuleEngineTest {
 
@@ -28,36 +31,32 @@ class PlateRuleEngineTest {
             new FiberRule(), new Omega3FoodRule()));
 
     @Test
-    @DisplayName("예시 A · 돼지고기 김치찌개 → 60점")
+    @DisplayName("예시 A · 돼지고기 김치찌개 → 58점")
     void kimchiStew() {
-        FoodAnalysis food = food("돼지고기 김치찌개", CookingMethod.BOILED, true,
-                nutrition(520, "28.5", 1850, "6.2"),
-                List.of(FoodIngredient.of("김치", IngredientTag.PROBIOTIC),
-                        FoodIngredient.of("고춧가루", IngredientTag.CAPSAICIN)));
+        PlateEvaluation result = engine.evaluate(new PlateContext(SKIN, demoStew()));
 
-        PlateEvaluation result = engine.evaluate(new PlateContext(SKIN, food));
-
-        // 70 + R05(+6) + R09(+4) + R04(-8) + R02(-12) = 60
-        assertThat(result.score()).isEqualTo(60);
-        assertThat(result.appliedRuleCodes()).containsExactlyInAnyOrder("R02", "R04", "R05", "R09");
+        // 70 + R05(+6) + R09(+4) + R04(-8) + R11(-2) + R02(-12) = 58
+        assertThat(result.score()).isEqualTo(58);
+        assertThat(result.appliedRuleCodes())
+                .containsExactlyInAnyOrder("R02", "R04", "R05", "R09", "R11");
     }
 
     @Test
-    @DisplayName("예시 B · 연어구이 정식 → 95점")
+    @DisplayName("예시 B · 연어구이 정식 → 93점")
     void grilledSalmon() {
         FoodAnalysis food = food("연어구이 정식", CookingMethod.GRILLED, false,
-                nutrition(610, "32.0", 1600, "4.0"),
+                nutrition(610, "32.0", 1600, "4.0", "28.0", "45.0", "4.4"),
                 List.of(FoodIngredient.of("연어", IngredientTag.OMEGA3),
                         FoodIngredient.of("브로콜리", IngredientTag.ANTIOXIDANT),
                         FoodIngredient.of("된장", IngredientTag.PROBIOTIC)));
 
         PlateEvaluation result = engine.evaluate(new PlateContext(SKIN, food));
 
-        // 70 + R01(+10) + R05(+6) + R06(+5) + R09(+4) + R14(+4) + R04(-4) = 95
+        // 70 + R01(+10) + R05(+6) + R06(+5) + R09(+4) + R14(+4) + R04(-4) + R11(-2) = 93
         // 나트륨 1,600mg 은 새 1단계(>1150)라 -4 다. 옛 임계 1,500mg 에서는 -8 이었다.
         // R14 는 R01 과 독립이다 — 건조한 사용자의 연어가 두 룰을 다 받는 것은
         // 이중계상이 아니라 "이 사람에게 가장 필요한 음식" 이라는 뜻이다.
-        assertThat(result.score()).isEqualTo(95);
+        assertThat(result.score()).isEqualTo(93);
         assertThat(result.appliedRuleCodes()).contains("R01", "R14");
     }
 
@@ -139,8 +138,8 @@ class PlateRuleEngineTest {
                 Spiciness.UNKNOWN, Oiliness.UNKNOWN, ProcessingLevel.UNKNOWN));
         PlateEvaluation withUnknown = engine.evaluate(new PlateContext(SKIN, unknownTraits));
 
-        assertThat(withoutTraits.score()).isEqualTo(60);
-        assertThat(withUnknown.score()).isEqualTo(60);
+        assertThat(withoutTraits.score()).isEqualTo(58);
+        assertThat(withUnknown.score()).isEqualTo(58);
         assertThat(withUnknown.appliedRuleCodes())
                 .containsExactlyElementsOf(withoutTraits.appliedRuleCodes());
     }
@@ -552,10 +551,14 @@ class PlateRuleEngineTest {
         return engine.evaluate(new PlateContext(SKIN, spicyFood)).score();
     }
 
-    /** 예시 A 의 김치찌개 — 특성 없는 원형. */
+    /**
+     * 예시 A 의 김치찌개 — 특성 없는 원형.
+     * 영양값은 표준 음식 테이블의 실제 값이다(포화지방 6.0g 포함) — 사용자가 사진을
+     * 찍었을 때 나오는 숫자와 이 테스트가 같은 것을 봐야 §18.7 재현이라 부를 수 있다.
+     */
     private static FoodAnalysis demoStew() {
         return food("돼지고기 김치찌개", CookingMethod.BOILED, true,
-                nutrition(520, "28.5", 1850, "6.2"),
+                nutrition(520, "28.5", 1850, "6.2", "24.0", "32.0", "6.0"),
                 List.of(FoodIngredient.of("김치", IngredientTag.PROBIOTIC),
                         FoodIngredient.of("고춧가루", IngredientTag.CAPSAICIN)));
     }

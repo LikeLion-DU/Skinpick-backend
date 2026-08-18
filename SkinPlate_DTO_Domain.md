@@ -3776,7 +3776,9 @@ private Nutrition adjustNutrition(Nutrition n, List<PlateActionCode> actions) {
 
 > **`readOnly = true`가 핵심 안전망이다.** 누군가 실수로 원본을 건드려도 Hibernate가 `FlushMode.MANUAL`로 동작해 변경이 DB로 나가지 않는다. 주석에 "저장하지 않는다"라고 적어두는 것만으로는 부족하다 — **문제는 저장 여부가 아니라 관리 엔티티를 만지는 것 자체**다.
 >
-> `REMOVE_BATTER`의 영양 조정에서 `fatG`는 손대지 않았다. **어떤 룰도 `fatG`를 보지 않기 때문에 점수에 영향이 0이다.** 실제 효과는 `cookingMethod = GRILLED`로 R07이 꺼지는 것뿐이다. 없는 효과를 문서에 적어두면 나중에 "왜 지방을 줄였는데 점수가 그대로냐"를 디버깅하게 된다.
+> `REMOVE_BATTER`의 영양 조정에서 지방은 손대지 않는다. 2026-08-18 이전에는 "어떤 룰도 지방을 보지 않아 영향이 0"이 이유였지만, 지금은 **R11이 포화지방을 본다**. 그래도 안 건드리는 이유가 바뀌었을 뿐이다 — 튀김옷을 걷어낸 뒤의 포화지방을 이 앱이 알 방법이 없다. 없는 숫자를 지어내 깎는 것보다 안 건드리는 편이 설명 가능하다. 실제 효과는 `cookingMethod = GRILLED`로 R07이 꺼지는 것뿐이다.
+>
+> **확장 영양 다섯 개(V9)는 사본으로 그대로 옮긴다.** 빠뜨리면 시뮬레이션의 `beforeScore`가 저장 점수와 갈라진다 — 원본에 포화지방이 있는데 사본은 0이라 R11이 통째로 사라진다.
 
 ---
 
@@ -3874,6 +3876,8 @@ public record OpenAiFoodResult(
 ### 1.21.1 상수
 
 **`domain/plate/engine/RuleConstants.java`**
+
+> *(2026-08-18 재캘리브레이션 — 아래 블록은 2026-08-17 시점의 기록이다. 저장소가 더 최신이다: 나트륨·열량이 계단형이 되고 R11(포화지방)·R12(정제 탄수)·R14(오메가3)·R15(식이섬유)가 들어왔으며, `GAIN_SOUP_HALF`·`GAIN_LESS_RICE` 는 상수가 아니라 룰이 단계 변화로 계산한다. **최종 룰표는 PRD §18.6, 실제 코드는 `plate/engine/RuleConstants.java` 를 본다.**)*
 
 ```java
 package com.skinplate.api.domain.plate.engine;
