@@ -197,8 +197,15 @@ public final class StandardFoodTable {
         // 본체는 끝에 있다. 첫 조각을 믿으면 김치찌개가 돼지고기(650kcal) 영양값을 받는데,
         // 그 뒤로는 표준 매칭이 확정돼 AI 태그까지 눌리므로 틀린 답이 결정론적으로 굳는다 —
         // 못 찾는 것보다 나쁘다. 뒤에 수식 표지가 있으면 지름길을 쓰지 않는다.
-        String head = trimmed.split("(와|과)\\s|,")[0].trim();
-        if (!head.equals(trimmed) && !MODIFIER_CLAUSE.matcher(trimmed).find()) {
+        //
+        // **표지는 첫 조각 뒤에서만 찾는다.** 이름 전체에서 찾으면 첫 조각 안에 든 수식
+        // ("소스가 올라간 돈가스와 양배추 샐러드")까지 지름길을 껐고, 그러면 곁들임인
+        // 샐러드(293kcal)가 다시 본체 돈가스(704kcal)를 이겼다. 앞을 꾸미는 말과
+        // 뒤를 가리키는 말은 자리가 다르다.
+        String firstChunk = trimmed.split("(와|과)\\s|,")[0];
+        String head = firstChunk.trim();
+        String rest = trimmed.substring(firstChunk.length());
+        if (!head.equals(trimmed) && !MODIFIER_CLAUSE.matcher(rest).find()) {
             // 첫 조각에서는 **마지막 낱말만** 본다. 앞 낱말까지 훑으면 "소스가 뿌려진
             // 돼지고기 돈까스" 가 돈가스를 못 찾았을 때 "돼지고기"(고기구이 650kcal)로
             // 떨어진다 — 못 찾는 것보다 나쁘다. 못 찾으면 아래에서 이름 전체를 훑는다.
@@ -237,7 +244,12 @@ public final class StandardFoodTable {
         return Optional.empty();
     }
 
-    /** 표기 차이를 표준 이름으로 되돌린다. 낱말 단위로만 바꾼다. */
+    /**
+     * 표기 차이를 표준 이름으로 되돌린다. 부분 문자열 치환이라 <b>키가 서로를 품으면 안 된다</b> —
+     * 지금 넷은 서로 겹치지 않아 순서와 무관하게 같은 답이 나온다. 한 키의 결과가 다른 키를
+     * 품는 순간 {@code Map.of} 의 순회 순서(JVM 마다 다르다)가 답을 가르고, 결정론이 목적인
+     * 이 파일에서 재기동만으로 점수가 달라진다.
+     */
     private static String normalizeSpelling(String name) {
         String normalized = name;
         for (Map.Entry<String, String> spelling : SPELLINGS.entrySet()) {

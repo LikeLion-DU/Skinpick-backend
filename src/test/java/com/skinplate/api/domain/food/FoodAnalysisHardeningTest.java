@@ -86,6 +86,13 @@ class FoodAnalysisHardeningTest {
         // 나열은 그대로 첫 조각이 본체다.
         assertThat(StandardFoodTable.find("돈가스와 양배추 샐러드")
                 .orElseThrow().name()).contains("돈가스");
+
+        // **수식 표지는 첫 조각 뒤에서만 찾는다.** 이름 전체에서 찾으면 앞을 꾸미는 말까지
+        // 지름길을 꺼서, 곁들임인 샐러드(293kcal)가 다시 본체 돈가스(704kcal)를 이긴다.
+        assertThat(StandardFoodTable.find("소스가 올라간 돈가스와 양배추 샐러드")
+                .orElseThrow().name()).contains("돈가스");
+        assertThat(StandardFoodTable.find("치즈가 얹은 돈가스와 샐러드")
+                .orElseThrow().name()).contains("돈가스");
     }
 
     /**
