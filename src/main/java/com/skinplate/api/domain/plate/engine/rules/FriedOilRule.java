@@ -28,7 +28,7 @@ public class FriedOilRule implements PlateRule {
     @Override
     public boolean supports(PlateContext context) {
         return context.food().isFried()
-                || context.food().getTraits().getOiliness() == Oiliness.HIGH;
+                || context.food().scoringTraits().getOiliness() == Oiliness.HIGH;
     }
 
     @Override

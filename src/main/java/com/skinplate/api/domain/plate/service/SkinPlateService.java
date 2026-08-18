@@ -400,10 +400,15 @@ public class SkinPlateService {
                 removeBatter ? Oiliness.MEDIUM : originTraits.getOiliness(),
                 originTraits.getProcessingLevel()));
 
+        // 표준 매칭 여부를 그대로 옮긴다. 빠뜨리면 사본이 "매칭 실패" 로 읽혀 점수용 태그가
+        // 통째로 꺼지고 강도 계수만 되살아난다 — before 가 저장 점수와 갈라진다.
+        copy.assignStandardFoodName(origin.getStandardFoodName());
+
+        // 재료도 출처까지 옮긴다. copyOf 가 아니라 of 를 쓰면 표준 유래 태그가 전부
+        // AI 유래로 바뀌어 R06·R09·R14 가 사본에서만 사라진다.
         origin.getIngredients().stream()
                 .filter(ingredient -> !(lessSpicy && ingredient.getTag() == IngredientTag.CAPSAICIN))
-                .forEach(ingredient -> copy.addIngredient(
-                        FoodIngredient.of(ingredient.getName(), ingredient.getTag())));
+                .forEach(ingredient -> copy.addIngredient(FoodIngredient.copyOf(ingredient)));
 
         return copy;
     }

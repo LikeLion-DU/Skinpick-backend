@@ -1525,6 +1525,7 @@ erDiagram
         numeric zinc_mg "V9 · 점수 미사용 · 리포트 영양 지표용 보존"
         varchar cooking_method "FRIED/BOILED/GRILLED/RAW/STEAMED/ETC"
         boolean is_spicy
+        varchar standard_food_name "V10 · 매칭된 표준 음식. NULL=매칭 실패 → 태그 룰 전부 꺼짐"
         varchar food_group "RICE/NOODLE/SOUP_STEW/... V7 · NULL=UNKNOWN"
         varchar portion_size "SMALL/MEDIUM/LARGE/UNKNOWN · 리포트 환산 전용"
         varchar spiciness "NONE/MILD/MEDIUM/HOT/UNKNOWN · R02 강도"
@@ -1537,6 +1538,7 @@ erDiagram
     FOOD_INGREDIENT {
         bigint id PK
         bigint food_analysis_id FK
+        boolean from_standard "V10 · 이 태그를 표준표가 확정했는가 — 점수는 이것만 본다"
         varchar name
         varchar tag "VITAMIN_C/OMEGA3/DAIRY..."
     }
@@ -3763,6 +3765,21 @@ public class PlateRuleEngine {
 >
 > **만들지 않은 룰** — RAW/STEAMED 가점(+3)은 "날것이면 피부에 좋다" 를 이 룰표로 증명할 수 없어
 > 뺐다(RAW 에 육회가, STEAMED 에 만두가 함께 들어온다). 점수 분산을 키우려고 근거가 약한 룰을 넣지 않는다.
+>
+> **점수 입력의 출처 (V10 · 2026-08-18)** — 실사진 E2E 에서 같은 떡볶이 사진 한 장이
+> 50 · 54 · 55 · 58 점을 냈다. 영양값은 표준 음식표가 이미 고정하고 있었는데 **재료 태그와
+> 매운맛 강도가 AI 유래**라 회차마다 달랐다 — ANTIOXIDANT 가 오면 R06 이 +5, PROBIOTIC 이면
+> R09 가 +4, 강도가 HOT↔MEDIUM 이면 R02 가 ±4 움직였다.
+>
+> **표준 음식표에서 찾은 한 끼는 점수 입력을 전부 표준표에서만 받는다** — 영양값 · 조리법 ·
+> 매운맛 · 재료 태그 · 강도 계수(=1.0 고정)까지. AI 가 사진에서 읽은 재료는 화면과 AI 코멘트에
+> 그대로 남는다. 같은 태그를 둘 다 알면 그 줄을 "표준표가 확정한 것"으로 승격해 이름은
+> AI 쪽(“쌀떡”)을 유지한다. **점수와 설명을 가르는 것이 이 정책의 전부다.**
+>
+> 표준표에서 못 찾으면 **태그 룰이 전부 꺼진다**(R06·R09·R14 와 R02 의 CAPSAICIN 경로).
+> AI 태그를 쓰면 결정론이 깨지고, 태그가 있는 척할 수도 없다. 그 음식은 영양값 기반
+> 룰(R04·R05·R10·R11)로만 점수가 난다 — 다만 그 영양값 자체가 AI 추정치라
+> **미매칭 음식의 완전한 재현성은 표준표를 넓히는 것 말고 방법이 없다.**
 >
 > **판정 이유(reason · V8)** — 각 GOOD/CAUTION 피드백에 결정론 템플릿 문장이 붙는다. 게이트를 뗀
 > R03·R07 은 문장이 두 갈래다 — 트러블·유분이 정상인 사람에게 "지금 유분이 높은 상태에서" 라고 말하면

@@ -772,22 +772,28 @@ class SkinPlateServiceTest {
      * before 가 60 으로, LESS_SPICY 가 spiciness 를 안 지우면 after 가 낮게 나온다.
      */
     @Test
-    @DisplayName("simulateFromToken — HOT 매운맛은 R02 를 -16 으로 키우고, LESS_SPICY 가 통째로 되돌린다")
+    @DisplayName("simulateFromToken — 표준표에 없는 매운 음식만 HOT 강도가 R02 를 -16 으로 키운다")
     void simulateFromToken_hotSpicinessDeepensR02() {
         givenSkinAnalysis();
         OpenAiFoodResult aiResult = givenAiResult();
         givenAnalysisTokenPayload(aiResult);
 
-        FoodAnalysis hotFood = givenFood();
+        // 표준 음식표가 확정한 한 끼는 관찰 강도를 점수에 쓰지 않는다(2026-08-18) —
+        // 같은 사진이 HOT 과 MEDIUM 을 오가며 -16 과 -12 를 오가던 통로를 막았다.
+        // 강도가 살아 있는 것은 다른 단서가 없는 미매칭 음식뿐이라 여기서는 그쪽을 쓴다.
+        FoodAnalysis hotFood = FoodAnalysis.create(null, "정체불명의 매운 볶음", "한식",
+                Nutrition.of(520, new BigDecimal("28.5"), new BigDecimal("24.0"),
+                        new BigDecimal("32.0"), 1850, new BigDecimal("6.2")),
+                CookingMethod.GRILLED, true, "{}");
         hotFood.assignTraits(FoodTraits.of(FoodGroup.SOUP_STEW, PortionSize.UNKNOWN,
                 Spiciness.HOT, Oiliness.UNKNOWN, ProcessingLevel.UNKNOWN));
         given(foodAnalysisService.toEntity(null, aiResult)).willReturn(hotFood);
 
         PlateAnalysisSimulateResponse response = simulateFromToken(PlateActionCode.LESS_SPICY);
 
-        // 70 +6(R05) +4(R09) -8(R04) -16(R02 홍조 64 × HOT 1.3) = 56 → R02 가 꺼져 72
-        assertThat(response.beforeScore()).isEqualTo(56);
-        assertThat(response.afterScore()).isEqualTo(72);
+        // 70 +6(R05) -8(R04) -16(R02 홍조 64 × HOT 1.3) = 52 → R02 가 꺼져 68
+        assertThat(response.beforeScore()).isEqualTo(52);
+        assertThat(response.afterScore()).isEqualTo(68);
         assertThat(response.removedRules()).contains("R02");
     }
 
@@ -869,14 +875,17 @@ class SkinPlateServiceTest {
                 user, SkinMetrics.of(38, 52, 64, 25, 78), 55, "요약", "{}");
         ReflectionTestUtils.setField(analysis, "id", ANALYSIS_ID);
 
+        // 표준 음식표가 확정한 한 끼다 — 점수용 태그는 표준 유래(김치·고춧가루)만 서고,
+        // AI 가 사진에서 본 재료(돼지고기·두부)는 화면에만 남는다.
         FoodAnalysis food = FoodAnalysis.create(user, "돼지고기 김치찌개", "한식/찌개",
                 Nutrition.of(520, new BigDecimal("28.5"), new BigDecimal("24.0"),
                         new BigDecimal("32.0"), 1850, new BigDecimal("6.2")),
                 CookingMethod.BOILED, true, "{}");
-        List.of(new String[]{"돼지고기", "ETC"}, new String[]{"김치", "PROBIOTIC"},
-                new String[]{"두부", "ETC"}, new String[]{"고춧가루", "CAPSAICIN"})
-                .forEach(pair -> food.addIngredient(
-                        FoodIngredient.of(pair[0], IngredientTag.valueOf(pair[1]))));
+        food.assignStandardFoodName("돼지고기 김치찌개");
+        food.addIngredient(FoodIngredient.of("돼지고기", IngredientTag.ETC));
+        food.addIngredient(FoodIngredient.of("두부", IngredientTag.ETC));
+        food.addIngredient(FoodIngredient.fromStandardTable("김치", IngredientTag.PROBIOTIC));
+        food.addIngredient(FoodIngredient.fromStandardTable("고춧가루", IngredientTag.CAPSAICIN));
 
         SkinPlate plate = SkinPlate.create(user, analysis, food, 60, "요약", "[]");
         ReflectionTestUtils.setField(plate, "id", PLATE_ID);
@@ -954,15 +963,22 @@ class SkinPlateServiceTest {
     }
 
     /** foodAnalysisService.toEntity(null, aiResult) 가 돌려준다고 가정하는 결과 — user 는 null 이다. */
+    /**
+     * 시연 예시 A. <b>표준 음식표가 확정한 한 끼</b>라 점수용 태그가 표준 유래다 —
+     * AI 유래 재료(두부·돼지고기)는 화면에만 보이고 점수에는 서지 않는다(2026-08-18).
+     */
     private FoodAnalysis givenFood() {
         FoodAnalysis food = FoodAnalysis.create(null, "돼지고기 김치찌개", "한식/찌개",
                 Nutrition.of(520, new BigDecimal("28.5"), new BigDecimal("24.0"),
-                        new BigDecimal("32.0"), 1850, new BigDecimal("6.2")),
+                                new BigDecimal("32.0"), 1850, new BigDecimal("6.2"))
+                        .withMicronutrients(new BigDecimal("6.0"), BigDecimal.ZERO,
+                                0, BigDecimal.ZERO, BigDecimal.ZERO),
                 CookingMethod.BOILED, true, "{}");
-        List.of(new String[]{"돼지고기", "ETC"}, new String[]{"김치", "PROBIOTIC"},
-                new String[]{"두부", "ETC"}, new String[]{"고춧가루", "CAPSAICIN"})
-                .forEach(pair -> food.addIngredient(
-                        FoodIngredient.of(pair[0], IngredientTag.valueOf(pair[1]))));
+        food.assignStandardFoodName("돼지고기 김치찌개");
+        food.addIngredient(FoodIngredient.of("돼지고기", IngredientTag.ETC));
+        food.addIngredient(FoodIngredient.of("두부", IngredientTag.ETC));
+        food.addIngredient(FoodIngredient.fromStandardTable("김치", IngredientTag.PROBIOTIC));
+        food.addIngredient(FoodIngredient.fromStandardTable("고춧가루", IngredientTag.CAPSAICIN));
         return food;
     }
 

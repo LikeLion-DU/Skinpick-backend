@@ -29,10 +29,8 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
-import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 
 /**
  * 음식 사진 인식. AI 는 "무슨 음식인가"만 판단하고 점수는 Rule Engine 이 계산한다.
@@ -104,22 +102,19 @@ public class FoodAnalysisService {
         Nutrition aiNutrition = toNutrition(aiResult.nutrition());
         Optional<StandardFood> standard = StandardFoodTable.find(foodName);
 
-        // 표준 DB 에 있으면 영양값뿐 아니라 조리법·매운맛까지 고정한다.
-        // 영양값만 고정하면 R02(매운맛)·R07(튀김)이 여전히 AI 추정에 흔들려
-        // 같은 사진에서 점수가 갈린다 — 재현성이 반쪽이 된다.
+        // 표준 DB 에 있으면 **점수 입력을 전부 표준 DB 에서만 받는다** — 영양값·조리법·매운맛,
+        // 그리고 아래의 재료 태그까지. 예전에는 조리법·매운맛을 "AI 보다 확실할 때만" 이기게
+        // 두어 ETC·spicy=false 면 AI 답이 남았는데, 그 틈으로 같은 사진이 다른 점수를 냈다.
         //
-        // 다만 셋의 확신도가 다르다. 영양값은 표준 DB 가 항상 이긴다(룰이 비교하는
-        // 숫자가 그것뿐이다). 조리법·매운맛은 이름에서 뽑은 값이라 사진을 본 AI 보다
-        // 확실할 때만 이긴다 — ETC 와 spicy=false 는 "아니다"가 아니라 "이름만 봐서는
-        // 모르겠다"는 뜻이므로 AI 의 답을 지우지 않는다.
+        // 대가는 이름만 봐서는 튀김인지 모르는 음식이 R07 을 놓치는 것이다. 그 자리는
+        // 실측 포화지방을 보는 R11 이 메운다 — 추정이 아니라 측정이라 흔들리지 않는다.
         Nutrition nutrition = standard
                 .map(food -> food.toNutrition(aiNutrition))
                 .orElse(aiNutrition);
         CookingMethod cookingMethod = standard
                 .map(StandardFood::cookingMethod)
-                .filter(method -> method != CookingMethod.ETC)
                 .orElseGet(() -> toCookingMethod(aiResult.cookingMethod()));
-        boolean spicy = standard.map(StandardFood::spicy).orElse(false) || aiResult.spicy();
+        boolean spicy = standard.map(StandardFood::spicy).orElseGet(aiResult::spicy);
 
         // 이름이 그대로면 debug 로 충분하지만, 다른 이름의 값으로 바뀌었다면 그게 요점이다.
         // "돈코츠 라멘" 이 "라멘" 값을 받은 걸 배포 서버(기본 INFO)에서 볼 수 없으면,
@@ -153,6 +148,10 @@ public class FoodAnalysisService {
                 toEnum(Oiliness.class, aiResult.oiliness(), Oiliness.UNKNOWN),
                 toEnum(ProcessingLevel.class, aiResult.processingLevel(), ProcessingLevel.UNKNOWN)));
 
+        // 매칭된 이름을 남긴다 — 점수가 표준표에서 왔는지를 엔티티 혼자 알 수 있어야
+        // 저장된 기록을 다시 평가하는 시뮬레이션도 같은 판단을 한다.
+        standard.ifPresent(matched -> food.assignStandardFoodName(matched.name()));
+
         food.addIngredients(toIngredients(aiResult.ingredients(), standard.orElse(null)));
         return food;
     }
@@ -172,16 +171,19 @@ public class FoodAnalysisService {
     }
 
     /**
-     * AI 가 사진에서 읽은 재료를 그대로 쓰되, 표준 DB 가 아는 태그를 보탠다.
+     * AI 가 사진에서 읽은 재료와 표준 DB 가 아는 태그를 <b>둘 다</b> 담되, 출처를 표시한다.
      *
-     * AI 를 지우지 않는 이유 — 사진에는 이름에 없는 재료가 보인다("김치찌개"에
-     * 올라간 두부). 표준 DB 를 보태는 이유 — 이름에서 확실히 아는 태그(김치→발효)를
-     * AI 가 어떤 날 빠뜨리면 그날만 점수가 달라진다. 둘은 서로를 대체하지 않는다.
+     * <p>AI 재료를 지우지 않는 이유 — 사진에는 이름에 없는 재료가 보이고("김치찌개"에 올라간
+     * 두부), 화면과 AI 코멘트가 그걸 쓴다. <b>점수는 표준 유래 태그만 본다</b>
+     * ({@code FoodAnalysis.hasTag}) — AI 태그를 점수에 섞으면 같은 사진이 회차마다 다른
+     * 점수를 낸다. 표시와 채점을 가르는 것이 {@code fromStandard} 플래그의 목적이다.
+     *
+     * <p>같은 태그가 양쪽에 다 있으면 표준 쪽만 남긴다 — 화면에 같은 판정이 두 줄 뜨는 것을
+     * 막고, 점수용 태그가 확실히 표준 유래로 남는다.
      */
     private List<FoodIngredient> toIngredients(List<OpenAiFoodResult.Ingredient> ingredients,
                                                StandardFood standard) {
         List<FoodIngredient> result = new ArrayList<>();
-        Set<IngredientTag> seen = EnumSet.noneOf(IngredientTag.class);
 
         if (ingredients != null) {
             ingredients.stream()
@@ -190,21 +192,37 @@ public class FoodAnalysisService {
                     .forEach(ingredient -> {
                         IngredientTag tag = toIngredientTag(ingredient.tag());
                         result.add(FoodIngredient.of(trim(ingredient.name(), 50), tag));
-                        seen.add(tag);
                     });
         }
 
         if (standard != null) {
             for (IngredientTag tag : standard.tags()) {
                 // ETC 는 "모르겠다"는 뜻이라 보탤 값이 없다.
-                if (tag == IngredientTag.ETC || !seen.add(tag)) continue;
+                if (tag == IngredientTag.ETC) continue;
+
+                // 같은 태그를 AI 도 줬으면 그 줄을 표준 유래로 <b>승격</b>한다 —
+                // 이름은 AI 가 본 재료("쌀떡")를 남기고 태그만 표준표가 확정한 것으로 표시한다.
+                // 지우고 표준 이름으로 새로 넣으면 화면의 재료 이름이 음식 이름으로 바뀐다.
+                int existing = indexOfTag(result, tag);
+                if (existing >= 0) {
+                    result.set(existing,
+                            FoodIngredient.fromStandardTable(result.get(existing).getName(), tag));
+                    continue;
+                }
                 if (result.size() >= INGREDIENT_MAX_COUNT) break;
                 // 위 AI 경로와 같은 이유로 자른다 — food_ingredient.name 은 VARCHAR(50) 이고,
                 // 표준 DB 이름은 스크립트가 만든다(`곱창전골_간편조리세트_…`).
-                result.add(FoodIngredient.of(trim(standard.name(), 50), tag));
+                result.add(FoodIngredient.fromStandardTable(trim(standard.name(), 50), tag));
             }
         }
         return result;
+    }
+
+    private static int indexOfTag(List<FoodIngredient> ingredients, IngredientTag tag) {
+        for (int index = 0; index < ingredients.size(); index++) {
+            if (ingredients.get(index).getTag() == tag) return index;
+        }
+        return -1;
     }
 
     /**

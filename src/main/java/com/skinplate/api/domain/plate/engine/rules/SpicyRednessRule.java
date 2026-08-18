@@ -21,7 +21,7 @@ public class SpicyRednessRule implements PlateRule {
     public RuleResult apply(PlateContext context) {
         // 발동은 spicy/CAPSAICIN(표준 테이블이 이긴다), 강도는 AI 관찰값이 정한다.
         // UNKNOWN·NONE(캡사이신으로만 발동)은 1.0 — 특성이 없던 시절과 같은 점수다.
-        Spiciness spiciness = context.food().getTraits().getSpiciness();
+        Spiciness spiciness = context.food().scoringTraits().getSpiciness();
         int delta = SeverityCalculator.apply(
                 R02_SPICY_REDNESS, context.skin().getRedness(), true, intensityOf(spiciness));
 

@@ -44,11 +44,9 @@ class PlateRuleEngineTest {
     @Test
     @DisplayName("예시 B · 연어구이 정식 → 93점")
     void grilledSalmon() {
-        FoodAnalysis food = food("연어구이 정식", CookingMethod.GRILLED, false,
+        FoodAnalysis food = standardFood("연어구이 정식", CookingMethod.GRILLED, false,
                 nutrition(610, "32.0", 1600, "4.0", "28.0", "45.0", "4.4"),
-                List.of(FoodIngredient.of("연어", IngredientTag.OMEGA3),
-                        FoodIngredient.of("브로콜리", IngredientTag.ANTIOXIDANT),
-                        FoodIngredient.of("된장", IngredientTag.PROBIOTIC)));
+                IngredientTag.OMEGA3, IngredientTag.ANTIOXIDANT, IngredientTag.PROBIOTIC);
 
         PlateEvaluation result = engine.evaluate(new PlateContext(SKIN, food));
 
@@ -398,9 +396,9 @@ class PlateRuleEngineTest {
     @Test
     @DisplayName("오메가3는 정상 피부에서도 가점이고, 건조하면 그 위에 개인화가 더 붙는다")
     void omega3ScoresOnCalmSkinAndStacksWithPersonalization() {
-        FoodAnalysis mackerel = food("고등어구이", CookingMethod.GRILLED, false,
+        FoodAnalysis mackerel = standardFood("고등어구이", CookingMethod.GRILLED, false,
                 nutrition(237, "16.3", 329, "0.0", "16.4", "4.6", "3.8"),
-                List.of(FoodIngredient.of("고등어", IngredientTag.OMEGA3)));
+                IngredientTag.OMEGA3);
 
         assertThat(deltaOf(mackerel, "R14")).isEqualTo(4);
 
@@ -441,12 +439,10 @@ class PlateRuleEngineTest {
     @Test
     @DisplayName("R12 는 HIGH_GI 태그와 탄수 30g 이 둘 다 설 때만 걸린다")
     void refinedCarbNeedsBothSignals() {
-        FoodAnalysis potatoSoup = food("감자 된장국", CookingMethod.BOILED, false,
-                nutrition(70, "4.4", 500, "3.1", "2.4", "10.6", "0.5"),
-                List.of(FoodIngredient.of("감자", IngredientTag.HIGH_GI)));
-        FoodAnalysis tteokbokki = food("떡볶이", CookingMethod.GRILLED, false,
-                nutrition(259, "6.3", 704, "7.9", "5.3", "46.7", "0.5"),
-                List.of(FoodIngredient.of("떡", IngredientTag.HIGH_GI)));
+        FoodAnalysis potatoSoup = standardFood("감자 된장국", CookingMethod.BOILED, false,
+                nutrition(70, "4.4", 500, "3.1", "2.4", "10.6", "0.5"), IngredientTag.HIGH_GI);
+        FoodAnalysis tteokbokki = standardFood("떡볶이", CookingMethod.GRILLED, false,
+                nutrition(259, "6.3", 704, "7.9", "5.3", "46.7", "0.5"), IngredientTag.HIGH_GI);
         FoodAnalysis plainRice = food("현미밥", CookingMethod.ETC, false,
                 nutrition(300, "6.0", 10, "0.0", "1.0", "65.0", "0.2"), List.of());
 
@@ -493,15 +489,15 @@ class PlateRuleEngineTest {
     @Test
     @DisplayName("R06 은 재료 태그와 실측 비타민 중 하나만 서도 걸리고, 둘 다 서도 한 번만 준다")
     void vitaminAcceptsEitherSignalButScoresOnce() {
-        FoodAnalysis tagOnly = food("브로콜리 무침", CookingMethod.RAW, false,
-                nutrition(100, "2.0", 100, "0.0"),
-                List.of(FoodIngredient.of("브로콜리", IngredientTag.ANTIOXIDANT)));
+        FoodAnalysis tagOnly = standardFood("브로콜리 무침", CookingMethod.RAW, false,
+                nutrition(100, "2.0", 100, "0.0"), IngredientTag.ANTIOXIDANT);
         FoodAnalysis measuredOnly = micronutrientFood("시금치 된장국", CookingMethod.BOILED,
                 36, "4.1", "0.0", 72, "0.0");                       // 비타민A 밀도 200
         FoodAnalysis both = micronutrientFood("당근 나물", CookingMethod.RAW,
                 100, "2.0", "0.0", 200, "0.0");
 
-        both.addIngredient(FoodIngredient.of("당근", IngredientTag.VITAMIN_A));
+        both.assignStandardFoodName("당근 나물");
+        both.addIngredient(FoodIngredient.fromStandardTable("당근", IngredientTag.VITAMIN_A));
 
         assertThat(deltaOf(tagOnly, "R06")).isEqualTo(5);
         assertThat(deltaOf(measuredOnly, "R06")).isEqualTo(5);
@@ -556,12 +552,22 @@ class PlateRuleEngineTest {
     @Test
     @DisplayName("판정 이유가 현재 피부 상태와 음식 특성을 잇는 문장으로 붙는다")
     void reasonsConnectSkinStateAndFoodTraits() {
+        // 표준 음식표가 확정한 한 끼는 AI 관찰 강도를 점수에도 문장에도 쓰지 않는다 —
+        // 같은 사진이 HOT 과 MEDIUM 을 오가며 -16 과 -12 를 오가던 통로를 막은 결과다.
         FoodAnalysis hotStew = withTraits(demoStew(), Spiciness.HOT, Oiliness.UNKNOWN);
 
         PlateEvaluation evaluation = engine.evaluate(new PlateContext(SKIN, hotStew));
 
         assertThat(reasonOf(evaluation, "R02"))
-                .contains("붉은기가 높은 상태").contains("강한 매운맛").contains("될 수 있어요");
+                .contains("붉은기가 높은 상태").contains("매운 재료가 들어 있어").contains("될 수 있어요");
+
+        // 표준 DB 에서 못 찾은 음식은 다른 단서가 없으므로 관찰 강도를 그대로 쓴다.
+        FoodAnalysis unmatchedHot = withTraits(
+                food("정체불명의 매운 볶음", CookingMethod.GRILLED, true,
+                        nutrition(500, "10.0", 1000, "5.0"), List.of()),
+                Spiciness.HOT, Oiliness.UNKNOWN);
+        assertThat(reasonOf(engine.evaluate(new PlateContext(SKIN, unmatchedHot)), "R02"))
+                .contains("강한 매운맛");
         // 1,850mg 은 새 2단계(>1700)라 수식어가 "매우 높은"으로 올라간다.
         assertThat(reasonOf(evaluation, "R04")).contains("나트륨이 매우 높은 편");
         // 피드백 엔티티까지 실려 내려간다 — DTO 배선은 FeedbackDto.from 이 잇는다.
@@ -592,10 +598,9 @@ class PlateRuleEngineTest {
      * 찍었을 때 나오는 숫자와 이 테스트가 같은 것을 봐야 §18.7 재현이라 부를 수 있다.
      */
     private static FoodAnalysis demoStew() {
-        return food("돼지고기 김치찌개", CookingMethod.BOILED, true,
+        return standardFood("돼지고기 김치찌개", CookingMethod.BOILED, true,
                 nutrition(520, "28.5", 1850, "6.2", "24.0", "32.0", "6.0"),
-                List.of(FoodIngredient.of("김치", IngredientTag.PROBIOTIC),
-                        FoodIngredient.of("고춧가루", IngredientTag.CAPSAICIN)));
+                IngredientTag.PROBIOTIC, IngredientTag.CAPSAICIN);
     }
 
     private static FoodAnalysis withTraits(FoodAnalysis food, Spiciness spiciness, Oiliness oiliness) {
@@ -606,11 +611,28 @@ class PlateRuleEngineTest {
 
     // ---- helpers ----
 
+    /** 표준 음식표에서 못 찾은 한 끼. 재료는 AI 유래라 점수용 태그가 서지 않는다. */
     private static FoodAnalysis food(String name, CookingMethod method, boolean spicy,
                                      Nutrition nutrition, List<FoodIngredient> ingredients) {
         FoodAnalysis food = FoodAnalysis.create(
                 null, name, "한식", nutrition, method, spicy, "{}");
         food.addIngredients(ingredients);
+        return food;
+    }
+
+    /**
+     * 표준 음식표가 확정한 한 끼. <b>점수용 태그는 표준 유래만 선다</b>(2026-08-18) —
+     * 태그가 점수를 움직이는 테스트는 전부 이쪽을 쓴다. AI 유래 재료로 만들면 R06·R09·R14 가
+     * 서지 않는 것이 이제 정상 동작이다.
+     */
+    private static FoodAnalysis standardFood(String name, CookingMethod method, boolean spicy,
+                                             Nutrition nutrition, IngredientTag... tags) {
+        FoodAnalysis food = FoodAnalysis.create(
+                null, name, "한식", nutrition, method, spicy, "{}");
+        food.assignStandardFoodName(name);
+        for (IngredientTag tag : tags) {
+            food.addIngredient(FoodIngredient.fromStandardTable(name, tag));
+        }
         return food;
     }
 

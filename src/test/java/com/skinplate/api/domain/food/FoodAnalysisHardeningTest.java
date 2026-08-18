@@ -94,28 +94,36 @@ class FoodAnalysisHardeningTest {
     }
 
     @Test
-    @DisplayName("표준 DB 의 ETC 는 '아니다'가 아니라 '모르겠다' — 사진을 본 AI 답을 지우지 않는다")
-    void cookingMethod_etcDoesNotOverwriteAi() {
+    @DisplayName("표준 DB 에서 찾으면 조리법도 표준값이 이긴다 — ETC 여도 AI 답을 쓰지 않는다")
+    void cookingMethod_standardWinsEvenWhenEtc() {
         // 가지나물은 이름 규칙으로 조리법이 안 잡혀 ETC 다.
+        // 예전에는 ETC 를 "모르겠다"로 읽어 AI 답(RAW)을 남겼는데, 그 틈으로 같은 사진이
+        // 회차마다 다른 조리법을 얻어 R07 이 켜졌다 꺼졌다. 결정론이 먼저다 —
+        // 이름에 안 드러나는 튀김은 실측 포화지방을 보는 R11 이 메운다.
         FoodAnalysis food = foodAnalysisService.toEntity(null,
                 aiResult("가지나물", "RAW", false));
 
         assertThat(StandardFoodTable.find("가지나물").orElseThrow().cookingMethod())
                 .isEqualTo(CookingMethod.ETC);
-        assertThat(food.getCookingMethod()).isEqualTo(CookingMethod.RAW);
+        assertThat(food.getCookingMethod()).isEqualTo(CookingMethod.ETC);
     }
 
     @Test
-    @DisplayName("표준 DB 의 spicy=false 는 AI 의 매운맛을 지우지 않는다 — 이름에 없을 뿐이다")
-    void spicy_standardNeverClearsAi() {
-        // 부대찌개는 이름에 매운맛 낱말이 없어 표준값이 false 다. 덮어쓰면 홍조 룰(R02)이
-        // 진짜 매운 음식에서 조용히 빠진다.
+    @DisplayName("표준 DB 에서 찾으면 매운맛도 표준값이 이긴다 — AI 가 뭐라 하든 같은 값이다")
+    void spicy_standardWinsWhenMatched() {
+        // 부대찌개는 이름에 매운맛 낱말이 없어 표준값이 false 다.
+        // 예전에는 AI 와 OR 로 묶어 AI 가 true 를 주는 회차에만 R02 가 켜졌다 —
+        // 같은 사진이 다른 점수를 내는 통로였다. 이제 AI 답과 무관하게 같은 값이 나온다.
         assertThat(StandardFoodTable.find("부대찌개").orElseThrow().spicy()).isFalse();
 
         assertThat(foodAnalysisService.toEntity(null, aiResult("부대찌개", "BOILED", true))
-                .isSpicy()).isTrue();
+                .isSpicy()).isFalse();
         assertThat(foodAnalysisService.toEntity(null, aiResult("부대찌개", "BOILED", false))
                 .isSpicy()).isFalse();
+
+        // 표준 DB 에서 못 찾으면 다른 단서가 없으므로 AI 답을 그대로 쓴다.
+        assertThat(foodAnalysisService.toEntity(null, aiResult("정체불명의 새 음식", "BOILED", true))
+                .isSpicy()).isTrue();
     }
 
     // ---- 관찰 특성 (스키마 v2) ----

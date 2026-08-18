@@ -159,9 +159,11 @@ class StandardFoodScoringTest {
                 standard.cookingMethod() == null ? CookingMethod.ETC : standard.cookingMethod(),
                 standard.spicy(), "{}");
 
+        // 표준 유래 태그로 넣는다 — 점수용 태그는 이것만 선다(FoodAnalysis.hasTag).
+        food.assignStandardFoodName(standard.name());
         for (IngredientTag tag : standard.tags()) {
             if (tag != IngredientTag.ETC) {
-                food.addIngredient(FoodIngredient.of(standard.name(), tag));
+                food.addIngredient(FoodIngredient.fromStandardTable(standard.name(), tag));
             }
         }
         return food;
