@@ -16,11 +16,11 @@ public final class RuleConstants {
     // ---- 룰별 기본 델타 (severityFactor 적용 전) ----
     public static final int R01_HYDRATION_FOOD   =  8;   // 건조 × 수분/오메가3
     public static final int R02_SPICY_REDNESS    = -10;  // 홍조 × 매운 음식
-    public static final int R03_SUGAR_TROUBLE    = -12;  // 트러블 × 당류 과다
+    public static final int R03_SUGAR_TROUBLE    = -12;  // 당류 과다 — 게이트 없음, 심각도로 개인화
     public static final int R04_SODIUM           = -8;   // 나트륨 과다
     public static final int R05_PROTEIN          =  6;   // 단백질 충분
     public static final int R06_VITAMIN          =  5;   // 비타민/항산화
-    public static final int R07_FRIED_OIL        = -10;  // 유분 × 튀김/기름진 음식
+    public static final int R07_FRIED_OIL        = -10;  // 튀김/기름진 음식 — 게이트 없음, 심각도로 개인화
     public static final int R08_OMEGA3_BARRIER   =  7;   // 장벽 약화 × 오메가3
     public static final int R09_PROBIOTIC        =  4;   // 발효식품
     // 피부 지표와 직접 매지 않는 보조 룰이라 심각도 계수를 태우지 않는 고정 델타다.
@@ -54,7 +54,7 @@ public final class RuleConstants {
     public static final double OILINESS_NON_FRIED_FACTOR = 0.7;
 
     // ---- 영양 단계화 ----
-    // 당류는 VERY_HIGH 에서 감점을 더한다. 25~40g 구간은 기존과 동일하다.
+    // 당류는 VERY_HIGH(40g 초과)에서 감점을 더한다. 15~40g 은 기본 델타 그대로다.
     //
     // 경계값(몇 g부터 많다고 보는가)은 여기 없다 — Nutrition 이 SODIUM/PROTEIN/
     // SUGAR/CALORIES 임계값을 이미 전부 쥐고 있고, 단계 경계만 이리 떼어 오면

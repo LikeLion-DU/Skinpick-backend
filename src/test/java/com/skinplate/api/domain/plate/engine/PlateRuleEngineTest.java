@@ -162,8 +162,83 @@ class PlateRuleEngineTest {
         assertThat(evaluation.results()).noneMatch(RuleResult::hasAction);
     }
 
+    // ---- 음식 축 · 피부 게이트 제거 (2026-08-18) ----
+
+    /**
+     * 게이트가 있던 시절 이 두 음식은 <b>똑같이 70점</b>이었다. 그게 이 개편의 출발점이다.
+     */
     @Test
-    @DisplayName("당류 40g 초과는 감점을 더한다 — 25~40g 구간은 기존 그대로다")
+    @DisplayName("정상 피부에서도 튀김과 당류는 감점된다 — 감자튀김과 샐러드가 같은 점수일 수 없다")
+    void foodBurdenAppliesOnCalmSkin() {
+        SkinMetrics calm = SkinMetrics.of(60, 50, 40, 40, 60);   // 어떤 게이트도 통과하지 못하는 지표
+
+        FoodAnalysis fried = food("감자튀김", CookingMethod.FRIED, false,
+                nutrition(400, "6.0", 300, "1.0"), List.of());
+        FoodAnalysis sugary = food("탄산음료 세트", CookingMethod.ETC, false,
+                nutrition(400, "6.0", 300, "20.0"), List.of());
+        FoodAnalysis plain = food("닭가슴살 샐러드", CookingMethod.RAW, false,
+                nutrition(150, "12.0", 300, "3.0"), List.of());
+
+        // 심각도 0.6 — 발동하지 않는 것이 아니라 약하게 걸린다.
+        assertThat(engine.evaluate(new PlateContext(calm, fried)).score()).isEqualTo(70 - 6);
+        assertThat(engine.evaluate(new PlateContext(calm, sugary)).score()).isEqualTo(70 - 7);
+        assertThat(engine.evaluate(new PlateContext(calm, plain)).score()).isEqualTo(70);
+    }
+
+    @Test
+    @DisplayName("같은 튀김이 피부 상태에 따라 -6 / -12 / -15 로 벌어진다")
+    void friedPenaltyScalesWithOil() {
+        FoodAnalysis fried = food("감자튀김", CookingMethod.FRIED, false,
+                nutrition(400, "6.0", 300, "1.0"), List.of());
+
+        assertThat(engine.evaluate(new PlateContext(SkinMetrics.of(60, 50, 40, 40, 60), fried)).score())
+                .isEqualTo(70 - 6);
+        assertThat(engine.evaluate(new PlateContext(SkinMetrics.of(60, 75, 40, 40, 60), fried)).score())
+                .isEqualTo(70 - 12);
+        assertThat(engine.evaluate(new PlateContext(SkinMetrics.of(60, 85, 40, 40, 60), fried)).score())
+                .isEqualTo(70 - 15);
+    }
+
+    /**
+     * 게이트를 떼면 문장이 거짓이 될 수 있다 — 유분·트러블이 정상인 사람에게
+     * "지금 유분이 높은 상태에서" 라고 말하는 순간 화면이 사실이 아닌 것을 말한다.
+     */
+    @Test
+    @DisplayName("피부가 정상이면 판정 이유가 피부 상태를 단정하지 않는다")
+    void reasonDoesNotClaimSkinStateWhenCalm() {
+        SkinMetrics calm = SkinMetrics.of(60, 50, 40, 40, 60);
+
+        FoodAnalysis fried = food("감자튀김", CookingMethod.FRIED, false,
+                nutrition(400, "6.0", 300, "20.0"), List.of());
+
+        PlateEvaluation evaluation = engine.evaluate(new PlateContext(calm, fried));
+
+        assertThat(reasonOf(evaluation, "R07")).doesNotContain("지금 유분이").contains("튀김 조리라");
+        assertThat(reasonOf(evaluation, "R03")).doesNotContain("트러블 지표").contains("당류가 많은 편이라");
+
+        // 피부가 나쁘면 예전처럼 지표를 잇는 문장이 나온다.
+        PlateEvaluation personalized = engine.evaluate(
+                new PlateContext(SkinMetrics.of(60, 85, 40, 85, 60), fried));
+        assertThat(reasonOf(personalized, "R07")).contains("지금 유분이 많이 높은 상태");
+        assertThat(reasonOf(personalized, "R03")).contains("트러블 지표가 많이 올라와 있는");
+    }
+
+    @Test
+    @DisplayName("당류 임계는 15g 이다 — 국물떡볶이(33g)가 비켜 가던 25g 을 내렸다")
+    void sugarThresholdIsFifteenGrams() {
+        SkinMetrics calm = SkinMetrics.of(60, 50, 40, 40, 60);
+
+        FoodAnalysis atBoundary = food("국물떡볶이", CookingMethod.BOILED, false,
+                nutrition(400, "6.0", 300, "15.0"), List.of());
+        FoodAnalysis overBoundary = food("국물떡볶이", CookingMethod.BOILED, false,
+                nutrition(400, "6.0", 300, "15.1"), List.of());
+
+        assertThat(engine.evaluate(new PlateContext(calm, atBoundary)).score()).isEqualTo(70);
+        assertThat(engine.evaluate(new PlateContext(calm, overBoundary)).score()).isEqualTo(70 - 7);
+    }
+
+    @Test
+    @DisplayName("당류 40g 초과는 감점을 더한다 — 15~40g 구간은 기본 델타 그대로다")
     void sugarVeryHighAddsExtraPenalty() {
         SkinMetrics troubledSkin = SkinMetrics.of(50, 50, 50, 65, 50);   // 트러블 65 → 심각도 1.2
 

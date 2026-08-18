@@ -6,6 +6,14 @@ import org.springframework.stereotype.Component;
 
 import static com.skinplate.api.domain.plate.engine.RuleConstants.*;
 
+/**
+ * R07 · 튀김 · 기름진 음식.
+ *
+ * <p><b>피부 게이트가 없다.</b> 유분이 정상이어도 튀김은 그 자체로 부담이다 — 게이트가
+ * 있던 시절에는 유분 70 이하 사용자에게 <b>감자튀김과 닭가슴살 샐러드가 똑같이 70점</b>이었다.
+ *
+ * <p>개인화는 발동 여부가 아니라 <b>크기</b>로 한다 — 정상 -6 · 중간 -12 · 심함 -15.
+ */
 @Component
 public class FriedOilRule implements PlateRule {
 
@@ -19,9 +27,8 @@ public class FriedOilRule implements PlateRule {
      */
     @Override
     public boolean supports(PlateContext context) {
-        return context.skin().isOily()
-                && (context.food().isFried()
-                        || context.food().getTraits().getOiliness() == Oiliness.HIGH);
+        return context.food().isFried()
+                || context.food().getTraits().getOiliness() == Oiliness.HIGH;
     }
 
     @Override
@@ -33,19 +40,31 @@ public class FriedOilRule implements PlateRule {
         int delta = SeverityCalculator.apply(R07_FRIED_OIL, context.skin().getOil(), true,
                 fried ? 1.0 : OILINESS_NON_FRIED_FACTOR);
 
-        String oilLevel = SeverityCalculator.isSevere(context.skin().getOil(), true)
-                ? "많이 높은" : "높은";
-
         if (fried) {
             return RuleResult.caution(code(), delta,
                     "튀김 조리",
-                    "지금 유분이 " + oilLevel + " 상태에서 튀김 조리가 부담이 될 수 있어요.",
+                    reason(context, "튀김 조리라", "튀김 조리가"),
                     "튀김옷을 일부 제거해 보세요.", GAIN_REMOVE_BATTER);
         }
 
         // 튀김옷이 없으니 REMOVE_BATTER 행동 카드가 성립하지 않는다 — 주의만 준다.
         return RuleResult.caution(code(), delta,
                 "기름진 음식",
-                "지금 유분이 " + oilLevel + " 상태에서 기름기가 많은 음식이라 부담이 될 수 있어요.");
+                reason(context, "기름기가 많은 음식이라", "기름기가 많은 음식이라"));
+    }
+
+    /**
+     * 유분이 정상인 사람에게 "지금 유분이 높은 상태에서" 라고 말하면 거짓이다.
+     * 게이트를 뗀 대가로 문장도 두 갈래가 된다 — 음식만 말하는 쪽과 피부를 잇는 쪽.
+     */
+    private static String reason(PlateContext context, String foodOnly, String withSkin) {
+        if (SeverityCalculator.isMild(context.skin().getOil(), true)) {
+            return foodOnly + " 피부에 부담이 될 수 있어요.";
+        }
+
+        String oilLevel = SeverityCalculator.isSevere(context.skin().getOil(), true)
+                ? "많이 높은" : "높은";
+
+        return "지금 유분이 " + oilLevel + " 상태에서 " + withSkin + " 부담이 될 수 있어요.";
     }
 }

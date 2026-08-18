@@ -17,7 +17,12 @@ public class Nutrition {
 
     public static final int SODIUM_THRESHOLD_MG   = 1500;   // 초과 시 감점
     public static final int PROTEIN_THRESHOLD_G   = 20;     // 이상이면 가점
-    public static final int SUGAR_THRESHOLD_G     = 25;     // 초과 시 감점
+    /**
+     * 초과 시 감점(R03). 25g 은 표준 음식 1,452종에서 <b>상위 2.5%</b>(p97.5)라
+     * 사실상 아무것도 걸리지 않던 값이다 — 당류 33g 짜리 국물떡볶이조차 비켜 갔다.
+     * 15g 은 p92 근처이고, 이 표의 당류 중앙값이 2.8g · p75 가 6.4g 이다.
+     */
+    public static final int SUGAR_THRESHOLD_G     = 15;     // 초과 시 감점
     public static final int CALORIES_THRESHOLD    = 900;    // 초과 시 감점 (R10)
 
     // 단계화 경계. 임계값은 전부 이 클래스가 소유한다 — 룰이 제 안에 숫자를 들면
@@ -67,7 +72,7 @@ public class Nutrition {
     public boolean isHighProtein() { return proteinG.compareTo(BigDecimal.valueOf(PROTEIN_THRESHOLD_G)) >= 0; }
     public boolean isHighCalorie() { return caloriesKcal > CALORIES_THRESHOLD; }
 
-    /** isHighSugar 를 이미 통과한 뒤 한 단계 더 보는 값이다. 25~40g 은 false. */
+    /** isHighSugar 를 이미 통과한 뒤 한 단계 더 보는 값이다. 15~40g 은 false. */
     public boolean isVeryHighSugar()  { return sugarG.compareTo(BigDecimal.valueOf(SUGAR_VERY_HIGH_G)) > 0; }
 
     /** 점수에는 쓰지 않는다 — R04 는 이미 초과량 비례라, 문구의 수식어만 가른다. */
