@@ -408,11 +408,16 @@ public class SkinPlateService {
     }
 
     /**
-     * REMOVE_BATTER 는 영양값을 건드리지 않는다. 어떤 룰도 지방을 보지 않아
-     * 점수에 영향이 0 이고, 실제 효과는 cookingMethod = GRILLED 로 R07 이 꺼지는 것뿐이다.
+     * REMOVE_BATTER 는 영양값을 건드리지 않는다. 실제 효과는 cookingMethod = GRILLED 로
+     * R07 이 꺼지는 것뿐이다 — 튀김옷을 걷어낸 뒤의 포화지방을 이 앱이 알 방법이 없어
+     * R11 은 그대로 둔다. 없는 숫자를 지어내 깎는 것보다 안 건드리는 편이 설명 가능하다.
      *
      * LESS_RICE 도 같은 원칙으로 열량만 3/4 로 줄인다 — R10 이 보는 값이 그것뿐이다.
-     * 탄수까지 줄이면 정확해 보이지만, 어떤 룰도 안 보는 숫자를 고치는 것은 거짓 정밀함이다.
+     * 탄수까지 줄이면 정확해 보이지만, 그 숫자를 보는 R12 는 <b>정제 탄수 재료가 있는가</b>를
+     * 함께 묻는 룰이라 밥을 덜 먹었다고 재료가 사라지지 않는다.
+     *
+     * <b>확장 영양 다섯 개는 그대로 옮긴다.</b> 빠뜨리면 시뮬레이션의 before 가 저장 점수와
+     * 갈라진다 — 원본에 포화지방이 있는데 사본에는 0 이라 R11 이 통째로 사라지기 때문이다.
      */
     private Nutrition adjustNutrition(Nutrition nutrition, List<PlateActionCode> actions) {
         int calories = actions.contains(PlateActionCode.LESS_RICE)
@@ -428,7 +433,9 @@ public class SkinPlateService {
                 : nutrition.getSugarG();
 
         return Nutrition.of(calories, nutrition.getProteinG(),
-                nutrition.getFatG(), nutrition.getCarbG(), sodium, sugar);
+                        nutrition.getFatG(), nutrition.getCarbG(), sodium, sugar)
+                .withMicronutrients(nutrition.getSaturatedFatG(), nutrition.getFiberG(),
+                        nutrition.getVitaminAUg(), nutrition.getVitaminCMg(), nutrition.getZincMg());
     }
 
     /** 행동으로 사라진 감점 룰. S07 에서 "나트륨 과다 카드가 없어졌다"를 보여주는 데 쓴다. */

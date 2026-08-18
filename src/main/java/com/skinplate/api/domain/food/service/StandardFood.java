@@ -25,6 +25,11 @@ public record StandardFood(
         BigDecimal carbG,
         Integer sodiumMg,
         BigDecimal sugarG,
+        BigDecimal saturatedFatG,
+        BigDecimal fiberG,
+        Integer vitaminAUg,
+        BigDecimal vitaminCMg,
+        BigDecimal zincMg,
         CookingMethod cookingMethod,
         boolean spicy,
         List<IngredientTag> tags,
@@ -37,12 +42,16 @@ public record StandardFood(
      * 거짓이 되므로, 비어 있으면 AI 추정치를 그대로 쓴다.
      */
     public Nutrition toNutrition(Nutrition fallback) {
+        // 확장 다섯 개는 fallback 이 없다 — AI 스키마에 애초에 없는 값이라
+        // 표준 테이블에 없으면 0(=모른다)으로 남는다. 그 상태에서는 R11·R15·R06 의
+        // 실측 경로가 발동하지 않을 뿐, 없는 값을 지어내지 않는다.
         return Nutrition.of(
                 caloriesKcal != null ? caloriesKcal : fallback.getCaloriesKcal(),
                 proteinG != null ? proteinG : fallback.getProteinG(),
                 fatG != null ? fatG : fallback.getFatG(),
                 carbG != null ? carbG : fallback.getCarbG(),
                 sodiumMg != null ? sodiumMg : fallback.getSodiumMg(),
-                sugarG != null ? sugarG : fallback.getSugarG());
+                sugarG != null ? sugarG : fallback.getSugarG())
+                .withMicronutrients(saturatedFatG, fiberG, vitaminAUg, vitaminCMg, zincMg);
     }
 }

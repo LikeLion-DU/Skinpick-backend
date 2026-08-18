@@ -24,7 +24,7 @@ class PlateRuleEngineTest {
             new SodiumRule(), new SpicyRednessRule(), new SugarTroubleRule(),
             new FriedOilRule(), new HydrationFoodRule(), new Omega3BarrierRule(),
             new ProteinRule(), new VitaminRule(), new ProbioticRule(),
-            new HighCalorieRule()));
+            new HighCalorieRule(), new SaturatedFatRule(), new RefinedCarbRule()));
 
     @Test
     @DisplayName("예시 A · 돼지고기 김치찌개 → 60점")
@@ -314,6 +314,108 @@ class PlateRuleEngineTest {
         assertThat(beyondHelpResult.appliedRuleCodes()).contains("R10");
     }
 
+    // ---- R11 포화지방 · R12 정제 탄수 (2026-08-18) ----
+
+    private static final SkinMetrics CALM = SkinMetrics.of(60, 50, 40, 40, 60);
+
+    /**
+     * <b>이 룰이 존재하는 이유가 이 테스트다.</b> 총지방으로 재던 시절 연어(28g)와
+     * 스테이크(39g)는 둘 다 최상위 구간이라 같은 -10 을 먹었다. 등푸른생선의 지방은
+     * 불포화가 주라 같은 벌을 줄 근거가 없고, 그 한계를 "OMEGA3 태그면 완화" 라는
+     * 대리 지표로 메우고 있었다. 실측 포화지방이 그 우회로를 지운다.
+     */
+    @Test
+    @DisplayName("총지방이 비슷해도 포화지방이 다르면 갈린다 — 생선은 비켜 가고 붉은 고기·튀김은 걸린다")
+    void saturatedFatSeparatesFishFromRedMeat() {
+        // 표준 음식 테이블의 실제 값이다.
+        FoodAnalysis salmon = food("연어구이", CookingMethod.GRILLED, false,
+                nutrition(610, "32.0", 300, "4.0", "28.0", "45.0", "4.4"), List.of());
+        FoodAnalysis mackerel = food("고등어구이", CookingMethod.GRILLED, false,
+                nutrition(237, "16.3", 329, "0.0", "16.4", "4.6", "3.8"), List.of());
+        FoodAnalysis tuna = food("참치구이", CookingMethod.GRILLED, false,
+                nutrition(347, "47.8", 826, "0.0", "16.2", "2.5", "5.0"), List.of());
+        FoodAnalysis steak = food("스테이크", CookingMethod.GRILLED, false,
+                nutrition(766, "52.7", 1061, "18.1", "39.1", "35.6", "12.7"), List.of());
+        FoodAnalysis porkCutlet = food("치즈돈가스", CookingMethod.FRIED, false,
+                nutrition(755, "42.0", 870, "3.6", "46.7", "36.4", "13.6"), List.of());
+
+        // 고등어 3.8g 은 1단계 경계(3.9) 아래라 아예 안 걸린다.
+        assertThat(rulesOf(salmon)).contains("R11");
+        assertThat(rulesOf(mackerel)).doesNotContain("R11");
+        assertThat(deltaOf(salmon, "R11")).isEqualTo(-2);
+        assertThat(deltaOf(tuna, "R11")).isEqualTo(-2);
+        assertThat(deltaOf(steak, "R11")).isEqualTo(-10);
+        assertThat(deltaOf(porkCutlet, "R11")).isEqualTo(-10);
+
+        // 상식적인 순서가 점수로 나온다 — 생선이 위, 붉은 고기·튀김이 아래.
+        assertThat(scoreOf(mackerel)).isGreaterThan(scoreOf(steak));
+        assertThat(scoreOf(tuna)).isGreaterThan(scoreOf(porkCutlet));
+    }
+
+    @Test
+    @DisplayName("포화지방 3단계 경계 — 초과부터 걸린다")
+    void saturatedFatTiers() {
+        assertThat(rulesOf(withSaturatedFat("3.9"))).doesNotContain("R11");
+        assertThat(deltaOf(withSaturatedFat("4.0"), "R11")).isEqualTo(-2);
+        assertThat(deltaOf(withSaturatedFat("8.3"), "R11")).isEqualTo(-7);
+        assertThat(deltaOf(withSaturatedFat("12.4"), "R11")).isEqualTo(-10);
+    }
+
+    /**
+     * 표준 테이블에서 못 찾은 음식은 포화지방이 0 이다 — AI 스키마에 그 값이 없다.
+     * 모르는 값을 추정해 깎지 않는다는 뜻이고, 이 동작이 바뀌면 AI 추정치가 점수를
+     * 흔들기 시작한다.
+     */
+    @Test
+    @DisplayName("포화지방을 모르는 음식은 R11 이 걸리지 않는다")
+    void unknownSaturatedFatDoesNotTrigger() {
+        FoodAnalysis unknown = food("정체불명", CookingMethod.ETC, false,
+                nutrition(500, "10.0", 300, "2.0"), List.of());   // 확장 영양이 전부 0
+
+        assertThat(rulesOf(unknown)).doesNotContain("R11");
+    }
+
+    /**
+     * HIGH_GI 태그만 보면 감자 된장국(70kcal · 탄수 10.6g)이 깎인다 — 태깅이 재료
+     * 이름을 보기 때문이다. "재료가 있다"와 "많이 먹는다"는 다른 말이라 둘 다 물어본다.
+     */
+    @Test
+    @DisplayName("R12 는 HIGH_GI 태그와 탄수 30g 이 둘 다 설 때만 걸린다")
+    void refinedCarbNeedsBothSignals() {
+        FoodAnalysis potatoSoup = food("감자 된장국", CookingMethod.BOILED, false,
+                nutrition(70, "4.4", 500, "3.1", "2.4", "10.6", "0.5"),
+                List.of(FoodIngredient.of("감자", IngredientTag.HIGH_GI)));
+        FoodAnalysis tteokbokki = food("떡볶이", CookingMethod.GRILLED, false,
+                nutrition(259, "6.3", 704, "7.9", "5.3", "46.7", "0.5"),
+                List.of(FoodIngredient.of("떡", IngredientTag.HIGH_GI)));
+        FoodAnalysis plainRice = food("현미밥", CookingMethod.ETC, false,
+                nutrition(300, "6.0", 10, "0.0", "1.0", "65.0", "0.2"), List.of());
+
+        assertThat(rulesOf(potatoSoup)).doesNotContain("R12");     // 태그는 있지만 탄수가 적다
+        assertThat(deltaOf(tteokbokki, "R12")).isEqualTo(-4);
+        assertThat(rulesOf(plainRice)).doesNotContain("R12");      // 탄수는 많지만 태그가 없다
+    }
+
+    private FoodAnalysis withSaturatedFat(String grams) {
+        return food("시험용", CookingMethod.ETC, false,
+                nutrition(300, "5.0", 300, "1.0", "20.0", "5.0", grams), List.of());
+    }
+
+    private int scoreOf(FoodAnalysis food) {
+        return engine.evaluate(new PlateContext(CALM, food)).score();
+    }
+
+    private List<String> rulesOf(FoodAnalysis food) {
+        return engine.evaluate(new PlateContext(CALM, food)).appliedRuleCodes();
+    }
+
+    private int deltaOf(FoodAnalysis food, String ruleCode) {
+        return engine.evaluate(new PlateContext(CALM, food)).results().stream()
+                .filter(result -> result.ruleCode().equals(ruleCode))
+                .findFirst().orElseThrow()
+                .delta();
+    }
+
     /**
      * reason 은 결정론 템플릿이다 — 같은 입력이면 같은 문장. 현재 피부 지표와 음식
      * 특성을 잇되 인과를 단정하지 않는다("부담이 될 수 있어요"까지).
@@ -378,5 +480,14 @@ class PlateRuleEngineTest {
     private static Nutrition nutrition(int kcal, String protein, int sodium, String sugar) {
         return Nutrition.of(kcal, new BigDecimal(protein), BigDecimal.ZERO,
                             BigDecimal.ZERO, sodium, new BigDecimal(sugar));
+    }
+
+    /** 지방·탄수와 포화지방까지 실은 픽스처. 표준 테이블에서 찾은 음식이 이 모양이다. */
+    private static Nutrition nutrition(int kcal, String protein, int sodium, String sugar,
+                                       String fat, String carb, String saturatedFat) {
+        return Nutrition.of(kcal, new BigDecimal(protein), new BigDecimal(fat),
+                            new BigDecimal(carb), sodium, new BigDecimal(sugar))
+                .withMicronutrients(new BigDecimal(saturatedFat), BigDecimal.ZERO,
+                                    0, BigDecimal.ZERO, BigDecimal.ZERO);
     }
 }

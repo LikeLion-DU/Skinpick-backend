@@ -31,6 +31,11 @@ public final class RuleConstants {
     // 같은 이유로 ConcernRules 에도 매지 않는다.
     public static final int R10_HIGH_CALORIE      = -4;  // >660kcal (p90)
     public static final int R10_VERY_HIGH_CALORIE = -7;  // >790kcal (p95)
+    // R11 도 같은 이유(피부 지표와 못 매단다)로 심각도 계수 없이 고정이다.
+    public static final int R11_SAT_FAT           = -2;  // >3.9g  (p75)
+    public static final int R11_SAT_FAT_HIGH      = -7;  // >8.2g  (p90)
+    public static final int R11_SAT_FAT_EXTREME   = -10; // >12.3g (p95)
+    public static final int R12_REFINED_CARB      = -4;  // HIGH_GI 태그 + 탄수 30g 이상
 
     // ---- 추천 행동 시 회복 점수 ----
     public static final int GAIN_LESS_SPICY      = 6;

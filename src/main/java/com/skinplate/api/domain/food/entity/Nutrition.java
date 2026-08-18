@@ -38,12 +38,43 @@ public class Nutrition {
     public static final int SODIUM_EXTREME_MG     = 2300;   // 나트륨 3단계 (p95 근처)
     public static final int CALORIES_VERY_HIGH    = 790;    // 열량 2단계 (p95)
 
+    /**
+     * 포화지방 단계 (R11). 표준 음식 1,443종 1인분의 p75 / p90 / p95 다.
+     *
+     * <p><b>총지방이 아니라 포화지방인 것이 요점이다.</b> 총지방으로 재면 연어(28g)와
+     * 스테이크(39g)가 같은 단계에 들어가는데, 포화지방으로 보면 연어 4.4g · 스테이크 12.7g 로
+     * 갈린다. 총지방을 쓰던 시절에는 이 한계를 "OMEGA3 태그면 한 단계 완화" 라는 대리
+     * 지표로 메웠고, 이제 실측값이 있으니 그 우회로가 통째로 필요 없다.
+     */
+    public static final double SAT_FAT_THRESHOLD_G = 3.9;
+    public static final double SAT_FAT_HIGH_G      = 8.2;
+    public static final double SAT_FAT_EXTREME_G   = 12.3;
+
+    /**
+     * R12(정제탄수)가 HIGH_GI 태그와 <b>함께</b> 보는 값.
+     *
+     * <p>태그만으로 걸면 감자 된장국(70kcal · 탄수 10.6g)이 감점을 먹는다 — 태깅이
+     * 재료 이름을 보기 때문이다. "정제 탄수 재료가 들었다"(태그)와 "실제로 많이 들었다"(이 값)
+     * 두 신호가 다 있을 때만 깎는다.
+     */
+    public static final int REFINED_CARB_MIN_G = 30;
+
     @Column(name = "calories_kcal", nullable = false) private int caloriesKcal;
     @Column(name = "protein_g", nullable = false, precision = 6, scale = 2) private BigDecimal proteinG;
     @Column(name = "fat_g",     nullable = false, precision = 6, scale = 2) private BigDecimal fatG;
     @Column(name = "carb_g",    nullable = false, precision = 6, scale = 2) private BigDecimal carbG;
     @Column(name = "sodium_mg", nullable = false) private int sodiumMg;
     @Column(name = "sugar_g",   nullable = false, precision = 6, scale = 2) private BigDecimal sugarG;
+
+    // ---- 표준 영양 확장 (V9) ----
+    // 전부 "모르면 0" 이다. 이 다섯을 보는 룰이 전부 "값이 클수록 발동" 이라
+    // 모르는 값은 어느 쪽으로도 점수를 움직이지 않는다. AI 스키마에는 이 다섯이 없으므로
+    // 표준 테이블에서 못 찾은 음식은 항상 0 으로 남는다.
+    @Column(name = "saturated_fat_g", nullable = false, precision = 6, scale = 2) private BigDecimal saturatedFatG;
+    @Column(name = "fiber_g",      nullable = false, precision = 6, scale = 2) private BigDecimal fiberG;
+    @Column(name = "vitamin_a_ug", nullable = false) private int vitaminAUg;
+    @Column(name = "vitamin_c_mg", nullable = false, precision = 6, scale = 2) private BigDecimal vitaminCMg;
+    @Column(name = "zinc_mg",      nullable = false, precision = 6, scale = 2) private BigDecimal zincMg;
 
     /**
      * 컬럼이 NUMERIC(6,2) 라 9999.99 를 넘으면 저장에서 `numeric field overflow` 가 난다.
@@ -60,7 +91,24 @@ public class Nutrition {
         return new Nutrition(
                 Math.max(0, caloriesKcal),
                 clamp(proteinG), clamp(fatG), clamp(carbG),
-                Math.max(0, sodiumMg), clamp(sugarG));
+                Math.max(0, sodiumMg), clamp(sugarG),
+                BigDecimal.ZERO, BigDecimal.ZERO, 0, BigDecimal.ZERO, BigDecimal.ZERO);
+    }
+
+    /**
+     * 표준 영양 확장 다섯 개를 얹은 사본. <b>여섯 인자짜리 of() 를 열한 개로 늘리지 않는
+     * 이유</b>는 이 다섯이 늘 함께 오고 늘 함께 비기 때문이다 — 표준 테이블에서 찾으면
+     * 다섯 다 있고, 못 찾으면 다섯 다 없다. 인자 열한 개를 순서로 맞추는 호출부보다
+     * 이쪽이 잘못 넣기 어렵다.
+     */
+    public Nutrition withMicronutrients(BigDecimal saturatedFatG, BigDecimal fiberG,
+                                        Integer vitaminAUg, BigDecimal vitaminCMg,
+                                        BigDecimal zincMg) {
+        return new Nutrition(
+                this.caloriesKcal, this.proteinG, this.fatG, this.carbG, this.sodiumMg, this.sugarG,
+                clamp(saturatedFatG), clamp(fiberG),
+                vitaminAUg == null ? 0 : Math.max(0, vitaminAUg),
+                clamp(vitaminCMg), clamp(zincMg));
     }
 
     /** 0 미만은 0 으로, 컬럼 상한을 넘으면 상한으로. 소수 자리도 컬럼에 맞춘다. */
@@ -108,6 +156,20 @@ public class Nutrition {
 
     public int sodiumTier()  { return sodiumTierOf(sodiumMg); }
     public int calorieTier() { return calorieTierOf(caloriesKcal); }
+
+    /** 포화지방 단계 0~3. 값이 없으면(=0) 0 이라 R11 이 발동하지 않는다. */
+    public int saturatedFatTier() {
+        double grams = saturatedFatG.doubleValue();
+        if (grams > SAT_FAT_EXTREME_G)   return 3;
+        if (grams > SAT_FAT_HIGH_G)      return 2;
+        if (grams > SAT_FAT_THRESHOLD_G) return 1;
+        return 0;
+    }
+
+    /** HIGH_GI 태그가 붙은 음식에서 "실제로 정제 탄수가 많은가"를 되묻는다. */
+    public boolean hasRefinedCarbLoad() {
+        return carbG.compareTo(BigDecimal.valueOf(REFINED_CARB_MIN_G)) >= 0;
+    }
 
     private static BigDecimal nonNull(BigDecimal value) {
         return value == null ? BigDecimal.ZERO : value.max(BigDecimal.ZERO);

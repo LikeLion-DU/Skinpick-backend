@@ -38,7 +38,7 @@ import java.util.Set;
  * 끝난다는 규칙(CLAUDE.md)은 <b>점수 계산</b>에 대한 것이고, 여기 안 적힌 룰은 고민 점수에만
  * 조용히 빠진다 — 아무것도 실패하지 않고 숫자만 틀린다.
  *
- * <p><b>R10(고열량)은 어느 고민에도 매지 않았다.</b> 고열량↔특정 피부 고민의 대응을
+ * <p><b>R10(고열량)·R11(포화지방)은 어느 고민에도 매지 않았다.</b> 고열량↔특정 피부 고민의 대응을
  * 이 앱이 증명할 수 없다 — 억지로 매달면 "많이 먹어서 트러블"이라는, 숫자로 하는
  * 단정이 된다. 종합 점수에는 이미 반영되므로 고민 점수에서만 빠진다.
  *
@@ -52,16 +52,17 @@ public final class ConcernRules {
     private ConcernRules() {}
 
     private static final Map<SkinConcern, Set<String>> RULES = Map.of(
-            SkinConcern.ACNE,         Set.of("R03", "R07", "R09"),  // 당류·튀김 / 발효식품
+            // R12(정제 탄수)는 R03(당류)과 같은 당화 축이라 R03 이 있는 자리에 함께 넣는다.
+            SkinConcern.ACNE,         Set.of("R03", "R12", "R07", "R09"),
             SkinConcern.REDNESS,      Set.of("R02", "R06"),         // 매운맛 / 항산화
             SkinConcern.DRYNESS,      Set.of("R01", "R08", "R04"),  // 수분·오메가3 / 나트륨
-            SkinConcern.OILINESS,     Set.of("R07", "R03", "R06"),
+            SkinConcern.OILINESS,     Set.of("R07", "R03", "R12", "R06"),
             SkinConcern.TEXTURE,      Set.of("R06", "R05", "R07"),
             // 색소침착·탄력에 R03(당류 과다)·R07(튀김)을 함께 매단다. 가점 룰만 있으면
             // 두 칸은 70 아래로 내려갈 수 없고, 다른 고민과 도달 범위가 달라 같은
             // 뱃지가 다른 뜻이 된다. 당화·산화는 두 고민이 공유하는 축이다.
-            SkinConcern.PIGMENTATION, Set.of("R06", "R08", "R03", "R07"),
-            SkinConcern.ELASTICITY,   Set.of("R05", "R08", "R06", "R03", "R07"),
+            SkinConcern.PIGMENTATION, Set.of("R06", "R08", "R03", "R12", "R07"),
+            SkinConcern.ELASTICITY,   Set.of("R05", "R08", "R06", "R03", "R12", "R07"),
             SkinConcern.PUFFINESS,    Set.of("R04", "R01"),
             SkinConcern.DARK_CIRCLE,  Set.of());
 
