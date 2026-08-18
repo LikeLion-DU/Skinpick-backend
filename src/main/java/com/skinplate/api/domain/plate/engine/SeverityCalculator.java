@@ -13,7 +13,20 @@ public final class SeverityCalculator {
 
     private static final double SEVERE   = 1.5;
     private static final double MODERATE = 1.2;
-    private static final double NORMAL   = 1.0;
+
+    /**
+     * 지표가 정상 범위일 때. <b>1.0 이 아니라 0.6 인 것이 요점이다.</b>
+     *
+     * 이 구간이 없던 시절 R03(당류)·R07(튀김)은 피부 게이트 뒤에 있어서 트러블·유분이
+     * 정상이면 <b>발동 자체를 안 했다</b> — 감자튀김과 닭가슴살 샐러드가 똑같이 70점이었다.
+     * 게이트를 떼는 대신 이 값을 두어 "정상 피부에서도 음식 자체의 부담은 남기되, 피부가
+     * 나쁠수록 더 크게 깎는다"로 바꾼다. 튀김 -10 기준으로 정상 -6 · 중간 -12 · 심함 -15 다.
+     *
+     * <b>게이트가 남아 있는 룰의 점수는 하나도 바뀌지 않는다.</b> 그 룰들의 임계값이 전부
+     * 심각도 60 이상에 놓여 있기 때문이다 — 홍조>60 → 심각도>60, 수분<40 → 심각도>60,
+     * 장벽<40 → 심각도>60. 이 구간에 닿는 게이트 룰이 없다.
+     */
+    private static final double MILD = 0.6;
 
     private static final int SEVERE_THRESHOLD   = 80;
     private static final int MODERATE_THRESHOLD = 60;
@@ -28,7 +41,7 @@ public final class SeverityCalculator {
 
         if (severity >= SEVERE_THRESHOLD)   return SEVERE;
         if (severity >= MODERATE_THRESHOLD) return MODERATE;
-        return NORMAL;
+        return MILD;
     }
 
     /**
@@ -57,5 +70,16 @@ public final class SeverityCalculator {
      */
     public static boolean isSevere(int metricValue, boolean higherIsWorse) {
         return of(metricValue, higherIsWorse) == SEVERE;
+    }
+
+    /**
+     * 지표가 정상 범위인가. <b>게이트를 뗀 룰이 문장을 고르는 데 쓴다</b> — 트러블이 정상인
+     * 사람에게 "지금 트러블 지표가 올라와 있는 상태에서" 라고 말하면 그건 거짓이다.
+     *
+     * {@link #isSevere} 와 같은 이유로 of() 를 되물어 본다. 문장을 위해 임계값을 룰마다
+     * 다시 적으면 판정과 문장의 경계가 어긋나는 날이 온다.
+     */
+    public static boolean isMild(int metricValue, boolean higherIsWorse) {
+        return of(metricValue, higherIsWorse) == MILD;
     }
 }
