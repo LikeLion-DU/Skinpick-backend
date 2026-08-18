@@ -47,7 +47,7 @@ HTTPS 는 자동이 아니다 — 리버스 프록시가 인증서와 **본문 �
 
 **Rule Engine** — 룰 추가 = `PlateRule` 구현 `@Component` 1개. 엔진도 기존 룰도 건드리지 않는다.
 - **델타·계수는 `RuleConstants`, 영양 임계값은 `Nutrition`** — 두 파일뿐이다
-- `PlateRuleEngineTest`(예시 A=60 · B=87)가 깨지면 **문서 예시도 같이 고친다**
+- `PlateRuleEngineTest`(예시 A=58 · B=93)가 깨지면 **문서 예시도 같이 고친다**
 - 시뮬레이션은 **detached 복사본**으로만 계산한다. 관리 엔티티를 만지면 `orphanRemoval`이 재료를 DELETE 한다
 
 **AI 경계** — AI는 인식, 점수는 Backend.
@@ -71,7 +71,7 @@ HTTPS 는 자동이 아니다 — 리버스 프록시가 인증서와 **본문 �
 docker compose up -d postgres
 set -a && source .env && set +a      # JWT_SECRET 은 한 번 만들어 고정
 ./gradlew bootRun                    # "테스트 계정 생성: test@skinplate.app" 이 뜨면 정상
-./gradlew test --tests '*PlateRuleEngineTest'   # 60점 / 87점 재현
+./gradlew test --tests '*PlateRuleEngineTest'   # 58점 / 93점 재현
 
 # 스키마 불변식 확인 — validate 는 테이블·컬럼·타입만 본다. 인덱스·CHECK·UNIQUE 는 안 본다.
 # idx_app_user_email(lower(email)) = 대소문자 중복 가입 차단 / food_analysis_id UNIQUE = 음식 1장 = Plate 1건

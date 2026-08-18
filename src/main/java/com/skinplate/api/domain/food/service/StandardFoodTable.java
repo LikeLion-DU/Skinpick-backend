@@ -53,6 +53,13 @@ public final class StandardFoodTable {
     private static final Map<String, StandardFood> TABLE = new HashMap<>();
 
     /**
+     * "A와 B가 <b>들어간</b> C" 처럼 앞이 재료고 뒤가 본체인 표현. 이 표지가 보이면
+     * 나열이 아니라 수식절이라, 첫 조각을 본체로 믿으면 안 된다.
+     */
+    private static final Pattern MODIFIER_CLAUSE =
+            Pattern.compile("(들어간|들어있는|들어 있는|곁들인|곁들여|올라간|얹은|넣은|넣어)\\s");
+
+    /**
      * 같은 음식의 흔한 표기 차이. AI 는 "돈까스"라고 답하는데 공공데이터는 "돈가스"만 있고,
      * 그러면 조회가 뒤 낱말로 밀려 <b>재료 이름("돼지고기")에 걸린다</b> — 돈가스가 고기구이
      * 영양값(650kcal)을 받는다. 실사진 E2E 에서 실제로 그렇게 됐다.
@@ -60,13 +67,6 @@ public final class StandardFoodTable {
      * <p><b>판정이 아니라 철자다.</b> 여기에 다른 음식을 이어 붙이지 마라 — "라멘 → 라면"은
      * 표기 차이가 아니라 다른 음식이고, 그 줄이 생기는 순간 이 표는 앱이 만든 판정 규칙이 된다.
      */
-    /**
-     * "A와 B가 <b>들어간</b> C" 처럼 앞이 재료고 뒤가 본체인 표현. 이 표지가 보이면
-     * 나열이 아니라 수식절이라, 첫 조각을 본체로 믿으면 안 된다.
-     */
-    private static final Pattern MODIFIER_CLAUSE =
-            Pattern.compile("(들어간|들어있는|들어 있는|곁들인|곁들여|올라간|얹은|넣은|넣어)\\s");
-
     private static final Map<String, String> SPELLINGS = Map.of(
             "돈까스", "돈가스",
             "돈카츠", "돈가스",
