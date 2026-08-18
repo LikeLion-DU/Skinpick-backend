@@ -166,11 +166,27 @@ public final class StandardFoodTable {
         StandardFood exact = TABLE.get(trimmed);
         if (exact != null) return Optional.of(exact);
 
-        // **뒤 낱말부터 본다.** 한국어 음식 이름은 핵심 낱말이 끝에 온다 —
-        // "돼지고기 김치찌개" 의 정체는 김치찌개지 돼지고기가 아니다.
-        // 모든 낱말을 동등하게 훑으면 앞의 재료가 먼저 걸려서, 찌개에 고기구이
-        // 영양값이 들어간다(650kcal·나트륨 334mg). 화면에도 로그에도 안 드러난다.
-        String[] words = trimmed.split("\\s+");
+        // **곁들임을 먼저 떼어 낸다.** AI 는 접시 전체를 나열해 답하기도 한다 —
+        // "소스가 뿌려진 돼지고기 돈가스와 양배추 샐러드". 아래 규칙은 뒤 낱말부터 보므로
+        // 그대로 두면 곁들임(샐러드, 293kcal)이 본체(돈가스, 704kcal)를 이겨서 같은 사진이
+        // 회차마다 다른 영양값을 받는다. 나열의 첫 조각이 본체다.
+        String head = trimmed.split("(와|과)\\s|,")[0].trim();
+        if (!head.equals(trimmed)) {
+            Optional<StandardFood> byHead = findInPhrase(head);
+            if (byHead.isPresent()) return byHead;
+        }
+
+        return findInPhrase(trimmed);
+    }
+
+    /**
+     * **뒤 낱말부터 본다.** 한국어 음식 이름은 핵심 낱말이 끝에 온다 —
+     * "돼지고기 김치찌개" 의 정체는 김치찌개지 돼지고기가 아니다.
+     * 모든 낱말을 동등하게 훑으면 앞의 재료가 먼저 걸려서, 찌개에 고기구이
+     * 영양값이 들어간다(650kcal·나트륨 334mg). 화면에도 로그에도 안 드러난다.
+     */
+    private static Optional<StandardFood> findInPhrase(String phrase) {
+        String[] words = phrase.split("\\s+");
         for (int i = words.length - 1; i >= 0; i--) {
             // 접미사를 긴 쪽부터 찍어 본다. "김치찌개"와 "찌개"가 둘 다 있으면 긴 쪽이
             // 먼저 나오므로, 모든 찌개가 같은 값을 받는 일이 없다.

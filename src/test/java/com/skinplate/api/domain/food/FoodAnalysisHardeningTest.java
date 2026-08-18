@@ -51,6 +51,23 @@ class FoodAnalysisHardeningTest {
                 .contains("라면");
     }
 
+    /**
+     * AI 는 접시 전체를 나열해 답하기도 한다. 그때 뒤 낱말부터 보는 규칙만 있으면
+     * 곁들임이 본체를 이긴다 — 실사진 E2E 에서 돈가스 한 장이 회차에 따라 704kcal(돈가스)과
+     * 293kcal(샐러드)을 오갔고, 그게 59점과 68점의 차이였다.
+     */
+    @Test
+    @DisplayName("곁들임을 나열한 이름은 본체를 찾는다 — 돈가스가 샐러드 값을 받으면 안 된다")
+    void garnishPhrases_resolveToTheMainDish() {
+        assertThat(StandardFoodTable.find("소스가 뿌려진 돼지고기 돈가스와 양배추 샐러드")
+                .orElseThrow().name()).contains("돈가스");
+        assertThat(StandardFoodTable.find("김치찌개와 공기밥").orElseThrow().name())
+                .contains("김치찌개");
+        // 나열이 없으면 규칙은 그대로다 — 핵심 낱말은 여전히 뒤에 온다.
+        assertThat(StandardFoodTable.find("돼지고기 김치찌개").orElseThrow().name())
+                .contains("김치찌개");
+    }
+
     @Test
     @DisplayName("낱말 가운데에 키가 들어간 다른 음식은 잡지 않는다 — 부대찌개가 라면 값을 받으면 안 된다")
     void otherDishes_areNotSubstituted() {
