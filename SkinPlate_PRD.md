@@ -2340,7 +2340,7 @@ public class Recommendation extends BaseTimeEntity {
 >
 > **`estimatedSkinAge` 는 Skin Score 계산에 들어가지 않는다.** 실제 생물학적 나이의 측정값이 아니라 사진 기반 외관 추정이며, 앱은 "사진 속 피부결, 주름, 탄력, 피부톤 등을 종합한 AI 추정값입니다"를 함께 띄운다.
 >
-> **`metricDetails` 는 `metrics` 를 대체하지 않는다.** `metrics` 는 기존 계약 그대로 남는다. `skinType` · `skinAge` 는 이 기능 이전에 저장된 분석에서는 키가 생략되고, `metricDetails[].evidence` 는 빈 배열이 된다.
+> **`metricDetails` 는 `metrics` 를 대체하지 않는다.** `metrics` 는 기존 계약 그대로 남는다. `skinAge` 는 이 기능 이전에 저장된 분석에서는 키가 생략되고, `metricDetails[].evidence` 는 빈 배열이 된다. **`skinType` 은 빠지지 않는다** — AI 원본이 아니라 저장된 지표에서 매번 다시 만들기 때문이다(아래 처리 흐름 참고).
 
 **처리 흐름**
 
@@ -2792,7 +2792,7 @@ public record SkinAnalysisResponse(
         int skinScore,
         SkinMetricsDto metrics,               // 기존 계약 그대로. S05 의 지표 바가 읽는다
         List<ScoredItemDto> metricDetails,    // 같은 5개에 등급과 관찰 근거를 붙인 것
-        SkinTypeDto skinType,                 // AI 가 읽은 타입. 없으면 null → 키 생략
+        SkinTypeDto skinType,                 // 지표에서 규칙으로 도출 — 항상 채워진다
         SkinAgeDto skinAge,                   // 예전 분석이면 null → 키 생략
         String summary,
         List<HighlightDto> highlights,
