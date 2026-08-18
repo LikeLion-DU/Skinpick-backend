@@ -48,12 +48,14 @@ public final class RuleConstants {
     // 부담이 큰 음식에 가점을 주게 된다. 점수를 흩기 위해 근거 없는 룰을 넣지 않는다.
 
     // ---- 추천 행동 시 회복 점수 ----
-    public static final int GAIN_LESS_SPICY      = 6;
-    public static final int GAIN_REMOVE_BATTER   = 5;
-    // R03·R04·R10 의 회복치는 상수가 아니다. 단계형이 되면서 "국물 절반"·"밥 줄이기"의
-    // 실제 효과가 지금 단계에서 계산된다 — 옛 고정값(8·5)은 나트륨 1,200mg 짜리
-    // 국에도 "+8" 이라 말했고, 시뮬레이션은 4 만 올렸다. 확인 가능한 거짓이었다.
-    // 셋이 각자 Nutrition 의 sugarTierOf · sodiumTierOf · calorieTierOf 로 계산한다.
+    // **여기에 회복치 상수는 없다.** 옛 고정값(8·6·7·5)은 나트륨 1,200mg 짜리 국에도
+    // "+8" 이라 말했고 시뮬레이션은 4 만 올렸다 — 확인 가능한 거짓이었다. 다섯 카드가
+    // 각자 실제 회복치를 계산한다.
+    //
+    //   R03·R04·R10  행동 뒤 단계를 다시 세어 그 차이 (Nutrition 의 sugarTierOf ·
+    //                sodiumTierOf · calorieTierOf). 단계가 안 내려가면 카드도 안 준다
+    //   R02·R07      행동이 룰을 통째로 끄므로 회복치가 곧 감점의 절댓값이다.
+    //                심각도·강도 계수가 이미 곱해진 값이라 상수로 둘 수 없다
 
     /**
      * LESS_RICE 를 실행한 뒤 남는 열량 비율. <b>R10 과 시뮬레이션이 같은 값을 써야</b>
@@ -83,7 +85,7 @@ public final class RuleConstants {
     // 경계값(몇 g부터 많다고 보는가)은 여기 없다 — Nutrition 이 SODIUM/PROTEIN/
     // SUGAR/CALORIES 임계값을 이미 전부 쥐고 있고, 단계 경계만 이리 떼어 오면
     // "당류를 몇 g부터 많다고 보는가"의 답이 두 파일로 갈린다.
-    // 여기는 델타(몇 점 깎을지)만 둔다. Nutrition.isVeryHighSugar() 를 쓴다.
+    // 여기는 델타(몇 점 깎을지)만 둔다. 단계는 Nutrition.sugarTierOf() 가 센다.
     public static final int R03_SUGAR_VERY_HIGH_EXTRA    = -4;
 
     // ---- 점수 범위 ----

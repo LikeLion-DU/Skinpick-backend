@@ -41,10 +41,14 @@ public class FriedOilRule implements PlateRule {
                 fried ? 1.0 : OILINESS_NON_FRIED_FACTOR);
 
         if (fried) {
+            // REMOVE_BATTER 는 조리법을 GRILLED 로, 기름기를 MEDIUM 으로 바꿔 이 룰을
+            // 통째로 끈다 — 회복치는 곧 이 감점의 절댓값이다. 고정값 5 를 싣던 시절에는
+            // 유분이 정상이면 6, 심하면 15 가 올랐다. 게이트를 떼면서 그 카드가 모든
+            // 사용자에게 보이게 됐고, 그만큼 틀린 숫자도 모든 화면에 실렸다.
             return RuleResult.caution(code(), delta,
                     "튀김 조리",
                     reason(context, "튀김 조리라", "튀김 조리가"),
-                    "튀김옷을 일부 제거해 보세요.", GAIN_REMOVE_BATTER);
+                    "튀김옷을 일부 제거해 보세요.", -delta);
         }
 
         // 튀김옷이 없으니 REMOVE_BATTER 행동 카드가 성립하지 않는다 — 주의만 준다.
