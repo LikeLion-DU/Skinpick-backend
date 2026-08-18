@@ -2126,7 +2126,11 @@ declared OILY ≠ observed DRY  →  SPECIAL["OILY→DRY"]
 
 ## 1.13 domain/food
 
-> *(2026-08-17 — 아래 코드 블록은 그때의 기록이다. 저장소가 더 최신이다: `FoodTraits`(관찰 특성 5종 @Embeddable)·`FoodAnalysis.assignTraits/getTraits`·`Nutrition.isVeryHighSugar/isVeryHighSodium` 가 빠져 있다. 실제 코드는 `domain/food/entity/` 를 본다.)*
+> *(2026-08-18 재캘리브레이션 — 아래 코드 블록은 2026-08-17 시점의 기록이다. 저장소가 더 최신이다.*
+> *① `FoodTraits`(관찰 특성 5종 @Embeddable)·`FoodAnalysis.assignTraits/getTraits` 가 빠져 있다.*
+> *② **아래 `Nutrition` 의 임계값 셋은 전부 옛 값이다** — 나트륨 1500→**1150**, 당류 25→**15**, 열량 900→**660** 으로 내려갔고 셋 다 단계형이 됐다(`sodiumTierOf`·`sugarTierOf`·`calorieTierOf`). 비례 감점용 `sodiumExcessMg()` 는 없어졌다.*
+> *③ 표준 영양 확장 다섯(`saturatedFatG`·`fiberG`·`vitaminAUg`·`vitaminCMg`·`zincMg`)과 `withMicronutrients` 가 빠져 있다.*
+> ***이 블록의 숫자를 그대로 옮기면 재캘리브레이션이 되돌아간다.** 임계값은 PRD §18.6 과 `domain/food/entity/Nutrition.java` 가 원본이다.)*
 
 **`domain/food/entity/CookingMethod.java`**
 

@@ -267,6 +267,41 @@ class PlateRuleEngineTest {
         assertThat(engine.evaluate(new PlateContext(calm, overBoundary)).score()).isEqualTo(70 - 7);
     }
 
+    /**
+     * 임계를 25g 에서 15g 으로 내리면서 "단 음료를 물로 바꿔도 같은 단계에 남는" 구간이
+     * 생겼다(37.5~40g · 0.4 배 후에도 15g 위). 옛 고정값 +7 은 그 구간에서 회복이 0 인데도
+     * +7 이라 말했고, 표준 음식표에 실제로 그런 음식이 3종 있다(고구마맛탕 등).
+     */
+    @Test
+    @DisplayName("단 음료 회복치가 실제 단계 변화와 같고, 회복이 0 이면 카드를 주지 않는다")
+    void sugarGainMatchesTheActualTierChange() {
+        SkinMetrics troubled = SkinMetrics.of(50, 50, 50, 65, 50);   // 트러블 65 → 심각도 1.2
+
+        // 30g → 12g : 1단계에서 0 으로 → 회복 14
+        assertThat(sugarGain(troubled, "30.0")).isEqualTo(14);
+        // 45g → 18g : 2단계에서 1단계로 → 회복 5 (-19 에서 -14)
+        assertThat(sugarGain(troubled, "45.0")).isEqualTo(5);
+        // 38.7g → 15.48g : 여전히 1단계라 회복이 0 이다 — 카드를 아예 주지 않는다.
+        assertThat(sugarGain(troubled, "38.7")).isZero();
+        assertThat(engine.evaluate(new PlateContext(troubled, sugaryFood("38.7"))).results())
+                .filteredOn(result -> "R03".equals(result.ruleCode()))
+                .singleElement()
+                .satisfies(result -> assertThat(result.hasAction()).isFalse());
+    }
+
+    private FoodAnalysis sugaryFood(String sugar) {
+        return food("단 음식", CookingMethod.ETC, false,
+                nutrition(400, "5.0", 300, sugar), List.of());
+    }
+
+    /** R03 이 광고하는 회복치. 카드가 없으면 0 이다. */
+    private int sugarGain(SkinMetrics skin, String sugar) {
+        return engine.evaluate(new PlateContext(skin, sugaryFood(sugar))).results().stream()
+                .filter(result -> "R03".equals(result.ruleCode()))
+                .findFirst().orElseThrow()
+                .expectedGain();
+    }
+
     @Test
     @DisplayName("당류 40g 초과는 감점을 더한다 — 15~40g 구간은 기본 델타 그대로다")
     void sugarVeryHighAddsExtraPenalty() {

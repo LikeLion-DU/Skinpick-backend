@@ -68,7 +68,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class SkinPlateService {
 
-    private static final BigDecimal SUGAR_WITHOUT_DRINK = new BigDecimal("0.4");
+    /** R03 이 카드에 싣는 회복치와 같은 값을 써야 한다 — 원본은 RuleConstants 다. */
+    private static final BigDecimal SUGAR_WITHOUT_DRINK = RuleConstants.SUGAR_AFTER_NO_DRINK;
 
     /**
      * 밥·면을 조금 줄인 한 끼의 열량 비율. <b>R10 이 카드에 싣는 회복치와 같은 값을 써야</b>
@@ -412,9 +413,16 @@ public class SkinPlateService {
      * R07 이 꺼지는 것뿐이다 — 튀김옷을 걷어낸 뒤의 포화지방을 이 앱이 알 방법이 없어
      * R11 은 그대로 둔다. 없는 숫자를 지어내 깎는 것보다 안 건드리는 편이 설명 가능하다.
      *
-     * LESS_RICE 도 같은 원칙으로 열량만 3/4 로 줄인다 — R10 이 보는 값이 그것뿐이다.
-     * 탄수까지 줄이면 정확해 보이지만, 그 숫자를 보는 R12 는 <b>정제 탄수 재료가 있는가</b>를
-     * 함께 묻는 룰이라 밥을 덜 먹었다고 재료가 사라지지 않는다.
+     * LESS_RICE 는 열량만 3/4 로 줄인다. 탄수까지 줄이면 정확해 보이지만, 그 숫자를 보는
+     * R12 는 <b>정제 탄수 재료가 있는가</b>를 함께 묻는 룰이라 밥을 덜 먹었다고 재료가
+     * 사라지지 않는다.
+     *
+     * <b>열량을 줄이면 R15·R06 의 영양 밀도가 함께 올라간다.</b> 밥에는 식이섬유도 비타민도
+     * 거의 없으므로 분모만 줄어드는 것이 맞다 — 표준 음식표에서 그렇게 단계가 새로 켜지는
+     * 음식이 R10 대상 144종 중 6종 있다(간자장·마라탕 등). 그때 총점은 R10 카드가 광고한
+     * 값보다 더 오른다. 카드의 expectedGain 은 <b>그 룰 하나가 되돌리는 점수</b>라는 정의
+     * 그대로이고 방향도 사용자에게 유리하므로 그대로 둔다 — 다만 "R10 이 보는 값이 열량뿐"
+     * 이라는 옛 설명은 이제 거짓이라 여기 적어 둔다.
      *
      * <b>확장 영양 다섯 개는 그대로 옮긴다.</b> 빠뜨리면 시뮬레이션의 before 가 저장 점수와
      * 갈라진다 — 원본에 포화지방이 있는데 사본에는 0 이라 R11 이 통째로 사라지기 때문이다.

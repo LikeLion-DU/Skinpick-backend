@@ -1,5 +1,7 @@
 package com.skinplate.api.domain.plate.engine;
 
+import java.math.BigDecimal;
+
 /**
  * 룰 튜닝은 전부 이 파일에서 한다. (PRD v1.4 §18.6)
  *
@@ -47,18 +49,23 @@ public final class RuleConstants {
 
     // ---- 추천 행동 시 회복 점수 ----
     public static final int GAIN_LESS_SPICY      = 6;
-    public static final int GAIN_WATER_NOT_SODA  = 7;
     public static final int GAIN_REMOVE_BATTER   = 5;
-    // R04·R10 의 회복치는 상수가 아니다. 단계형이 되면서 "국물 절반"·"밥 줄이기"의
+    // R03·R04·R10 의 회복치는 상수가 아니다. 단계형이 되면서 "국물 절반"·"밥 줄이기"의
     // 실제 효과가 지금 단계에서 계산된다 — 옛 고정값(8·5)은 나트륨 1,200mg 짜리
     // 국에도 "+8" 이라 말했고, 시뮬레이션은 4 만 올렸다. 확인 가능한 거짓이었다.
-    // 두 룰이 각자 Nutrition.sodiumTierOf · calorieTierOf 로 계산한다.
+    // 셋이 각자 Nutrition 의 sugarTierOf · sodiumTierOf · calorieTierOf 로 계산한다.
 
     /**
      * LESS_RICE 를 실행한 뒤 남는 열량 비율. <b>R10 과 시뮬레이션이 같은 값을 써야</b>
      * 카드가 광고한 회복치와 실제 결과가 같아진다 — 그래서 서비스가 아니라 여기 둔다.
      */
     public static final double CALORIES_AFTER_LESS_RICE = 0.75;
+
+    /**
+     * NO_SUGAR_DRINK 를 실행한 뒤 남는 당류 비율. 위와 같은 이유로 여기 둔다 —
+     * R03 이 카드에 싣는 회복치와 시뮬레이션이 같은 식을 써야 한다.
+     */
+    public static final BigDecimal SUGAR_AFTER_NO_DRINK = new BigDecimal("0.4");
 
     // ---- 음식 특성 강도 계수 (스키마 v2) ----
     // SeverityCalculator 의 피부 축과 직교로 곱는 음식 축이다.

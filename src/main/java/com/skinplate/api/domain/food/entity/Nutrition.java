@@ -171,8 +171,16 @@ public class Nutrition {
         return 0;
     }
 
+    /** 당류 단계 0~2. 위 둘과 같은 이유로 static 을 함께 둔다(NO_SUGAR_DRINK 회복치 계산). */
+    public static int sugarTierOf(BigDecimal sugarG) {
+        if (sugarG.compareTo(BigDecimal.valueOf(SUGAR_VERY_HIGH_G)) > 0) return 2;
+        if (sugarG.compareTo(BigDecimal.valueOf(SUGAR_THRESHOLD_G)) > 0)  return 1;
+        return 0;
+    }
+
     public int sodiumTier()  { return sodiumTierOf(sodiumMg); }
     public int calorieTier() { return calorieTierOf(caloriesKcal); }
+    public int sugarTier()   { return sugarTierOf(sugarG); }
 
     /** 포화지방 단계 0~3. 값이 없으면(=0) 0 이라 R11 이 발동하지 않는다. */
     public int saturatedFatTier() {

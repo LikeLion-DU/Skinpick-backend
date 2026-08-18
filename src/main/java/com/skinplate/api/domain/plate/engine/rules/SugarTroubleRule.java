@@ -1,7 +1,10 @@
 package com.skinplate.api.domain.plate.engine.rules;
 
+import com.skinplate.api.domain.food.entity.Nutrition;
 import com.skinplate.api.domain.plate.engine.*;
 import org.springframework.stereotype.Component;
+
+import java.math.BigDecimal;
 
 import static com.skinplate.api.domain.plate.engine.RuleConstants.*;
 
@@ -28,16 +31,35 @@ public class SugarTroubleRule implements PlateRule {
 
     @Override
     public RuleResult apply(PlateContext context) {
-        // 당류 단계화 — 40g 초과만 기본 델타에 더한다(심각도를 곱하기 전).
-        // 경계는 Nutrition 이 쥔다(다른 임계값들과 같은 자리), 델타만 RuleConstants 다.
-        boolean veryHigh = context.nutrition().isVeryHighSugar();
-        int baseDelta = R03_SUGAR_TROUBLE + (veryHigh ? R03_SUGAR_VERY_HIGH_EXTRA : 0);
-        int delta = SeverityCalculator.apply(baseDelta, context.skin().getTrouble(), true);
+        BigDecimal sugarG = context.nutrition().getSugarG();
+        int trouble = context.skin().getTrouble();
 
-        return RuleResult.caution(code(), delta,
-                "당류 과다",
-                reason(context, veryHigh),
-                "단 음료 대신 물을 곁들이세요.", GAIN_WATER_NOT_SODA);
+        int delta = deltaOf(Nutrition.sugarTierOf(sugarG), trouble);
+
+        // 단 음료를 물로 바꾸면 당류가 0.4 배가 된다. 그때 단계가 몇으로 내려가는지를
+        // 지금 계산한다 — 임계를 25g 에서 15g 으로 내리면서 "줄여도 같은 단계에 남는"
+        // 구간이 생겼다(37.5~40g). 옛 고정값 +7 은 그 구간에서 회복이 0 인데도 +7 이라
+        // 말했고, 표준 음식표에 실제로 그런 음식이 3종 있다(고구마맛탕 등).
+        int afterNoDrink = deltaOf(
+                Nutrition.sugarTierOf(sugarG.multiply(SUGAR_AFTER_NO_DRINK)), trouble);
+        int expectedGain = afterNoDrink - delta;
+
+        String reason = reason(context, Nutrition.sugarTierOf(sugarG) >= 2);
+
+        // 회복이 0 이면 행동 카드를 주지 않는다 — R04·R10 과 같은 규칙이다.
+        if (expectedGain == 0) {
+            return RuleResult.caution(code(), delta, "당류 과다", reason);
+        }
+
+        return RuleResult.caution(code(), delta, "당류 과다", reason,
+                "단 음료 대신 물을 곁들이세요.", expectedGain);
+    }
+
+    /** 단계 → 델타. 경계는 Nutrition 이, 델타는 RuleConstants 가 소유한다. */
+    private static int deltaOf(int tier, int trouble) {
+        if (tier == 0) return 0;
+        int baseDelta = R03_SUGAR_TROUBLE + (tier >= 2 ? R03_SUGAR_VERY_HIGH_EXTRA : 0);
+        return SeverityCalculator.apply(baseDelta, trouble, true);
     }
 
     /**
