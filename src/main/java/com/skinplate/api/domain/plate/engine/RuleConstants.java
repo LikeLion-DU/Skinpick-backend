@@ -37,6 +37,7 @@ public final class RuleConstants {
     public static final int R11_SAT_FAT_EXTREME   = -10; // >12.3g (p95)
     public static final int R12_REFINED_CARB      = -4;  // HIGH_GI 태그 + 탄수 30g 이상
     // 가점 쪽 유일한 단계형. 이 룰이 "좋은 음식이 올라간다"를 담당한다.
+    public static final int R14_OMEGA3_FOOD       =  4;  // 오메가3 재료 — 게이트 없음
     public static final int R15_FIBER             =  4;  // 100kcal 당 3.0g (p75)
     public static final int R15_FIBER_HIGH        =  6;  // 100kcal 당 5.0g (p90)
     // R13(생·찜 조리 +3) 과 R16(아연 가점) 은 만들지 않았다. 전자는 "날것이면 피부에 좋다"를

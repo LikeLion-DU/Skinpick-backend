@@ -25,7 +25,7 @@ class PlateRuleEngineTest {
             new FriedOilRule(), new HydrationFoodRule(), new Omega3BarrierRule(),
             new ProteinRule(), new VitaminRule(), new ProbioticRule(),
             new HighCalorieRule(), new SaturatedFatRule(), new RefinedCarbRule(),
-            new FiberRule()));
+            new FiberRule(), new Omega3FoodRule()));
 
     @Test
     @DisplayName("예시 A · 돼지고기 김치찌개 → 60점")
@@ -43,7 +43,7 @@ class PlateRuleEngineTest {
     }
 
     @Test
-    @DisplayName("예시 B · 연어구이 정식 → 91점")
+    @DisplayName("예시 B · 연어구이 정식 → 95점")
     void grilledSalmon() {
         FoodAnalysis food = food("연어구이 정식", CookingMethod.GRILLED, false,
                 nutrition(610, "32.0", 1600, "4.0"),
@@ -53,9 +53,12 @@ class PlateRuleEngineTest {
 
         PlateEvaluation result = engine.evaluate(new PlateContext(SKIN, food));
 
-        // 70 + R01(+10) + R05(+6) + R06(+5) + R09(+4) + R04(-4) = 91
+        // 70 + R01(+10) + R05(+6) + R06(+5) + R09(+4) + R14(+4) + R04(-4) = 95
         // 나트륨 1,600mg 은 새 1단계(>1150)라 -4 다. 옛 임계 1,500mg 에서는 -8 이었다.
-        assertThat(result.score()).isEqualTo(91);
+        // R14 는 R01 과 독립이다 — 건조한 사용자의 연어가 두 룰을 다 받는 것은
+        // 이중계상이 아니라 "이 사람에게 가장 필요한 음식" 이라는 뜻이다.
+        assertThat(result.score()).isEqualTo(95);
+        assertThat(result.appliedRuleCodes()).contains("R01", "R14");
     }
 
     @Test
@@ -351,6 +354,27 @@ class PlateRuleEngineTest {
         // 상식적인 순서가 점수로 나온다 — 생선이 위, 붉은 고기·튀김이 아래.
         assertThat(scoreOf(mackerel)).isGreaterThan(scoreOf(steak));
         assertThat(scoreOf(tuna)).isGreaterThan(scoreOf(porkCutlet));
+    }
+
+    /**
+     * 게이트가 있던 시절 오메가3 가점은 R01(건조)·R08(장벽) 뒤에만 있어서, 피부가 정상인
+     * 사용자에게 고등어구이가 초밥·김밥과 같은 70점이었다. 등푸른생선이 좋은 이유가
+     * 피부가 건조할 때만 생기지는 않는다.
+     */
+    @Test
+    @DisplayName("오메가3는 정상 피부에서도 가점이고, 건조하면 그 위에 개인화가 더 붙는다")
+    void omega3ScoresOnCalmSkinAndStacksWithPersonalization() {
+        FoodAnalysis mackerel = food("고등어구이", CookingMethod.GRILLED, false,
+                nutrition(237, "16.3", 329, "0.0", "16.4", "4.6", "3.8"),
+                List.of(FoodIngredient.of("고등어", IngredientTag.OMEGA3)));
+
+        assertThat(deltaOf(mackerel, "R14")).isEqualTo(4);
+
+        // 건조(수분 35)·장벽 약화(35)면 R01·R08 이 그 위에 더 붙는다 — 독립이다.
+        PlateEvaluation dry = engine.evaluate(
+                new PlateContext(SkinMetrics.of(35, 50, 40, 40, 35), mackerel));
+        assertThat(dry.appliedRuleCodes()).contains("R01", "R08", "R14");
+        assertThat(dry.score()).isGreaterThan(scoreOf(mackerel));
     }
 
     @Test

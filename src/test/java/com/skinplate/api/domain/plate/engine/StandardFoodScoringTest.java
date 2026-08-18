@@ -45,7 +45,7 @@ class StandardFoodScoringTest {
             new FriedOilRule(), new HydrationFoodRule(), new Omega3BarrierRule(),
             new ProteinRule(), new VitaminRule(), new ProbioticRule(),
             new HighCalorieRule(), new SaturatedFatRule(), new RefinedCarbRule(),
-            new FiberRule()));
+            new FiberRule(), new Omega3FoodRule()));
 
     /** 시연에서 "좋은 음식"으로 보여줄 것들. */
     private static final List<String> HEALTHY =
