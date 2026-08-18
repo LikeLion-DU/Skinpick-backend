@@ -372,8 +372,8 @@ public class SkinPlateService {
      *
      * 원본을 그 자리에서 고치면 LESS_SPICY 가 orphanRemoval 컬렉션에서 CAPSAICIN 을
      * 지우는 순간 food_ingredient 행이 DELETE 되고, HALVE_SOUP 은 sodium_mg 를
-     * 영구히 절반으로 바꾼다. 무대에서 버튼을 누르면 68 이 뜨고, 뒤로 갔다 다시
-     * 들어오면 원래 점수가 68 이다.
+     * 영구히 절반으로 바꾼다. 무대에서 버튼을 누르면 66 이 뜨고, 뒤로 갔다 다시
+     * 들어오면 원래 점수가 66 이다.
      */
     private FoodAnalysis detachedCopy(FoodAnalysis origin, List<PlateActionCode> actions) {
         boolean lessSpicy = actions.contains(PlateActionCode.LESS_SPICY);

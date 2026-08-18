@@ -21,6 +21,9 @@ import com.skinplate.api.domain.plate.dto.PlateSimulateResponse;
 import com.skinplate.api.domain.plate.dto.SkinBasis;
 import com.skinplate.api.domain.plate.dto.SkinPlateResponse;
 import com.skinplate.api.domain.plate.engine.PlateRuleEngine;
+import com.skinplate.api.domain.plate.engine.PlateContext;
+import com.skinplate.api.domain.plate.engine.PlateEvaluation;
+import com.skinplate.api.domain.plate.engine.RuleResult;
 import com.skinplate.api.domain.plate.engine.RuleConstants;
 import com.skinplate.api.domain.plate.engine.rules.*;
 import com.skinplate.api.domain.plate.entity.PlateActionCode;
@@ -56,6 +59,7 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -71,8 +75,8 @@ import static org.mockito.Mockito.verify;
 /**
  * 시뮬레이션이 이 서비스에서 유일하게 위험한 지점이다. 원본을 그 자리에서 고치면
  * LESS_SPICY 가 orphanRemoval 컬렉션에서 CAPSAICIN 을 지우는 순간 재료 행이 DELETE 되고
- * HALVE_SOUP 이 나트륨을 영구히 절반으로 바꾼다. 무대에서 버튼을 누르면 68 이 뜨고,
- * 뒤로 갔다 다시 들어오면 원래 점수가 68 이 되어 있다.
+ * HALVE_SOUP 이 나트륨을 영구히 절반으로 바꾼다. 무대에서 버튼을 누르면 66 이 뜨고,
+ * 뒤로 갔다 다시 들어오면 원래 점수가 66 이 되어 있다.
  *
  * 엔진 자체는 PlateRuleEngineTest 가 지킨다. 여기서는 조립 결과와 원본 불변만 본다.
  */
@@ -106,11 +110,15 @@ class SkinPlateServiceTest {
         given(transactionTemplate.execute(any())).willAnswer(invocation ->
                 invocation.getArgument(0, TransactionCallback.class).doInTransaction(null));
 
+        // **프로덕션과 같은 목록이어야 한다.** 여기서 룰 하나가 빠지면 "무대에서 말할
+        // 숫자"를 고정한다는 이 파일의 테스트가 무대에 없는 숫자를 고정한다 —
+        // 실제 컨텍스트는 @Component 를 전부 모으기 때문이다.
         engine = new PlateRuleEngine(List.of(
                 new SodiumRule(), new SpicyRednessRule(), new SugarTroubleRule(),
                 new FriedOilRule(), new HydrationFoodRule(), new Omega3BarrierRule(),
                 new ProteinRule(), new VitaminRule(), new ProbioticRule(),
-                new HighCalorieRule()));
+                new HighCalorieRule(), new SaturatedFatRule(), new RefinedCarbRule(),
+                new Omega3FoodRule(), new FiberRule()));
 
         // 문장 생성은 이 테스트의 관심사가 아니다 — 실패해도 저장이 도는 게 계약이라
         // EMPTY 를 돌려주는 mock 으로 통과시킨다.
@@ -125,13 +133,48 @@ class SkinPlateServiceTest {
     }
 
     @Test
-    @DisplayName("무대에서 말할 숫자가 그대로 나온다 — 60 → 국물 절반 68 → 매운 양념까지 80")
+    @DisplayName("무대에서 말할 숫자가 그대로 나온다 — 58 → 국물 절반 66 → 매운 양념까지 78")
     void simulate_reproducesDemoNumbers() {
         givenPlate();
 
-        assertThat(simulate(PlateActionCode.HALVE_SOUP).afterScore()).isEqualTo(68);
+        assertThat(simulate(PlateActionCode.HALVE_SOUP).afterScore()).isEqualTo(66);
         assertThat(simulate(PlateActionCode.HALVE_SOUP, PlateActionCode.LESS_SPICY).afterScore())
-                .isEqualTo(80);
+                .isEqualTo(78);
+    }
+
+    /**
+     * <b>카드가 광고한 회복치 = 버튼을 눌렀을 때 실제로 오르는 점수.</b> 이 제품이 파는 것이
+     * 그 한 줄이라 여기가 어긋나면 화면에서 바로 들킨다.
+     *
+     * <p>R02·R07 은 심각도·강도 계수가 곱해진 감점이라 고정 상수로 광고할 수 없다 —
+     * 홍조 64 에서 매운맛 카드는 +6 이라 적어 놓고 실제로는 12 를 올렸다.
+     */
+    @Test
+    @DisplayName("행동 카드의 expectedGain 이 시뮬레이션이 실제로 올리는 점수와 같다")
+    void simulate_expectedGainMatchesActualMovement() {
+        SkinPlate plate = givenPlate();
+
+        PlateEvaluation evaluation = engine.evaluate(new PlateContext(
+                plate.getSkinAnalysis().getMetrics(), plate.getFoodAnalysis()));
+
+        Map<String, PlateActionCode> actionOfRule = Map.of(
+                "R04", PlateActionCode.HALVE_SOUP,
+                "R02", PlateActionCode.LESS_SPICY,
+                "R03", PlateActionCode.NO_SUGAR_DRINK,
+                "R07", PlateActionCode.REMOVE_BATTER,
+                "R10", PlateActionCode.LESS_RICE);
+
+        List<RuleResult> cards = evaluation.results().stream()
+                .filter(result -> result.actionMessage() != null)
+                .toList();
+
+        assertThat(cards).isNotEmpty();
+        cards.forEach(card -> {
+            PlateSimulateResponse response = simulate(actionOfRule.get(card.ruleCode()));
+            assertThat(response.afterScore() - response.beforeScore())
+                    .as("%s 카드가 광고한 회복치", card.ruleCode())
+                    .isEqualTo(card.expectedGain());
+        });
     }
 
     @Test
@@ -141,7 +184,7 @@ class SkinPlateServiceTest {
 
         PlateSimulateResponse response = simulate(PlateActionCode.HALVE_SOUP);
 
-        assertThat(response.beforeScore()).isEqualTo(60);
+        assertThat(response.beforeScore()).isEqualTo(58);
         assertThat(response.plateId()).isEqualTo(PLATE_ID);
     }
 
@@ -154,13 +197,13 @@ class SkinPlateServiceTest {
     @DisplayName("저장 점수가 지금 룰과 어긋나도 before·after·removedRules 는 한 규칙으로 답한다")
     void simulate_neverMixesStoredAndRecomputedRules() {
         SkinPlate plate = givenPlate();
-        // 옛 룰로 매겨진 것처럼 저장 점수만 어긋나게 둔다(엔진은 여전히 60을 낸다).
+        // 옛 룰로 매겨진 것처럼 저장 점수만 어긋나게 둔다(엔진은 여전히 58을 낸다).
         ReflectionTestUtils.setField(plate, "plateScore", 70);
 
         PlateSimulateResponse response = simulate(PlateActionCode.HALVE_SOUP);
 
-        assertThat(response.beforeScore()).isEqualTo(60);              // 저장값 70 이 아니다
-        assertThat(response.afterScore()).isEqualTo(68);
+        assertThat(response.beforeScore()).isEqualTo(58);              // 저장값 70 이 아니다
+        assertThat(response.afterScore()).isEqualTo(66);
         assertThat(response.afterScore() - response.beforeScore()).isPositive();
         assertThat(response.removedRules()).containsExactly("R04");
     }
@@ -183,7 +226,7 @@ class SkinPlateServiceTest {
         assertThat(origin.getIngredients()).hasSize(ingredientsBefore);
         assertThat(origin.getNutrition().getSodiumMg()).isEqualTo(sodiumBefore);
         assertThat(origin.isSpicy()).isTrue();
-        assertThat(plate.getPlateScore()).isEqualTo(60);
+        assertThat(plate.getPlateScore()).isEqualTo(58);
     }
 
     @Test
@@ -296,7 +339,7 @@ class SkinPlateServiceTest {
 
         PlateAnalysisResponse response = skinPlateService.analyze(USER_ID, image(), ANALYSIS_ID);
 
-        assertThat(response.plateScore()).isEqualTo(60);
+        assertThat(response.plateScore()).isEqualTo(58);
         assertThat(response.baseScore()).isEqualTo(RuleConstants.BASE_SCORE);
 
         // analyze 와 record(Task 3) 의 점수 동일성이 이 호출 하나에 걸려 있다.
@@ -478,7 +521,7 @@ class SkinPlateServiceTest {
 
         SkinPlateResponse response = skinPlateService.saveRecord(USER_ID, "token");
 
-        assertThat(response.plateScore()).isEqualTo(60);
+        assertThat(response.plateScore()).isEqualTo(58);
         assertThat(response.aiTip()).isNull();
         verify(skinPlateRepository).save(any());
     }
@@ -673,8 +716,8 @@ class SkinPlateServiceTest {
 
         SkinPlateResponse response = skinPlateService.saveRecord(USER_ID, "token");
 
-        // 문서의 시연 예시 그대로 — 같은 음식·같은 지표면 60점이 나와야 한다.
-        assertThat(response.plateScore()).isEqualTo(60);
+        // 문서의 시연 예시 그대로 — 같은 음식·같은 지표면 58점이 나와야 한다.
+        assertThat(response.plateScore()).isEqualTo(58);
         // 점수만으로는 "무엇을" 평가했는지 알 수 없다 — 저장 경로가 토큰의 aiResult
         // 그대로를 toEntity 에 넘겼는지까지 확인해야 재평가 대상이 토큰의 food 임이 보장된다.
         verify(foodAnalysisService).toEntity(any(AppUser.class), eq(aiResult), eq("jti-score"));
@@ -707,7 +750,7 @@ class SkinPlateServiceTest {
 
         PlateAnalysisSimulateResponse response = simulateFromToken(PlateActionCode.HALVE_SOUP);
 
-        assertThat(response.beforeScore()).isEqualTo(60);
+        assertThat(response.beforeScore()).isEqualTo(58);
         verify(foodAnalysisService).toEntity(null, aiResult);
     }
 
@@ -739,7 +782,7 @@ class SkinPlateServiceTest {
     }
 
     @Test
-    @DisplayName("simulateFromToken — 무대 숫자 그대로 움직인다: 60 → 국물 절반 68")
+    @DisplayName("simulateFromToken — 무대 숫자 그대로 움직인다: 58 → 국물 절반 66")
     void simulateFromToken_movesScoreLikeDemo() {
         givenSkinAnalysis();
         OpenAiFoodResult aiResult = givenAiResult();
@@ -748,8 +791,8 @@ class SkinPlateServiceTest {
 
         PlateAnalysisSimulateResponse response = simulateFromToken(PlateActionCode.HALVE_SOUP);
 
-        assertThat(response.beforeScore()).isEqualTo(60);
-        assertThat(response.afterScore()).isEqualTo(68);
+        assertThat(response.beforeScore()).isEqualTo(58);
+        assertThat(response.afterScore()).isEqualTo(66);
         assertThat(response.afterScore()).isGreaterThan(response.beforeScore());
         assertThat(response.removedRules()).isNotEmpty();
     }
@@ -825,7 +868,7 @@ class SkinPlateServiceTest {
     void simulateFromToken_beforeScoreMatchesAnalyze() {
         givenSkinAnalysis();
         // 원본(2200)은 표준값(1850)과 다르다 — toEntity 를 타야만 표준화된 givenFood() 로
-        // 수렴해 60점이 나온다. 원본을 그대로 쓰면 R04 초과분이 늘어 59점으로 갈라진다.
+        // 수렴해 58점이 나온다. 원본을 그대로 쓰면 R04 초과분이 늘어 57점으로 갈라진다.
         OpenAiFoodResult aiResult = givenAiResult(2200);
         given(foodAnalysisService.recognize(any())).willReturn(aiResult);
         given(foodAnalysisService.toEntity(null, aiResult)).willReturn(givenFood());
@@ -866,7 +909,13 @@ class SkinPlateServiceTest {
         return payload;
     }
 
-    /** 문서의 시연 예시 그대로 — 지표 38/52/64/25/78 + 돼지고기 김치찌개 = 60점. */
+    /**
+     * 문서의 시연 예시 그대로 — 지표 38/52/64/25/78 + 돼지고기 김치찌개 = 58점.
+     *
+     * <p><b>포화지방 6.0g 을 빠뜨리면 안 된다.</b> 표준 음식표의 `돼지고기 김치찌개` 항목이
+     * 그 값을 들고 있어서 실제 시연은 R11 을 -2 로 받는다. 픽스처만 0 이면 이 테스트가
+     * 무대에 없는 60 점을 "무대 숫자"라고 고정한다.
+     */
     private SkinPlate givenPlate() {
         AppUser user = AppUser.create("test@skinplate.app", "encoded", "테스트유저");
         ReflectionTestUtils.setField(user, "id", USER_ID);
@@ -879,7 +928,9 @@ class SkinPlateServiceTest {
         // AI 가 사진에서 본 재료(돼지고기·두부)는 화면에만 남는다.
         FoodAnalysis food = FoodAnalysis.create(user, "돼지고기 김치찌개", "한식/찌개",
                 Nutrition.of(520, new BigDecimal("28.5"), new BigDecimal("24.0"),
-                        new BigDecimal("32.0"), 1850, new BigDecimal("6.2")),
+                                new BigDecimal("32.0"), 1850, new BigDecimal("6.2"))
+                        .withMicronutrients(new BigDecimal("6.0"), BigDecimal.ZERO,
+                                0, BigDecimal.ZERO, BigDecimal.ZERO),
                 CookingMethod.BOILED, true, "{}");
         food.assignStandardFoodName("돼지고기 김치찌개");
         food.addIngredient(FoodIngredient.of("돼지고기", IngredientTag.ETC));
@@ -887,7 +938,7 @@ class SkinPlateServiceTest {
         food.addIngredient(FoodIngredient.fromStandardTable("김치", IngredientTag.PROBIOTIC));
         food.addIngredient(FoodIngredient.fromStandardTable("고춧가루", IngredientTag.CAPSAICIN));
 
-        SkinPlate plate = SkinPlate.create(user, analysis, food, 60, "요약", "[]");
+        SkinPlate plate = SkinPlate.create(user, analysis, food, 58, "요약", "[]");
         ReflectionTestUtils.setField(plate, "id", PLATE_ID);
 
         given(skinPlateRepository.findByIdAndUserId(PLATE_ID, USER_ID))
@@ -917,7 +968,7 @@ class SkinPlateServiceTest {
         return plate;
     }
 
-    /** analyze() 전용 픽스처. 지표는 givenPlate() 와 같은 시연 값 — 같은 음식이면 같은 60점이 나와야 한다. */
+    /** analyze() 전용 픽스처. 지표는 givenPlate() 와 같은 시연 값 — 같은 음식이면 같은 58점이 나와야 한다. */
     private SkinAnalysis givenSkinAnalysis() {
         AppUser user = AppUser.create("test@skinplate.app", "encoded", "테스트유저");
         ReflectionTestUtils.setField(user, "id", USER_ID);
