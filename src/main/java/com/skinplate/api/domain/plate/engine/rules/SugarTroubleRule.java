@@ -5,6 +5,7 @@ import com.skinplate.api.domain.plate.engine.*;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 
 import static com.skinplate.api.domain.plate.engine.RuleConstants.*;
 
@@ -40,8 +41,15 @@ public class SugarTroubleRule implements PlateRule {
         // 지금 계산한다 — 임계를 25g 에서 15g 으로 내리면서 "줄여도 같은 단계에 남는"
         // 구간이 생겼다(37.5~40g). 옛 고정값 +7 은 그 구간에서 회복이 0 인데도 +7 이라
         // 말했고, 표준 음식표에 실제로 그런 음식이 3종 있다(고구마맛탕 등).
+        //
+        // **시뮬레이션과 같은 자리에서 반올림한다.** 시뮬레이션은 곱한 값을 Nutrition.of 에
+        // 넣고, 거기서 컬럼 자릿수(소수 둘)로 HALF_UP 된다. 여기서 안 맞추면 당류 37.51g 이
+        // 룰에서는 15.004(1단계) · 시뮬레이션에서는 15.00(0단계)이 되어, 실제로 오르는
+        // 한 끼에서만 카드가 사라진다.
         int afterNoDrink = deltaOf(
-                Nutrition.sugarTierOf(sugarG.multiply(SUGAR_AFTER_NO_DRINK)), trouble);
+                Nutrition.sugarTierOf(
+                        sugarG.multiply(SUGAR_AFTER_NO_DRINK).setScale(2, RoundingMode.HALF_UP)),
+                trouble);
         int expectedGain = afterNoDrink - delta;
 
         String reason = reason(context, Nutrition.sugarTierOf(sugarG) >= 2);

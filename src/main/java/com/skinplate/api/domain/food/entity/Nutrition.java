@@ -144,9 +144,6 @@ public class Nutrition {
     public boolean isHighProtein() { return proteinG.compareTo(BigDecimal.valueOf(PROTEIN_THRESHOLD_G)) >= 0; }
     public boolean isHighCalorie() { return calorieTier() > 0; }
 
-    /** isHighSugar 를 이미 통과한 뒤 한 단계 더 보는 값이다. 15~40g 은 false. */
-    public boolean isVeryHighSugar()  { return sugarG.compareTo(BigDecimal.valueOf(SUGAR_VERY_HIGH_G)) > 0; }
-
     /** R04 문구의 수식어("매우 높은"/"높은")를 가른다. 단계 2 이상이 그것이다. */
     public boolean isVeryHighSodium() { return sodiumTier() >= 2; }
 

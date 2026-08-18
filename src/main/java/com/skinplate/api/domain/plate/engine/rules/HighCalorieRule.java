@@ -37,7 +37,8 @@ public class HighCalorieRule implements PlateRule {
                 (int) Math.round(caloriesKcal * CALORIES_AFTER_LESS_RICE)));
         int expectedGain = penalty - afterLessRice;
 
-        String level = caloriesKcal > Nutrition.CALORIES_VERY_HIGH
+        // 경계를 여기서 다시 적지 않는다 — 감점과 문구가 다른 경계를 보는 날이 온다.
+        String level = Nutrition.calorieTierOf(caloriesKcal) >= 2
                 ? "열량이 아주 높은 편이라" : "열량이 높은 편이라";
         String reason = level + " 오늘 다른 끼니에서 균형을 맞춰보면 좋겠어요.";
 
