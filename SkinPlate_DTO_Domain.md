@@ -5746,10 +5746,10 @@ class ScoredItem {
 
 /// 오늘의 피부 타입 + 상태. 화면 문구는 서버가 조합해 준 [label] 을 **그대로** 쓴다.
 ///
-/// 클래스 이름의 `Ai` 는 이제 사실과 다르다 — 서버가 지표에서 규칙으로 낸다.
-/// 이름을 바꾸는 것은 프론트 PR 몫이라 여기서는 계약만 적는다.
-class AiSkinType {
-  const AiSkinType({required this.primary, required this.label});
+/// AI 관찰값이 아니라 **서버가 지표에서 규칙으로 낸 값**이다. 그래서 이름에 `Ai` 가
+/// 없다(프론트 #40 에서 개명 완료). [primary] 는 `skinTypeGap.observed` 와 항상 같다.
+class ObservedSkinType {
+  const ObservedSkinType({required this.primary, required this.label});
 
   final SkinType? primary;  // 모르는 값이면 null. "미선택"과 섞지 않는다
   final String label;       // "건성 · 붉은기" · "복합성 · 수분 부족(수부지)"
@@ -5776,11 +5776,15 @@ class SkinAge {
 > **`label` 뒤에 아무것도 붙이지 않는다.** '수부지' 처럼 괄호로 끝나는 문구가 있어서
 > `'$label 피부'` 로 이어 붙이면 "…(수부지) 피부" 가 된다.
 >
-> **카드 제목은 `skinTypeGap.observed`(규칙) 를 유지하고, `skinType` 은 칩으로 따로 단다.**
-> 제목을 AI 관찰값으로 덮으면 바로 아래 갭 카드와 한 화면에서 어긋난다 — 둘은 갈릴 수 있다.
+> **제목 하나로 그린다. 타입 칩을 따로 달지 않는다.**
+> `skinType.primary` 와 `skinTypeGap.observed` 는 **항상 같은 값**이라(둘 다
+> `SkinType.observe(metrics)`) 나눠 그릴 이유가 없다. 예전에는 이 필드가 AI 관찰값이라
+> 둘이 갈릴 수 있었고, 그래서 제목에 규칙값·칩에 AI 값을 그리며 한 화면이 타입을 두 개
+> 들고 있었다. 프롬프트에서 피부 타입 질문을 빼 출처를 하나로 만들면서 그 분리가
+> 사라졌다(프론트 #40).
 >
-> **AI 타입 칩이 뜨면 앱의 홍조 임계 배지는 달지 않는다.** 서버가 "민감 경향" 이라고 한
-> 옆에서 앱이 따로 판정하면, 두 판정이 어긋나는 날 어느 쪽을 믿을지 알 수 없다.
+> **앱이 홍조 임계 배지를 따로 달지 않는다.** 서버가 상태를 `label` 로 말한 옆에서 앱이
+> 다시 판정하면, 두 판정이 어긋나는 날 어느 쪽을 믿을지 알 수 없다.
 
 **`lib/features/skin_analysis/data/models/skin_dtos.dart`**
 
@@ -5850,15 +5854,15 @@ class ScoredItemDto with _$ScoredItemDto {
 /// traits 를 enum 으로 올리지 않는다 — 화면 문구는 서버가 조합해 준 label 을 쓴다.
 /// 그래서 서버가 상태 값 이름을 바꿔도 이 모델은 깨지지 않는다.
 @freezed
-class AiSkinTypeDto with _$AiSkinTypeDto {
-  const factory AiSkinTypeDto({
+class SkinTypeDto with _$SkinTypeDto {
+  const factory SkinTypeDto({
     String? primary,
     @Default(<String>[]) List<String> traits,
-    @Default('') String label,          // "건성 · 민감 경향"
-  }) = _AiSkinTypeDto;
+    @Default('') String label,          // "건성 · 붉은기"
+  }) = _SkinTypeDto;
 
-  factory AiSkinTypeDto.fromJson(Map<String, dynamic> json) =>
-      _$AiSkinTypeDtoFromJson(json);
+  factory SkinTypeDto.fromJson(Map<String, dynamic> json) =>
+      _$SkinTypeDtoFromJson(json);
 }
 
 /// AI 추정 피부 나이. 서버가 쓸 수 없다고 판단하면 키 자체를 생략한다.
@@ -5881,7 +5885,7 @@ class SkinAnalysisDto with _$SkinAnalysisDto {
     required int skinScore,
     required SkinMetricsDto metrics,
     @Default(<ScoredItemDto>[]) List<ScoredItemDto> metricDetails,
-    AiSkinTypeDto? skinType,            // 예전 분석이면 서버가 키를 생략한다
+    SkinTypeDto? skinType,              // 예전 분석이면 서버가 키를 생략한다
     SkinAgeDto? skinAge,                // 예전 분석이면 서버가 키를 생략한다
     @Default('') String summary,
     @Default(<HighlightDto>[]) List<HighlightDto> highlights,
@@ -5909,7 +5913,7 @@ extension SkinAnalysisDtoX on SkinAnalysisDto {
         id: skinAnalysisId,
         skinScore: skinScore,
         metricDetails: metricDetails.map((d) => d.toEntity()).toList(),
-        aiSkinType: skinType?.toEntity(),
+        skinType: skinType?.toEntity(),
         skinAge: skinAge?.toEntity(),
         metrics: SkinMetrics(
           hydration: metrics.hydration,
@@ -6870,7 +6874,7 @@ if (_consecutiveFailures >= 3) {
 | 4 | `expectedGain` ≠ `scoreDelta.abs()` | 서버 엔티티에 별도 컬럼, 앱 `ActionDto`에 별도 필드. **합산으로 "실행 후 점수"를 만들지 말 것** |
 | 5 | `PlateActionCode` · `SkinType` 이름 | 서버 enum 이름(`HALVE_SOUP`, `OILY` 등)을 앱이 그대로 보낸다. 한쪽만 이름을 바꾸면 400이 난다 |
 | 6 | `declaredSkinType` · `skinTypeGap` 이 **없는 것**과 **`UNKNOWN`인 것** | 앱 파서에 기본값을 두지 않는다. `null`이면 선택 칩, 값이 있으면 갭 카드 |
-| 8 | `skinType`(AI 관찰) 과 `skinTypeGap.observed`(규칙 도출) | **다른 값이고 갈릴 수 있다.** 갭 카드는 `observed` 를, 타입 칩은 `skinType` 을 쓴다 |
+| 8 | `skinType.primary` 와 `skinTypeGap.observed` | **항상 같은 값이다** — 둘 다 `SkinType.observe(metrics)` 다. 제목 하나로 그리고 타입 칩을 따로 달지 마라. 예전에 AI 관찰값이던 시절의 "갈릴 수 있다" 를 보고 칩을 다시 붙이면 프론트 #40 이 되돌아간다 |
 | 9 | `skinType` · `skinAge` 키가 **없는 것** | 이 기능 이전에 저장된 분석이거나 AI 응답이 쓸 수 없는 경우다. 두 카드를 통째로 숨긴다 — 빈 값으로 그리지 않는다 |
 | 10 | `metricDetails[].level` 과 `highlights[].status` | 같은 지표라도 <b>등급은 5단, 뱃지는 3단</b>이라 경계가 정확히 40·60 인 한 점에서 한 칸 어긋난다. 의도된 것이고, 앱은 둘을 각자 그리면 된다 |
 | 7 | `days[].skinScore`(그 날 분석이 없으면 그 날 첫 Plate 채점 당시 점수로 폴백돼 **항상 존재**) | 앱은 history 의 skinScore 를 "그날의 측정"이 아니라 **기준(baseline) 점수**로 라벨링한다. ~~`skinScoreTrend[]` 와의 대조~~ 는 없어졌다 — 그 배열을 내려보내던 `GET /reports?period=` 가 삭제됐다(2026-08-17). 피부 점수 추이를 다시 그려야 하면 새 엔드포인트를 만드는 것이지, 없는 필드를 찾을 일이 아니다 |
