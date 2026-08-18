@@ -69,6 +69,26 @@ class FoodAnalysisHardeningTest {
     }
 
     /**
+     * 나열("A와 B")과 수식절("A와 B가 들어간 C")은 정반대다 — 앞이 본체인 쪽과 뒤가 본체인
+     * 쪽. 수식절에서 첫 조각을 믿으면 김치찌개가 돼지고기(650kcal) 영양값을 받고,
+     * 그 뒤로는 표준 매칭이 확정돼 AI 태그까지 눌려 틀린 답이 결정론적으로 굳는다.
+     */
+    @Test
+    @DisplayName("수식절은 나열이 아니다 — 재료가 앞에 와도 뒤의 본체를 찾는다")
+    void modifierClauses_resolveToTheTrailingDish() {
+        assertThat(StandardFoodTable.find("돼지고기와 채소가 들어간 김치찌개")
+                .orElseThrow().name()).contains("김치찌개");
+        assertThat(StandardFoodTable.find("두부와 돼지고기를 넣은 김치찌개")
+                .orElseThrow().name()).contains("김치찌개");
+        assertThat(StandardFoodTable.find("양배추와 소스를 곁들인 돈가스")
+                .orElseThrow().name()).contains("돈가스");
+
+        // 나열은 그대로 첫 조각이 본체다.
+        assertThat(StandardFoodTable.find("돈가스와 양배추 샐러드")
+                .orElseThrow().name()).contains("돈가스");
+    }
+
+    /**
      * AI 는 "돈까스"라고 답하는데 공공데이터에는 "돈가스"만 있다. 그러면 조회가 뒤 낱말로
      * 밀려 재료 이름에 걸린다 — 돈가스가 고기구이 영양값(650kcal)을 받는다.
      * 실사진 E2E 에서 실제로 그렇게 됐고, 같은 사진이 59점과 66점을 오갔다.

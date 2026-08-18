@@ -209,9 +209,13 @@ public class FoodAnalysisService {
                             FoodIngredient.fromStandardTable(result.get(existing).getName(), tag));
                     continue;
                 }
-                if (result.size() >= INGREDIENT_MAX_COUNT) break;
-                // 위 AI 경로와 같은 이유로 자른다 — food_ingredient.name 은 VARCHAR(50) 이고,
-                // 표준 DB 이름은 스크립트가 만든다(`곱창전골_간편조리세트_…`).
+                // **표준 태그에는 상한을 걸지 않는다.** AI 가 재료를 12개 나열한 접시에서
+                // 상한에 막혀 표준 태그가 잘리면 그 룰이 통째로 꺼진다 — 같은 사진의 점수가
+                // "AI 가 재료를 몇 개나 적었는가"에 다시 매달린다. 태그는 많아야 열둘이고
+                // (IngredientTag 전체), 상한은 원래 화면이 감당할 재료 줄 수를 위한 값이다.
+                //
+                // 위 AI 경로와 같은 이유로 이름을 자른다 — food_ingredient.name 은
+                // VARCHAR(50) 이고, 표준 DB 이름은 스크립트가 만든다(`곱창전골_간편조리세트_…`).
                 result.add(FoodIngredient.fromStandardTable(trim(standard.name(), 50), tag));
             }
         }

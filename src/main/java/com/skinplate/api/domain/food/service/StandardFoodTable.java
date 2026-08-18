@@ -14,6 +14,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 /**
  * 공공데이터 기반 표준 음식 테이블. 조회 전용이고 첫 조회 때 한 번 읽는다.
@@ -59,6 +60,13 @@ public final class StandardFoodTable {
      * <p><b>판정이 아니라 철자다.</b> 여기에 다른 음식을 이어 붙이지 마라 — "라멘 → 라면"은
      * 표기 차이가 아니라 다른 음식이고, 그 줄이 생기는 순간 이 표는 앱이 만든 판정 규칙이 된다.
      */
+    /**
+     * "A와 B가 <b>들어간</b> C" 처럼 앞이 재료고 뒤가 본체인 표현. 이 표지가 보이면
+     * 나열이 아니라 수식절이라, 첫 조각을 본체로 믿으면 안 된다.
+     */
+    private static final Pattern MODIFIER_CLAUSE =
+            Pattern.compile("(들어간|들어있는|들어 있는|곁들인|곁들여|올라간|얹은|넣은|넣어)\\s");
+
     private static final Map<String, String> SPELLINGS = Map.of(
             "돈까스", "돈가스",
             "돈카츠", "돈가스",
@@ -184,8 +192,13 @@ public final class StandardFoodTable {
         // "소스가 뿌려진 돼지고기 돈가스와 양배추 샐러드". 아래 규칙은 뒤 낱말부터 보므로
         // 그대로 두면 곁들임(샐러드, 293kcal)이 본체(돈가스, 704kcal)를 이겨서 같은 사진이
         // 회차마다 다른 영양값을 받는다. 나열의 첫 조각이 본체다.
+        //
+        // **단, 수식절이면 정반대다.** "돼지고기와 채소가 들어간 김치찌개" 에서 앞은 재료고
+        // 본체는 끝에 있다. 첫 조각을 믿으면 김치찌개가 돼지고기(650kcal) 영양값을 받는데,
+        // 그 뒤로는 표준 매칭이 확정돼 AI 태그까지 눌리므로 틀린 답이 결정론적으로 굳는다 —
+        // 못 찾는 것보다 나쁘다. 뒤에 수식 표지가 있으면 지름길을 쓰지 않는다.
         String head = trimmed.split("(와|과)\\s|,")[0].trim();
-        if (!head.equals(trimmed)) {
+        if (!head.equals(trimmed) && !MODIFIER_CLAUSE.matcher(trimmed).find()) {
             // 첫 조각에서는 **마지막 낱말만** 본다. 앞 낱말까지 훑으면 "소스가 뿌려진
             // 돼지고기 돈까스" 가 돈가스를 못 찾았을 때 "돼지고기"(고기구이 650kcal)로
             // 떨어진다 — 못 찾는 것보다 나쁘다. 못 찾으면 아래에서 이름 전체를 훑는다.

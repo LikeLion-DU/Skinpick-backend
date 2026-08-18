@@ -140,6 +140,29 @@ class DeterministicScoringTest {
         assertThat(food.getIngredients()).hasSize(2);
     }
 
+    /**
+     * AI 가 재료를 잔뜩 나열해도 표준 태그는 잘리지 않는다. 상한에 막혀 표준 태그가
+     * 사라지면 그 룰이 통째로 꺼져서, 같은 사진의 점수가 "AI 가 재료를 몇 개나 적었는가"에
+     * 다시 매달린다 — 이 PR 이 없애려는 바로 그 결함이다.
+     */
+    @Test
+    @DisplayName("AI 가 재료를 12개 나열해도 표준 태그가 잘리지 않는다")
+    void standardTags_surviveTheIngredientCap() {
+        OpenAiFoodResult.Ingredient[] many = IntStream.range(0, 12)
+                .mapToObj(index -> ingredient("재료" + index, "ETC"))
+                .toArray(OpenAiFoodResult.Ingredient[]::new);
+
+        FoodAnalysis crowded = foodAnalysisService.toEntity(null, tteokbokki("MEDIUM", many));
+        FoodAnalysis sparse = foodAnalysisService.toEntity(null,
+                tteokbokki("MEDIUM", ingredient("쌀떡", "HIGH_GI")));
+
+        assertThat(engine.evaluate(new PlateContext(DEMO, crowded)).score())
+                .isEqualTo(engine.evaluate(new PlateContext(DEMO, sparse)).score());
+        // 표준표의 떡볶이 태그(CAPSAICIN·HIGH_GI)가 둘 다 남아 있어야 한다.
+        assertThat(crowded.hasTag(com.skinplate.api.domain.food.entity.IngredientTag.HIGH_GI))
+                .isTrue();
+    }
+
     // ---- helpers ----
 
     private int score(OpenAiFoodResult aiResult, SkinMetrics skin) {

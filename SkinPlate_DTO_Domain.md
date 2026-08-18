@@ -2233,6 +2233,12 @@ public class Nutrition {
 
 > **영양 임계값을 `Nutrition` 안에 둔 이유** — `RuleConstants`에 몰아넣을 수도 있지만, "나트륨이 많은가"는 영양 정보 자신이 대답할 수 있는 질문이다. 룰은 판단(감점 몇 점, 무슨 문구)에 집중하고, 사실 확인은 값 객체가 한다.
 
+> *(2026-08-18 결정론 개편 — 아래 `FoodIngredient`·`FoodAnalysis` 블록은 그 이전 기록이다.
+> 저장소가 더 최신이다: `FoodIngredient.fromStandard`(+`fromStandardTable`/`copyOf`),
+> `FoodAnalysis.standardFoodName`·`isStandardMatched()`·`scoringTraits()` 가 빠져 있고,
+> **`hasTag()` 의 의미가 정반대다** — 지금은 표준 유래 재료만 본다(§1.22.1).
+> 이 블록의 `hasTag` 를 그대로 옮기면 AI 태그가 다시 점수에 섞인다.)*
+
 **`domain/food/entity/FoodIngredient.java`**
 
 ```java
@@ -3761,7 +3767,7 @@ private FoodAnalysis simulate(FoodAnalysis origin, List<PlateActionCode> actions
             !lessSpicy && origin.isSpicy(),
             "{}");
 
-    origin.getIngredients().stream()
+    origin.getIngredients().stream()   // ← 실제 코드는 FoodIngredient.copyOf 를 쓴다(출처 보존)
             .filter(i -> !(lessSpicy && i.getTag() == IngredientTag.CAPSAICIN))
             .forEach(i -> copy.addIngredient(FoodIngredient.of(i.getName(), i.getTag())));
 
@@ -4661,14 +4667,20 @@ AI가 사진을 보고 추정한 값이라 호출할 때마다 흔들린다.
 부대찌개에 라면 영양값이 들어가기 때문이다. 접미사를 긴 쪽부터 보므로 `Map` 순회 순서에
 기대지 않는다(구 N10 리스크 해소).
 
-**AI 와 표준값 중 누가 이기는가 — 필드마다 다르다.**
+**AI 와 표준값 중 누가 이기는가 — 2026-08-18 부터 표준 DB 가 전부 이긴다.**
 
-| 필드 | 이기는 쪽 | 왜 |
+예전에는 필드마다 달랐다. 조리법은 `ETC` 면 AI 가 이기고, 매운맛은 둘의 OR 이고, 재료 태그는
+둘 다 점수에 섰다. 그 틈이 정확히 **같은 사진이 다른 점수를 내는 통로**였다 — 실사진 E2E 에서
+떡볶이 한 장이 50 · 54 · 55 · 58 점을 냈고, 원인은 AI 태그(ANTIOXIDANT ±5 · PROBIOTIC ±4)와
+관찰 강도(HOT↔MEDIUM ±4)였다.
+
+| 필드 | 표준 DB 에서 찾았을 때 | 못 찾았을 때 |
 |---|---|---|
-| 영양값 | **표준 DB 항상** | 룰이 비교하는 숫자가 그것뿐이다. 원본에 없는 항목만 AI 추정치로 남는다 |
-| 조리법 | 표준 DB — 단 `ETC` 면 AI | `ETC` 는 "아니다"가 아니라 "이름만 봐서는 모르겠다"다. 비빔국수·막국수처럼 국물 여부를 이름으로 못 가리는 것은 스크립트가 일부러 `ETC` 로 둔다 |
-| 매운맛 | 둘의 OR | `spicy=false` 는 이름에 매운 낱말이 없다는 뜻이지 안 맵다는 증거가 아니다 |
-| 재료 태그 | 둘 다 — AI 먼저, 표준이 보탬 | 사진에는 이름에 없는 재료가 보이고(두부), 이름에는 AI 가 놓치는 태그가 있다(김치→발효) |
+| 영양값 | **표준 DB** (원본에 없는 항목만 AI 추정치) | AI 추정치 |
+| 조리법 | **표준 DB** — `ETC` 여도 AI 답을 쓰지 않는다 | AI |
+| 매운맛 | **표준 DB** — OR 하지 않는다 | AI |
+| 재료 태그 | **표준 DB 태그만 점수에 선다.** AI 재료는 화면·AI 코멘트에 그대로 남는다 | 태그 룰 전부 꺼짐 |
+| 강도 계수(spiciness·oiliness) | **쓰지 않는다** (`scoringTraits()` → UNKNOWN) | AI 관찰값 |
 
 ```java
 // FoodAnalysisService.toEntity()
@@ -4676,10 +4688,25 @@ Optional<StandardFood> standard = StandardFoodTable.find(foodName);
 
 Nutrition nutrition = standard.map(food -> food.toNutrition(aiNutrition)).orElse(aiNutrition);
 CookingMethod cookingMethod = standard.map(StandardFood::cookingMethod)
-        .filter(method -> method != CookingMethod.ETC)
         .orElseGet(() -> toCookingMethod(aiResult.cookingMethod()));
-boolean spicy = standard.map(StandardFood::spicy).orElse(false) || aiResult.spicy();
+boolean spicy = standard.map(StandardFood::spicy).orElseGet(aiResult::spicy);
+
+// 매칭된 이름을 남긴다 — 엔티티 혼자 "점수가 표준표에서 왔는가"를 알 수 있어야
+// 저장된 기록을 다시 평가하는 시뮬레이션도 같은 판단을 한다.
+standard.ifPresent(matched -> food.assignStandardFoodName(matched.name()));
 ```
+
+**점수용 태그와 표시용 재료를 가른다.** `FoodIngredient.fromStandard` 가 그 표시다.
+`FoodAnalysis.hasTag()` 는 표준 유래 재료만 보고, 화면·DTO 는 전부 본다. 같은 태그를 둘 다
+알면 그 줄을 표준 확정으로 **승격**해 이름은 AI 쪽("쌀떡")을 유지한다 — 지우고 표준 이름으로
+새로 넣으면 화면의 재료 이름이 음식 이름으로 바뀐다. 표준 태그에는 재료 개수 상한을 걸지
+않는다. 상한에 막혀 잘리면 그 룰이 꺼져 점수가 "AI 가 재료를 몇 개 적었는가"에 다시 매달린다.
+
+> **이름 조회의 두 함정.** 뒤 낱말부터 보는 규칙은 나열("돈가스와 양배추 샐러드")에서
+> 곁들임이 본체를 이기게 만들고, 첫 조각을 믿는 규칙은 수식절("돼지고기와 채소가 들어간
+> 김치찌개")에서 재료가 본체를 이기게 만든다. 둘 다 실제로 겪었다 — 후자는 김치찌개에
+> 돼지고기 650kcal 을 물린다. 수식 표지(`들어간`·`곁들인`·`넣은` …)가 보이면 첫 조각
+> 지름길을 쓰지 않는 것이 지금 규칙이다. 표기 차이(`돈까스`→`돈가스`)는 별도 표로 흡수한다.
 
 **정직성.** 숨기지 않는다. 화면에 "표준 영양 DB 기준"이라고 표기하고, "AI는 무슨 음식인지
 판단하고, 영양값은 표준 DB에서 가져옵니다"라고 설명한다. 오히려 이게 강점이 된다 —

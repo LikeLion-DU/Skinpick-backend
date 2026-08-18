@@ -91,7 +91,9 @@ class StandardFoodTableTest {
     @DisplayName("국물인지 모르는 면류는 단정하지 않는다 — 비빔국수에 '국물을 남기세요'가 붙으면 안 된다")
     void ambiguousNoodlesStayUnknown() {
         // '면'·'국' 부분일치로 BOILED 가 되면 isSoup() 이 참이 되어, 국물 없는 음식에
-        // 국물 조언과 HALVE_SOUP 시뮬레이션이 붙는다. ETC 면 사진을 본 AI 가 답한다.
+        // 국물 조언과 HALVE_SOUP 시뮬레이션이 붙는다. ETC 면 국물 조언이 안 붙는다 —
+        // 2026-08-18 부터는 표준 DB 에서 찾은 음식의 조리법을 AI 가 덮지 않으므로,
+        // ETC 가 "모르겠으니 AI 에게" 가 아니라 "국물이라 단정하지 않는다" 가 됐다.
         assertThat(StandardFoodTable.find("비빔국수").orElseThrow().cookingMethod())
                 .isEqualTo(CookingMethod.ETC);
         assertThat(StandardFoodTable.find("막국수").orElseThrow().cookingMethod())
