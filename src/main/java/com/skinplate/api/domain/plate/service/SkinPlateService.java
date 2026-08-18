@@ -70,8 +70,11 @@ public class SkinPlateService {
 
     private static final BigDecimal SUGAR_WITHOUT_DRINK = new BigDecimal("0.4");
 
-    /** 밥·면을 조금 줄인 한 끼의 열량 비율. R10(>900kcal)이 1200kcal 까지는 꺼진다. */
-    private static final double CALORIES_WITHOUT_EXTRA_RICE = 0.75;
+    /**
+     * 밥·면을 조금 줄인 한 끼의 열량 비율. <b>R10 이 카드에 싣는 회복치와 같은 값을 써야</b>
+     * 광고한 점수와 시뮬레이션 결과가 같아진다 — 그래서 RuleConstants 가 원본을 쥔다.
+     */
+    private static final double CALORIES_WITHOUT_EXTRA_RICE = RuleConstants.CALORIES_AFTER_LESS_RICE;
 
     private final AppUserRepository userRepository;
     private final SkinAnalysisRepository skinAnalysisRepository;

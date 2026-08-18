@@ -42,7 +42,7 @@ class PlateRuleEngineTest {
     }
 
     @Test
-    @DisplayName("예시 B · 연어구이 정식 → 87점")
+    @DisplayName("예시 B · 연어구이 정식 → 91점")
     void grilledSalmon() {
         FoodAnalysis food = food("연어구이 정식", CookingMethod.GRILLED, false,
                 nutrition(610, "32.0", 1600, "4.0"),
@@ -52,26 +52,53 @@ class PlateRuleEngineTest {
 
         PlateEvaluation result = engine.evaluate(new PlateContext(SKIN, food));
 
-        // 70 + R01(+10) + R05(+6) + R06(+5) + R09(+4) + R04(-8) = 87
-        assertThat(result.score()).isEqualTo(87);
+        // 70 + R01(+10) + R05(+6) + R06(+5) + R09(+4) + R04(-4) = 91
+        // 나트륨 1,600mg 은 새 1단계(>1150)라 -4 다. 옛 임계 1,500mg 에서는 -8 이었다.
+        assertThat(result.score()).isEqualTo(91);
     }
 
     @Test
-    @DisplayName("나트륨 초과량에 비례해 감점이 커지고 -15에서 잘린다")
-    void sodiumScalesWithExcess() {
-        // 두 예시(1850·1600)는 초과량이 500 미만이라 비례 분기가 한 번도 돌지 않는다.
-        // Day 8 에 만질 로직이므로 여기서 덮어둔다.
-        FoodAnalysis mild = food("간장국", CookingMethod.BOILED, false,
-                nutrition(300, "5.0", 2100, "2.0"), List.of());     // excess 600 → 8 + 1 = 9
-        FoodAnalysis extreme = food("소금덩어리", CookingMethod.BOILED, false,
-                nutrition(300, "5.0", 9000, "2.0"), List.of());     // excess 7500 → 8 + 15 → 15로 잘림
-
+    @DisplayName("나트륨은 3단계로 깎인다 — p75 -4 · p90 -8 · p95 -12")
+    void sodiumIsTiered() {
         SkinMetrics neutral = SkinMetrics.of(50, 50, 50, 50, 50);   // 다른 룰이 안 걸리는 지표
 
-        assertThat(engine.evaluate(new PlateContext(neutral, mild)).score())
-                .isEqualTo(70 - 9);
-        assertThat(engine.evaluate(new PlateContext(neutral, extreme)).score())
-                .isEqualTo(70 - 15);
+        assertThat(scoreOfSodium(neutral, 1150)).isEqualTo(70);        // 경계는 초과부터
+        assertThat(scoreOfSodium(neutral, 1151)).isEqualTo(70 - 4);
+        assertThat(scoreOfSodium(neutral, 1701)).isEqualTo(70 - 8);
+        assertThat(scoreOfSodium(neutral, 2301)).isEqualTo(70 - 12);
+        // 초과량 비례에서 계단으로 바꿨으므로 아무리 짜도 -12 를 넘지 않는다.
+        assertThat(scoreOfSodium(neutral, 9000)).isEqualTo(70 - 12);
+    }
+
+    /**
+     * 옛 비례식은 "국물 절반"의 효과를 미리 계산할 수 없어 고정 +8 을 광고했다.
+     * 계단형은 절반으로 줄인 뒤의 단계를 알 수 있으므로, 카드가 말하는 회복치와
+     * 시뮬레이션이 실제로 올리는 점수가 같아야 한다.
+     */
+    @Test
+    @DisplayName("국물 절반 회복치가 실제 단계 변화와 같다")
+    void sodiumGainMatchesTheActualTierChange() {
+        SkinMetrics neutral = SkinMetrics.of(50, 50, 50, 50, 50);
+
+        // 2400 → 절반 1200 : -12 에서 -4 로 → 회복 8
+        assertThat(gainOfSodium(neutral, 2400)).isEqualTo(8);
+        // 1200 → 절반 600 : -4 에서 0 으로 → 회복 4. 옛 고정값이라면 "+8" 이라 거짓말했다.
+        assertThat(gainOfSodium(neutral, 1200)).isEqualTo(4);
+    }
+
+    private int scoreOfSodium(SkinMetrics skin, int sodiumMg) {
+        FoodAnalysis soup = food("국", CookingMethod.BOILED, false,
+                nutrition(300, "5.0", sodiumMg, "2.0"), List.of());
+        return engine.evaluate(new PlateContext(skin, soup)).score();
+    }
+
+    private int gainOfSodium(SkinMetrics skin, int sodiumMg) {
+        FoodAnalysis soup = food("국", CookingMethod.BOILED, false,
+                nutrition(300, "5.0", sodiumMg, "2.0"), List.of());
+        return engine.evaluate(new PlateContext(skin, soup)).results().stream()
+                .filter(result -> result.ruleCode().equals("R04"))
+                .findFirst().orElseThrow()
+                .expectedGain();
     }
 
     @Test
@@ -252,23 +279,39 @@ class PlateRuleEngineTest {
     }
 
     @Test
-    @DisplayName("R10 — 900kcal 초과만 고정 -5 로 걸리고 밥 줄이기 행동이 붙는다")
+    @DisplayName("R10 — 열량은 2단계로 걸리고 밥 줄이기 회복치가 실제 단계 변화와 같다")
     void highCalorieRule() {
         SkinMetrics neutral = SkinMetrics.of(50, 50, 50, 50, 50);
 
-        FoodAnalysis heavy = food("곱빼기", CookingMethod.ETC, false,
-                nutrition(950, "10.0", 1000, "5.0"), List.of());
         FoodAnalysis boundary = food("보통", CookingMethod.ETC, false,
-                nutrition(900, "10.0", 1000, "5.0"), List.of());
-
-        PlateEvaluation evaluation = engine.evaluate(new PlateContext(neutral, heavy));
-        assertThat(evaluation.score()).isEqualTo(70 - 5);
-        assertThat(evaluation.appliedRuleCodes()).containsExactly("R10");
-        // 광고한 회복치가 시뮬레이션의 실제 효과와 같아야 한다 — R10 은 고정 감점이라
-        // 근사가 필요 없고, 어긋나면 카드가 확인 가능한 거짓을 말한다.
-        assertThat(evaluation.results().get(0).expectedGain()).isEqualTo(5);
+                nutrition(660, "10.0", 1000, "5.0"), List.of());
+        FoodAnalysis heavy = food("곱빼기", CookingMethod.ETC, false,
+                nutrition(700, "10.0", 1000, "5.0"), List.of());
+        FoodAnalysis veryHeavy = food("특곱빼기", CookingMethod.ETC, false,
+                nutrition(1000, "10.0", 1000, "5.0"), List.of());
+        FoodAnalysis beyondHelp = food("초대형", CookingMethod.ETC, false,
+                nutrition(1200, "10.0", 1000, "5.0"), List.of());
 
         assertThat(engine.evaluate(new PlateContext(neutral, boundary)).score()).isEqualTo(70);
+
+        PlateEvaluation evaluation = engine.evaluate(new PlateContext(neutral, heavy));
+        assertThat(evaluation.score()).isEqualTo(70 - 4);
+        assertThat(evaluation.appliedRuleCodes()).containsExactly("R10");
+        // 700 × 0.75 = 525 → 단계 0. 광고한 회복치가 시뮬레이션의 실제 효과와 같다.
+        assertThat(evaluation.results().get(0).expectedGain()).isEqualTo(4);
+
+        // 1000 × 0.75 = 750 → 2단계에서 1단계로만 내려간다. 회복은 7-4 = 3 이다.
+        PlateEvaluation veryHeavyResult = engine.evaluate(new PlateContext(neutral, veryHeavy));
+        assertThat(veryHeavyResult.score()).isEqualTo(70 - 7);
+        assertThat(veryHeavyResult.results().get(0).expectedGain()).isEqualTo(3);
+
+        // 1200 × 0.75 = 900 → 여전히 2단계라 실제 회복이 0 이다. 옛 고정값은 이 자리에서도
+        // "+5" 라 말했고, 사용자가 버튼을 누르면 점수가 그대로였다 — 이제 카드를 안 준다.
+        PlateEvaluation beyondHelpResult = engine.evaluate(new PlateContext(neutral, beyondHelp));
+        assertThat(beyondHelpResult.results().get(0).expectedGain()).isZero();
+        assertThat(beyondHelpResult.results()).noneMatch(RuleResult::hasAction);
+        // 주의 문장은 사라지지 않는다 — 회복이 없다고 부담까지 없는 것은 아니다.
+        assertThat(beyondHelpResult.appliedRuleCodes()).contains("R10");
     }
 
     /**
@@ -284,7 +327,8 @@ class PlateRuleEngineTest {
 
         assertThat(reasonOf(evaluation, "R02"))
                 .contains("붉은기가 높은 상태").contains("강한 매운맛").contains("될 수 있어요");
-        assertThat(reasonOf(evaluation, "R04")).contains("나트륨이 높은 편");
+        // 1,850mg 은 새 2단계(>1700)라 수식어가 "매우 높은"으로 올라간다.
+        assertThat(reasonOf(evaluation, "R04")).contains("나트륨이 매우 높은 편");
         // 피드백 엔티티까지 실려 내려간다 — DTO 배선은 FeedbackDto.from 이 잇는다.
         assertThat(evaluation.toFeedbacks())
                 .filteredOn(feedback -> "R02".equals(feedback.getRuleCode())

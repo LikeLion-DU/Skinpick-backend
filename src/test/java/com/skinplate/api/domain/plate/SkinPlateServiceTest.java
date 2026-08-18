@@ -792,22 +792,25 @@ class SkinPlateServiceTest {
     }
 
     @Test
-    @DisplayName("simulate — LESS_RICE 는 열량을 3/4 로 줄여 R10 을 끈다 (65 → 70)")
+    @DisplayName("simulate — LESS_RICE 는 열량을 3/4 로 줄여 R10 을 끈다 (63 → 70)")
     void simulateFromToken_lessRiceTurnsOffHighCalorie() {
         givenSkinAnalysis();
         OpenAiFoodResult aiResult = givenAiResult();
         givenAnalysisTokenPayload(aiResult);
 
         // 시연 지표(38/52/64/25/78)에서 R10 만 걸리는 음식 — 맵지 않고 싱겁고 단백질도 낮다.
+        // 800kcal 은 열량 2단계(>790)고 3/4 로 줄이면 600 이라 단계 0 으로 떨어진다.
+        // 임계값을 p90/p95 로 내리면서 옛 1,000kcal 픽스처는 줄여도 1단계에 남는다 —
+        // "R10 을 끈다"는 이 테스트의 의도를 보여주려면 픽스처가 경계를 넘어야 한다.
         FoodAnalysis heavyFood = FoodAnalysis.create(null, "짜장면 곱빼기", "중식",
-                Nutrition.of(1000, BigDecimal.TEN, BigDecimal.TEN, BigDecimal.TEN, 1000, BigDecimal.ONE),
+                Nutrition.of(800, BigDecimal.TEN, BigDecimal.TEN, BigDecimal.TEN, 1000, BigDecimal.ONE),
                 CookingMethod.ETC, false, "{}");
         given(foodAnalysisService.toEntity(null, aiResult)).willReturn(heavyFood);
 
         PlateAnalysisSimulateResponse response = simulateFromToken(PlateActionCode.LESS_RICE);
 
-        assertThat(response.beforeScore()).isEqualTo(65);   // 70 - 5(R10)
-        assertThat(response.afterScore()).isEqualTo(70);    // 1000 × 0.75 = 750 → R10 해제
+        assertThat(response.beforeScore()).isEqualTo(63);   // 70 - 7(R10 2단계)
+        assertThat(response.afterScore()).isEqualTo(70);    // 800 × 0.75 = 600 → R10 해제
         assertThat(response.removedRules()).containsExactly("R10");
     }
 

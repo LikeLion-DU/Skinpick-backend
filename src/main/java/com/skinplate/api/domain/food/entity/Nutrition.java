@@ -15,7 +15,11 @@ import java.math.BigDecimal;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class Nutrition {
 
-    public static final int SODIUM_THRESHOLD_MG   = 1500;   // 초과 시 감점
+    /**
+     * 나트륨 1단계. 표준 음식 1,452종의 p75 다(중앙값 688 · p90 1,822).
+     * 옛 1,500mg 은 p85 라 6종 중 1종만 걸렸고, 한 끼에 하루 권장량의 75% 를 허용하는 값이었다.
+     */
+    public static final int SODIUM_THRESHOLD_MG   = 1150;
     public static final int PROTEIN_THRESHOLD_G   = 20;     // 이상이면 가점
     /**
      * 초과 시 감점(R03). 25g 은 표준 음식 1,452종에서 <b>상위 2.5%</b>(p97.5)라
@@ -23,13 +27,16 @@ public class Nutrition {
      * 15g 은 p92 근처이고, 이 표의 당류 중앙값이 2.8g · p75 가 6.4g 이다.
      */
     public static final int SUGAR_THRESHOLD_G     = 15;     // 초과 시 감점
-    public static final int CALORIES_THRESHOLD    = 900;    // 초과 시 감점 (R10)
+    /** 열량 1단계. 표준 음식의 p90 이다(중앙값 268 · p95 791). 옛 900kcal 은 p97 이었다. */
+    public static final int CALORIES_THRESHOLD    = 660;    // 초과 시 감점 (R10)
 
     // 단계화 경계. 임계값은 전부 이 클래스가 소유한다 — 룰이 제 안에 숫자를 들면
     // "당류를 몇 g부터 많다고 보는가"의 답이 파일마다 달라진다.
     // 델타(몇 점 깎을지)는 RuleConstants 몫이다. 그 둘은 다른 축이다.
     public static final int SUGAR_VERY_HIGH_G     = 40;     // 초과 시 R03 추가 감점
-    public static final int SODIUM_VERY_HIGH_MG   = 2500;   // 초과 시 R04 문구만 강해진다
+    public static final int SODIUM_VERY_HIGH_MG   = 1700;   // 나트륨 2단계 (p90 근처)
+    public static final int SODIUM_EXTREME_MG     = 2300;   // 나트륨 3단계 (p95 근처)
+    public static final int CALORIES_VERY_HIGH    = 790;    // 열량 2단계 (p95)
 
     @Column(name = "calories_kcal", nullable = false) private int caloriesKcal;
     @Column(name = "protein_g", nullable = false, precision = 6, scale = 2) private BigDecimal proteinG;
@@ -67,18 +74,40 @@ public class Nutrition {
 
     // ---- 판정 ----
 
-    public boolean isHighSodium()  { return sodiumMg > SODIUM_THRESHOLD_MG; }
+    public boolean isHighSodium()  { return sodiumTier() > 0; }
     public boolean isHighSugar()   { return sugarG.compareTo(BigDecimal.valueOf(SUGAR_THRESHOLD_G)) > 0; }
     public boolean isHighProtein() { return proteinG.compareTo(BigDecimal.valueOf(PROTEIN_THRESHOLD_G)) >= 0; }
-    public boolean isHighCalorie() { return caloriesKcal > CALORIES_THRESHOLD; }
+    public boolean isHighCalorie() { return calorieTier() > 0; }
 
     /** isHighSugar 를 이미 통과한 뒤 한 단계 더 보는 값이다. 15~40g 은 false. */
     public boolean isVeryHighSugar()  { return sugarG.compareTo(BigDecimal.valueOf(SUGAR_VERY_HIGH_G)) > 0; }
 
-    /** 점수에는 쓰지 않는다 — R04 는 이미 초과량 비례라, 문구의 수식어만 가른다. */
-    public boolean isVeryHighSodium() { return sodiumMg > SODIUM_VERY_HIGH_MG; }
+    /** R04 문구의 수식어("매우 높은"/"높은")를 가른다. 단계 2 이상이 그것이다. */
+    public boolean isVeryHighSodium() { return sodiumTier() >= 2; }
 
-    public int sodiumExcessMg() { return Math.max(0, sodiumMg - SODIUM_THRESHOLD_MG); }
+    /**
+     * 나트륨 단계 0~3. <b>경계는 이 클래스가, 델타는 RuleConstants 가 소유한다.</b>
+     *
+     * <p>임의의 mg 를 받는 static 이 함께 있는 이유는 R04 가 "국물을 절반만 남기면
+     * 몇 점 오르는가"를 <b>계산해서</b> 말해야 하기 때문이다. 단계를 룰 안에서 다시 세면
+     * 경계가 두 파일로 갈리고, 카드가 광고한 회복치와 시뮬레이션 결과가 언젠가 어긋난다.
+     */
+    public static int sodiumTierOf(int sodiumMg) {
+        if (sodiumMg > SODIUM_EXTREME_MG)   return 3;
+        if (sodiumMg > SODIUM_VERY_HIGH_MG) return 2;
+        if (sodiumMg > SODIUM_THRESHOLD_MG) return 1;
+        return 0;
+    }
+
+    /** 열량 단계 0~2. 위와 같은 이유로 static 을 함께 둔다(LESS_RICE 회복치 계산). */
+    public static int calorieTierOf(int caloriesKcal) {
+        if (caloriesKcal > CALORIES_VERY_HIGH) return 2;
+        if (caloriesKcal > CALORIES_THRESHOLD) return 1;
+        return 0;
+    }
+
+    public int sodiumTier()  { return sodiumTierOf(sodiumMg); }
+    public int calorieTier() { return calorieTierOf(caloriesKcal); }
 
     private static BigDecimal nonNull(BigDecimal value) {
         return value == null ? BigDecimal.ZERO : value.max(BigDecimal.ZERO);

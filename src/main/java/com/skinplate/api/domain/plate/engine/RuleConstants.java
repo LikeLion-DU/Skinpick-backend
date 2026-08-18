@@ -17,31 +17,35 @@ public final class RuleConstants {
     public static final int R01_HYDRATION_FOOD   =  8;   // 건조 × 수분/오메가3
     public static final int R02_SPICY_REDNESS    = -10;  // 홍조 × 매운 음식
     public static final int R03_SUGAR_TROUBLE    = -12;  // 당류 과다 — 게이트 없음, 심각도로 개인화
-    public static final int R04_SODIUM           = -8;   // 나트륨 과다
+    // 나트륨은 초과량 비례에서 3단계로 바꿨다. 비례식은 경계 근처에서 1점씩 흔들려
+    // "왜 이 점수인가" 카드가 설명하기 어려웠고, 계단은 회복치를 정확히 계산할 수 있다.
+    public static final int R04_SODIUM_HIGH      = -4;   // >1150mg (p75)
+    public static final int R04_SODIUM_VERY_HIGH = -8;   // >1700mg (p90)
+    public static final int R04_SODIUM_EXTREME   = -12;  // >2300mg (p95)
     public static final int R05_PROTEIN          =  6;   // 단백질 충분
     public static final int R06_VITAMIN          =  5;   // 비타민/항산화
     public static final int R07_FRIED_OIL        = -10;  // 튀김/기름진 음식 — 게이트 없음, 심각도로 개인화
     public static final int R08_OMEGA3_BARRIER   =  7;   // 장벽 약화 × 오메가3
     public static final int R09_PROBIOTIC        =  4;   // 발효식품
     // 피부 지표와 직접 매지 않는 보조 룰이라 심각도 계수를 태우지 않는 고정 델타다.
-    // 시연 음식(520·610kcal)에는 걸리지 않아 예시 60·87 이 그대로다.
-    public static final int R10_HIGH_CALORIE     = -5;   // 고열량
+    // 같은 이유로 ConcernRules 에도 매지 않는다.
+    public static final int R10_HIGH_CALORIE      = -4;  // >660kcal (p90)
+    public static final int R10_VERY_HIGH_CALORIE = -7;  // >790kcal (p95)
 
     // ---- 추천 행동 시 회복 점수 ----
-    public static final int GAIN_SOUP_HALF       = 8;
     public static final int GAIN_LESS_SPICY      = 6;
     public static final int GAIN_WATER_NOT_SODA  = 7;
     public static final int GAIN_REMOVE_BATTER   = 5;
-    // R10 은 고정 -5 다. LESS_RICE 가 열량을 3/4 로 줄여 900 아래로 내리면 회복이
-    // 정확히 5 이고, 900~1200kcal 이 그 구간이다. **1200 을 넘으면 줄여도 900 위라
-    // 실제 회복은 0 이다** — 그건 GAIN_SOUP_HALF 와 같은 종류의 근사다(감점이 가변인
-    // R04 는 애초에 정확할 수 없다). 4 를 쓰면 그 근사와 무관하게 일반적인 구간에서도
-    // 카드가 "+4" 라 말하고 시뮬레이션은 5 를 올리는, 확인 가능한 거짓이 된다.
-    public static final int GAIN_LESS_RICE       = 5;   // R10 쌍 · |R10_HIGH_CALORIE| 와 같다
+    // R04·R10 의 회복치는 상수가 아니다. 단계형이 되면서 "국물 절반"·"밥 줄이기"의
+    // 실제 효과가 지금 단계에서 계산된다 — 옛 고정값(8·5)은 나트륨 1,200mg 짜리
+    // 국에도 "+8" 이라 말했고, 시뮬레이션은 4 만 올렸다. 확인 가능한 거짓이었다.
+    // 두 룰이 각자 Nutrition.sodiumTierOf · calorieTierOf 로 계산한다.
 
-    // ---- 나트륨 초과량 비례 감점 ----
-    public static final int SODIUM_STEP_MG       = 500;  // 500mg 초과마다 1점 추가 감점
-    public static final int SODIUM_MAX_PENALTY   = 15;
+    /**
+     * LESS_RICE 를 실행한 뒤 남는 열량 비율. <b>R10 과 시뮬레이션이 같은 값을 써야</b>
+     * 카드가 광고한 회복치와 실제 결과가 같아진다 — 그래서 서비스가 아니라 여기 둔다.
+     */
+    public static final double CALORIES_AFTER_LESS_RICE = 0.75;
 
     // ---- 음식 특성 강도 계수 (스키마 v2) ----
     // SeverityCalculator 의 피부 축과 직교로 곱는 음식 축이다.
