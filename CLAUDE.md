@@ -81,6 +81,18 @@ docker exec -i skinplate-db psql -U skinplate -d skinplate -tAc \
     where connamespace='public'::regnamespace and contype in ('c','u') order by conname;"
 ```
 
+**배포 서버** — 가비아 VM. `docker compose` 를 쓰지 않는다(위 compose 는 로컬 Postgres 전용).
+
+```bash
+ssh gabia '~/skinplate/deploy.sh'             # main 을 받아 빌드·교체·헬스체크까지
+ssh gabia 'docker logs -f skinplate'          # 앱 로그. 에러만 보려면 2>&1 을 꼭 붙인다
+ssh gabia 'sudo tail -f /var/log/caddy/api.log'   # 요청이 서버까지 왔는지 (413·502 는 여기만 남는다)
+curl https://1-201-116-157.sslip.io/api/v1/health
+```
+
+`.env` 는 서버의 `~/skinplate/.env` 에만 있다 — 저장소에도 이미지에도 들어가지 않는다.
+OpenAI 한도에 막히면 그 파일의 `AI_MOCK=true` 주석을 풀고 `docker restart skinplate` 가 시연 백업이다.
+
 ## Git / PR
 
 - 브랜치명: `{type}/{설명}` (예: `feat/skin-analysis-api`). 이슈가 있으면 `{type}/{이슈번호}-{설명}`
@@ -94,6 +106,20 @@ docker exec -i skinplate-db psql -U skinplate -d skinplate -tAc \
 - **1개 단위 = 1 브랜치 = 1 PR 원칙** (백엔드: API 단위)
 - 모든 작업 브랜치는 `develop` 에서 분기, `develop` 으로 PR
 
+**브랜치 역할이 둘로 나뉜다 — `develop` 은 개발, `main` 은 배포다.**
+
+| 브랜치 | 역할 |
+|---|---|
+| `develop` | 기본 브랜치. 모든 PR 이 여기로 온다. **기본 브랜치는 계속 `develop` 이다** — `main` 으로 바꾸면 새 PR 이 배포 브랜치로 꽂혀 리뷰 전 코드가 배포본이 된다 |
+| `main` | **가비아 VM 이 실제로 배포하는 브랜치.** `develop` 을 fast-forward 로만 받는다 |
+
+```bash
+git checkout main && git merge --ff-only develop && git push   # 릴리스
+ssh gabia '~/skinplate/deploy.sh'                              # 배포
+```
+
+`--ff-only` 는 편의가 아니라 **`main` 을 `develop` 의 한 지점으로 묶어두는 장치**다. `main` 에 직접 커밋하면 이게 실패하면서 알려준다 — "배포된 것 = `main`" 이 거짓이 되는 순간을 조용히 넘기지 않는다.
+
 ## 절대 금지
 
 - 시크릿을 코드 · `application*.yml` · 커밋에 기재 (`JWT_SECRET` `OPENAI_API_KEY` `DB_PASSWORD`)
@@ -102,5 +128,7 @@ docker exec -i skinplate-db psql -U skinplate -d skinplate -tAc \
 - 점수 계산을 LLM에 위임 (재현성이 이 제품의 주장이다)
   - **예외는 `estimatedSkinAge` 하나다.** 8개 축을 종합한 인상이라 기계적 공식을 두지 않기로 결정했다(PRD §17.2). Skin Score·level·highlights·`skinTypeGap.observed` 는 전부 Backend 가 지표에서 다시 만든다 — 피부 나이만 재계산이 불가능하고, 그래서 흔들림도 여기서 가장 크게 보인다
 - `declaredSkinType`을 `PlateContext`에 넣기 — 자가 신고값은 표시·비교 전용
+- **`main` 에 직접 커밋.** 배포 브랜치라 리뷰를 건너뛴 코드가 그대로 배포본이 된다. `develop` 에서 `--ff-only` 로만 올린다
+- **배포 서버에서 브랜치 바꾸기** (`deploy.sh` 의 `BRANCH` 수정 포함). 급할 때 `develop` 을 바로 올리고 싶어지는데, 그 순간부터 `main` 은 배포본이 아니고 아무도 그걸 모른다
 - **08-21 이후 커밋.** 그날 업로드가 닫힌다 — 기능·QA·배포·촬영이 전부 그 안에 들어간다
 - 기능 동결은 날짜가 아니라 **G5(배포본 E2E 1회 완주)** 로 판단한다. PRD 의 "Day 8 동결"은 08-17 발표 전제였고 무효다
