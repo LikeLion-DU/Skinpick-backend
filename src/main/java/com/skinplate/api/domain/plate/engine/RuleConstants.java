@@ -36,6 +36,13 @@ public final class RuleConstants {
     public static final int R11_SAT_FAT_HIGH      = -7;  // >8.2g  (p90)
     public static final int R11_SAT_FAT_EXTREME   = -10; // >12.3g (p95)
     public static final int R12_REFINED_CARB      = -4;  // HIGH_GI 태그 + 탄수 30g 이상
+    // 가점 쪽 유일한 단계형. 이 룰이 "좋은 음식이 올라간다"를 담당한다.
+    public static final int R15_FIBER             =  4;  // 100kcal 당 3.0g (p75)
+    public static final int R15_FIBER_HIGH        =  6;  // 100kcal 당 5.0g (p90)
+    // R13(생·찜 조리 +3) 과 R16(아연 가점) 은 만들지 않았다. 전자는 "날것이면 피부에 좋다"를
+    // 이 룰표로 증명할 수 없고(RAW 에는 육회가, STEAMED 에는 만두가 함께 들어온다),
+    // 후자는 아연 밀도가 단백질 밀도와 r=0.38 로 겹치는 데다 상위가 굴·조개·갈비탕·수육이라
+    // 부담이 큰 음식에 가점을 주게 된다. 점수를 흩기 위해 근거 없는 룰을 넣지 않는다.
 
     // ---- 추천 행동 시 회복 점수 ----
     public static final int GAIN_LESS_SPICY      = 6;

@@ -24,7 +24,8 @@ class PlateRuleEngineTest {
             new SodiumRule(), new SpicyRednessRule(), new SugarTroubleRule(),
             new FriedOilRule(), new HydrationFoodRule(), new Omega3BarrierRule(),
             new ProteinRule(), new VitaminRule(), new ProbioticRule(),
-            new HighCalorieRule(), new SaturatedFatRule(), new RefinedCarbRule()));
+            new HighCalorieRule(), new SaturatedFatRule(), new RefinedCarbRule(),
+            new FiberRule()));
 
     @Test
     @DisplayName("예시 A · 돼지고기 김치찌개 → 60점")
@@ -394,6 +395,80 @@ class PlateRuleEngineTest {
         assertThat(rulesOf(potatoSoup)).doesNotContain("R12");     // 태그는 있지만 탄수가 적다
         assertThat(deltaOf(tteokbokki, "R12")).isEqualTo(-4);
         assertThat(rulesOf(plainRice)).doesNotContain("R12");      // 탄수는 많지만 태그가 없다
+    }
+
+    // ---- R15 식이섬유 · R06 실측 비타민 (2026-08-18) ----
+
+    /**
+     * <b>밀도로 재는 이유가 이 테스트다.</b> 절대량으로 보면 감자튀김(5.8g)이
+     * 샐러드(3.8g)를 이긴다 — 감자튀김이 468kcal 이고 샐러드가 293kcal 이기 때문이다.
+     * 그러면 점수가 음식의 질이 아니라 크기를 재게 된다.
+     */
+    @Test
+    @DisplayName("식이섬유는 밀도로 잰다 — 절대량이 더 많은 감자튀김이 나물을 이기지 않는다")
+    void fiberIsMeasuredByDensityNotAmount() {
+        // 표준 음식 테이블의 실제 값이다. 감자튀김이 식이섬유 절대량은 더 많다.
+        FoodAnalysis friesFixture = micronutrientFood("감자튀김", CookingMethod.FRIED,
+                468, "6.8", "5.8", 0, "0.0");
+        FoodAnalysis beanSprouts = micronutrientFood("콩나물무침", CookingMethod.RAW,
+                25, "2.1", "1.2", 0, "0.0");
+
+        assertThat(deltaOf(beanSprouts, "R15")).isEqualTo(4);       // 밀도 4.8 → p75 통과
+        assertThat(rulesOf(friesFixture)).doesNotContain("R15");    // 밀도 1.24 → 미달
+    }
+
+    @Test
+    @DisplayName("식이섬유 2단계 — 100kcal 당 3.0g 이상 +4 · 5.0g 이상 +6")
+    void fiberTiers() {
+        assertThat(rulesOf(micronutrientFood("경계아래", CookingMethod.ETC, 100, "2.0", "2.9", 0, "0.0")))
+                .doesNotContain("R15");
+        assertThat(deltaOf(micronutrientFood("1단계", CookingMethod.ETC, 100, "2.0", "3.0", 0, "0.0"), "R15"))
+                .isEqualTo(4);
+        assertThat(deltaOf(micronutrientFood("2단계", CookingMethod.ETC, 100, "2.0", "5.0", 0, "0.0"), "R15"))
+                .isEqualTo(6);
+    }
+
+    /**
+     * 태그 판정을 지우지 않는 이유 — 표준 테이블에 없는 음식에서는 AI 가 사진에서 본
+     * 재료가 유일한 단서다. 실측을 더하는 이유 — 태그만으로는 1,443종 중 42종밖에 못 잡았다.
+     */
+    @Test
+    @DisplayName("R06 은 재료 태그와 실측 비타민 중 하나만 서도 걸리고, 둘 다 서도 한 번만 준다")
+    void vitaminAcceptsEitherSignalButScoresOnce() {
+        FoodAnalysis tagOnly = food("브로콜리 무침", CookingMethod.RAW, false,
+                nutrition(100, "2.0", 100, "0.0"),
+                List.of(FoodIngredient.of("브로콜리", IngredientTag.ANTIOXIDANT)));
+        FoodAnalysis measuredOnly = micronutrientFood("시금치 된장국", CookingMethod.BOILED,
+                36, "4.1", "0.0", 72, "0.0");                       // 비타민A 밀도 200
+        FoodAnalysis both = micronutrientFood("당근 나물", CookingMethod.RAW,
+                100, "2.0", "0.0", 200, "0.0");
+
+        both.addIngredient(FoodIngredient.of("당근", IngredientTag.VITAMIN_A));
+
+        assertThat(deltaOf(tagOnly, "R06")).isEqualTo(5);
+        assertThat(deltaOf(measuredOnly, "R06")).isEqualTo(5);
+        // 신호가 둘이라고 두 배 좋아지지 않는다 — R06 은 한 번만 실린다.
+        assertThat(rulesOf(both)).filteredOn("R06"::equals).hasSize(1);
+        assertThat(deltaOf(both, "R06")).isEqualTo(5);
+    }
+
+    @Test
+    @DisplayName("확장 영양을 모르는 음식은 R15·R06 실측 경로가 걸리지 않는다")
+    void unknownMicronutrientsDoNotTrigger() {
+        FoodAnalysis unknown = food("정체불명", CookingMethod.ETC, false,
+                nutrition(500, "10.0", 300, "2.0"), List.of());
+
+        assertThat(rulesOf(unknown)).doesNotContain("R15", "R06");
+    }
+
+    private static FoodAnalysis micronutrientFood(String name, CookingMethod method, int kcal,
+                                                  String protein, String fiber,
+                                                  int vitaminA, String saturatedFat) {
+        Nutrition nutrition = Nutrition.of(kcal, new BigDecimal(protein), BigDecimal.ZERO,
+                        BigDecimal.ZERO, 100, BigDecimal.ZERO)
+                .withMicronutrients(new BigDecimal(saturatedFat), new BigDecimal(fiber),
+                        vitaminA, BigDecimal.ZERO, BigDecimal.ZERO);
+        return food(name, method, false, nutrition, List.of());
     }
 
     private FoodAnalysis withSaturatedFat(String grams) {

@@ -59,6 +59,23 @@ public class Nutrition {
      */
     public static final int REFINED_CARB_MIN_G = 30;
 
+    /**
+     * 가점 룰이 쓰는 <b>영양 밀도</b> 경계 — 100kcal 당 함량이다. 표준 음식 1,443종의
+     * p75 / p90 을 반올림했다.
+     *
+     * <p><b>절대량이 아니라 밀도인 이유.</b> 절대량으로 재면 감자튀김(식이섬유 5.8g)이
+     * 샐러드(3.8g)를 이긴다 — 감자튀김이 468kcal 이고 샐러드가 293kcal 이기 때문이다.
+     * 그러면 점수가 "이 음식이 얼마나 좋은가"가 아니라 "얼마나 큰가"를 재게 된다.
+     * 밀도로 보면 콩나물무침 4.8 · 샐러드 1.3 · 떡볶이 0.7 · 돈가스 0.4 로 상식과 맞는다.
+     *
+     * <p>감점 쪽은 절대량 그대로다. 부담은 실제로 먹은 총량이 만들고, 밀도로 바꾸면
+     * 1,000kcal 짜리 한 끼가 "밀도는 낮으니 괜찮다"로 빠져나간다.
+     */
+    public static final double FIBER_DENSITY_THRESHOLD     = 3.0;   // p75 3.08
+    public static final double FIBER_DENSITY_HIGH          = 5.0;   // p90 5.11
+    public static final double VITAMIN_A_DENSITY_THRESHOLD = 36.0;  // p75 36.8 (μg RAE)
+    public static final double VITAMIN_C_DENSITY_THRESHOLD = 4.0;   // p75 4.17 (mg)
+
     @Column(name = "calories_kcal", nullable = false) private int caloriesKcal;
     @Column(name = "protein_g", nullable = false, precision = 6, scale = 2) private BigDecimal proteinG;
     @Column(name = "fat_g",     nullable = false, precision = 6, scale = 2) private BigDecimal fatG;
@@ -169,6 +186,28 @@ public class Nutrition {
     /** HIGH_GI 태그가 붙은 음식에서 "실제로 정제 탄수가 많은가"를 되묻는다. */
     public boolean hasRefinedCarbLoad() {
         return carbG.compareTo(BigDecimal.valueOf(REFINED_CARB_MIN_G)) >= 0;
+    }
+
+    /** 식이섬유 단계 0~2 (밀도 기준). 값을 모르면(=0) 0 이라 R15 가 발동하지 않는다. */
+    public int fiberTier() {
+        double density = densityOf(fiberG.doubleValue());
+        if (density >= FIBER_DENSITY_HIGH)      return 2;
+        if (density >= FIBER_DENSITY_THRESHOLD) return 1;
+        return 0;
+    }
+
+    /**
+     * 실측 비타민이 풍부한가. A 와 C 중 <b>하나만 넘어도</b> 참이다 — 둘 다 요구하면
+     * 나물(A 는 높고 C 는 낮다)과 생채소(그 반대)가 함께 떨어진다.
+     */
+    public boolean isVitaminRich() {
+        return densityOf(vitaminAUg) >= VITAMIN_A_DENSITY_THRESHOLD
+                || densityOf(vitaminCMg.doubleValue()) >= VITAMIN_C_DENSITY_THRESHOLD;
+    }
+
+    /** 100kcal 당 함량. 열량이 0 이면 나눌 수 없으므로 0 으로 본다(=모른다). */
+    private double densityOf(double amount) {
+        return caloriesKcal <= 0 ? 0.0 : amount * 100.0 / caloriesKcal;
     }
 
     private static BigDecimal nonNull(BigDecimal value) {
