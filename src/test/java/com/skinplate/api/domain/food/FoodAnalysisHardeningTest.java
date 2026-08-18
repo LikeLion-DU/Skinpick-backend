@@ -93,6 +93,15 @@ class FoodAnalysisHardeningTest {
                 .orElseThrow().name()).contains("돈가스");
         assertThat(StandardFoodTable.find("치즈가 얹은 돈가스와 샐러드")
                 .orElseThrow().name()).contains("돈가스");
+
+        // 표지 목록에 없는 활용형("넣고")도 목적격 조사로 잡힌다 — 어미를 다 나열하지 않는다.
+        assertThat(StandardFoodTable.find("돼지고기와 채소를 넣고 끓인 김치찌개")
+                .orElseThrow().name()).contains("김치찌개");
+
+        // 앞이 수식절이고 뒤가 나열인 이름. 이름 전체에서 표지를 찾으면 곁들임(순대)이
+        // 본체를 이겨서, 고치려던 것과 정반대 결과가 된다.
+        assertThat(StandardFoodTable.find("치즈가 올라간 떡볶이와 순대")
+                .orElseThrow().name()).contains("떡볶이");
     }
 
     /**
