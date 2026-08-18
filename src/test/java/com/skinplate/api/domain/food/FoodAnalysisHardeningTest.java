@@ -85,6 +85,27 @@ class FoodAnalysisHardeningTest {
                 .orElseThrow().name()).doesNotContain("돼지고기");
     }
 
+    /**
+     * 실사진 E2E 에서 돈가스 사진 한 장에 AI 가 붙인 이름 전부다. 다섯 가지로 불렸고
+     * 그중 둘이 다른 음식(샐러드 293kcal · 돼지고기 650kcal)으로 잡혀 같은 사진이
+     * 59 · 66 · 68 점을 오갔다. 이름이 흔들려도 같은 표준 음식에 닿아야 점수가 하나로 모인다.
+     */
+    @Test
+    @DisplayName("같은 사진에 붙은 이름이 다섯 가지여도 전부 같은 표준 음식에 닿는다")
+    void observedNameVariants_allResolveToTheSameDish() {
+        List<String> observed = List.of(
+                "돈가스 정식",
+                "소스 돈가스",
+                "소스가 뿌려진 돼지고기 돈가스",
+                "소스 돈가스와 양배추 샐러드",
+                "소스가 뿌려진 돼지고기 돈까스와 양배추 샐러드");
+
+        assertThat(observed)
+                .allSatisfy(name -> assertThat(StandardFoodTable.find(name).orElseThrow().name())
+                        .as(name)
+                        .isEqualTo("돈가스"));
+    }
+
     @Test
     @DisplayName("낱말 가운데에 키가 들어간 다른 음식은 잡지 않는다 — 부대찌개가 라면 값을 받으면 안 된다")
     void otherDishes_areNotSubstituted() {
