@@ -16,6 +16,11 @@ gpt-5 계열은 temperature 를 고정할 수 없어 재현성 레버가 없으�
 판정 기준 — 하나라도 벗어나면 OPENAI_MODEL=gpt-4o 로 되돌린다
     지표 등급이 회차마다 같을 것 · Skin Score 폭 ≤ 5 · 피부 나이 폭 ≤ 3 · 타입 일치율 100%
 
+    타입은 **AI 에게 묻지 않는다** — 서버가 지표에서 규칙으로 낸다(SkinType.observe).
+    얼굴 미검출(faceDetected=false) 회차는 표본에서 뺀다. 실제 서비스라면 그 응답은
+    FACE_NOT_DETECTED(422) 라 사용자에게 결과가 나가지 않는다 — 세면 "얼굴이 안 잡힌
+    다섯 번"이 "안정적인 다섯 번"이 된다.
+
     등급 안정성이 핵심이다. 총점만 보면 화면 흔들림을 못 잡는다 — SkinLevel 은
     총점이 아니라 지표마다 따로 계산되므로, 수분이 45→25 로 흔들려도 총점은 4밖에
     안 움직이는데(게이트 통과) 그 지표의 등급은 NORMAL→CAUTION 으로, 뱃지는
@@ -134,11 +139,38 @@ def levels_of(result):
     return levels
 
 
+def observed_type(d):
+    """`SkinType.observe` 와 같은 규칙.
+
+    **AI 는 타입을 내지 않는다** — `SkinAnalysisPrompt` 가 "피부 타입은 판단하지
+    않습니다" 라고 못 박았고 `SCHEMA_JSON` 에도 `skinType` 이 없다. 예전 이 스크립트는
+    `result["skinType"]["primary"]` 를 요구해서 **모든 회차가 shape 실패로 버려졌다** —
+    사진이 아무리 좋아도 게이트가 통과할 수 없었다.
+
+    타입 일치율은 여전히 봐야 한다. 화면에 뜨는 것이 그 값이기 때문이다. 그래서
+    AI 에게 묻는 대신 서버와 같은 규칙으로 지표에서 도출한다. 경계는
+    `SkinMetrics` 의 OILY(>70) · OIL_ELEVATED(>=60) · DRY(<40) 그대로다.
+    """
+    if d["oil"] > 70:
+        return "OILY"
+    if d["oil"] >= 60:
+        return "COMBINATION"
+    if d["hydration"] < 40:
+        return "DRY"
+    return "NORMAL"
+
+
 def usable(result):
-    """집계가 건드릴 필드가 다 있는지. 하나라도 없으면 표본에서 뺀다."""
+    """집계가 건드릴 필드가 다 있는지. 하나라도 없으면 표본에서 뺀다.
+
+    `faceDetected` 가 false 인 회차도 뺀다 — 그건 실제 서비스라면
+    `SkinAnalysisService` 가 `FACE_NOT_DETECTED`(422) 로 거절하는 응답이라
+    사용자에게 결과가 나가지 않는다. 표본으로 세면 "얼굴이 안 잡힌 다섯 번"이
+    "안정적인 다섯 번"으로 둔갑한다.
+    """
     age = result.get("skinAgeAnalysis")
-    return (all(k in result for k in METRICS)
-            and isinstance(result.get("skinType"), dict) and "primary" in result["skinType"]
+    return (result.get("faceDetected") is True
+            and all(k in result for k in METRICS)
             and isinstance(age, dict) and "estimatedSkinAge" in age
             and all(isinstance(age.get(a), dict) and "score" in age[a] for a in AGE_AXES))
 
@@ -228,7 +260,7 @@ def main():
 
     summary = {}
     for model in models:
-        per_person, limited, failed = [], 0, 0
+        per_person, limited, failed, no_face = [], 0, 0, 0
 
         for person in people:
             content = content_for(f"{FACES}/{person}", user_prompt, labels, detail)
@@ -236,19 +268,28 @@ def main():
             for i in range(RUNS):
                 result = call(key, model, system, content, sch, max_tokens)
                 if result["ok"] and not usable(result["data"]):
-                    # 파싱은 됐는데 축이나 타입이 빠진 응답이다. 아래 집계에서
-                    # KeyError 로 죽으면 이미 쓴 요청이 전부 날아간다.
-                    result = {**result, "ok": False, "code": "shape",
-                              "rate_limited": False, "error": "응답에 필요한 필드가 없다"}
+                    # 파싱은 됐는데 쓸 수 없는 응답이다. 아래 집계에서 KeyError 로
+                    # 죽으면 이미 쓴 요청이 전부 날아간다.
+                    #
+                    # 두 경우를 갈라서 찍는다 — 얼굴 미검출은 "사진을 바꿔라"이고
+                    # 필드 누락은 "프롬프트/스키마를 봐라"다. 한 문구로 뭉치면
+                    # 실제로 사진 문제인데 모델을 의심하게 된다.
+                    detected = result["data"].get("faceDetected") is True
+                    result = {**result, "ok": False,
+                              "code": "no-face" if not detected else "shape",
+                              "rate_limited": False,
+                              "error": "얼굴 미검출 — 서비스라면 FACE_NOT_DETECTED(422) 다"
+                                       if not detected else "응답에 필요한 필드가 없다"}
                 if result["ok"]:
                     d = result["data"]
                     data.append((d, result))
                     print(f"  {model:14} {person:9} {i + 1}/{RUNS}  "
                           f"{[d[k] for k in METRICS]} score={skin_score(d)} "
                           f"age={d['skinAgeAnalysis']['estimatedSkinAge']} "
-                          f"type={d['skinType']['primary']} {result['latency']:.1f}s")
+                          f"type={observed_type(d)} {result['latency']:.1f}s")
                 else:
                     failed += 1
+                    no_face += result["code"] == "no-face"
                     limited += result["rate_limited"]
                     print(f"  {model:14} {person:9} {i + 1}/{RUNS}  "
                           f"✗ {result['code']} {result['error'][:80]}")
@@ -259,7 +300,7 @@ def main():
             results = [d for d, _ in data]
             scores = [skin_score(d) for d in results]
             ages = [d["skinAgeAnalysis"]["estimatedSkinAge"] for d in results]
-            types = [d["skinType"]["primary"] for d in results]
+            types = [observed_type(d) for d in results]
             # 회차마다 등급이 흔들린 칸을 모은다. 이게 화면에서 실제로 바뀌는 것이다.
             per_run_levels = [levels_of(d) for d in results]
             unstable = sorted({key for key in per_run_levels[0]
@@ -293,11 +334,17 @@ def main():
                 "worst_age_range": max(p["age_range"] for p in per_person),
                 "worst_type_agree": min(p["type_agree"] for p in per_person),
                 "unstable_levels": sorted({k for p in per_person for k in p["unstable_levels"]}),
-                "rate_limited": limited, "failed": failed,
+                "rate_limited": limited, "failed": failed, "no_face": no_face,
             }
 
     if not summary:
-        sys.exit("\n성공한 호출이 없다. 일일 요청 한도부터 확인한다.")
+        # 원인을 지목해서 끝낸다. 예전에는 무조건 "일일 한도"를 가리켰는데,
+        # 실제로는 사진에 얼굴이 없는 경우가 더 흔하고 그때 모델을 의심하게 된다.
+        if no_face and no_face == failed:
+            sys.exit("\n전 회차 얼굴 미검출 — 모델 문제가 아니라 사진 문제다. "
+                     "얼굴이 크게·밝게 나온 사진으로 다시 넣는다.")
+        sys.exit("\n성공한 호출이 없다. 얼굴 미검출 %d회 · 그 밖의 실패 %d회 — "
+                 "미검출이 0 이면 일일 요청 한도부터 확인한다." % (no_face, failed - no_face))
 
     models = list(summary)
     rows = [("실제 얼굴 평균 latency", lambda s: f"{s['latency']:.1f}초"),

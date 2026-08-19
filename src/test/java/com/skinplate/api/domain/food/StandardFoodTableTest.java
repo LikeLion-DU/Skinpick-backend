@@ -143,8 +143,16 @@ class StandardFoodTableTest {
         assertThat(salmonSalad.tags()).contains(IngredientTag.VITAMIN_C);   // 샐러드(채소)
 
         // 감점 재료는 이름으로 얹지 않는다 — "고추냉이 연어"가 매운 음식이 되면 안 된다.
-        StandardFood porkStew = StandardFoodTable.find("돼지고기 김치찌개").orElseThrow();
-        assertThat(porkStew.tags()).contains(IngredientTag.PROBIOTIC);
+        //
+        // 예전 이 자리는 `돼지고기 김치찌개` 가 PROBIOTIC 을 갖는지 봤는데, 그 행은
+        // standard-food.json 에 이미 `"tags": ["PROBIOTIC"]` 로 실려 있어서
+        // withNameTags 를 통째로 지워도 통과했다 — 아무것도 지키지 않는 단언이었다.
+        // 지켜야 하는 것은 "감점 태그는 이름으로 붙지 않는다" 이므로 그것을 직접 본다.
+        StandardFood wasabiSalmon = StandardFoodTable.find("고추냉이 연어구이").orElseThrow();
+        assertThat(wasabiSalmon.tags()).contains(IngredientTag.OMEGA3);   // 가점은 붙고
+        assertThat(wasabiSalmon.tags()).doesNotContain(IngredientTag.CAPSAICIN);  // 감점은 안 붙는다
+        assertThat(StandardFoodTable.find("치즈 감자튀김").orElseThrow().tags())
+                .doesNotContain(IngredientTag.DAIRY);
     }
 
     @Test

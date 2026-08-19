@@ -209,7 +209,13 @@ public final class StandardFoodTable {
      *
      * <p><b>가점 태그만 얹는다.</b> 감점 재료(당·유제품·매운맛)는 영양값과 spicy 가
      * 이미 잡고 있고, 낱말 하나로 벌을 주면 "고추냉이 연어"류 오탐이 점수를 깎는다.
-     * 낱말 목록은 tools/build_standard_food.py 의 TAG_RULES 와 같은 값을 쓴다.
+     * <p><b>낱말 목록은 TAG_RULES 와 같지 않다.</b> OMEGA3·ANTIOXIDANT·PROBIOTIC 세 벌은
+     * {@code tools/build_standard_food.py} 의 TAG_RULES 를 그대로 옮긴 것이라 표준표에
+     * 새로 붙는 행이 0 이다. 실제로 점수를 움직이는 것은 TAG_RULES 에 <b>없는</b> 두 낱말,
+     * VITAMIN_C 의 {@code 샐러드} 와 VITAMIN_A 의 {@code 나물} 이다 — 재료가 아니라
+     * 조리 형태라서 감자 샐러드·마카로니 샐러드·콩나물무침처럼 <b>실측 비타민이 임계
+     * 아래인 행에도 R06(+7)이 붙는다.</b> 표를 다시 만들면 두 소스가 갈리므로,
+     * 값을 손댈 때는 양쪽을 같이 본다.
      */
     private record BonusNameTag(IngredientTag tag, List<String> words) {}
 

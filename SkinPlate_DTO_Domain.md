@@ -3622,7 +3622,8 @@ public record SkinPlateResponse(
          * 같은 68점이 화면마다 다른 등급으로 뜬다.
          */
         SkinLevel grade,
-        int baseScore,        // 항상 RuleConstants.BASE_SCORE(70). 계산 내역 카드 첫 줄
+        int baseScore,        // 항상 RuleConstants.BASE_SCORE(75). 상한에 걸린 한 끼에서는
+                              // 기본+델타 합이 총점보다 크다 — 그대로 더해 보이면 카드가 어긋난다
         String summary,
         FoodAnalysisDto food,
         FeedbackGroupDto feedbacks,
@@ -4016,18 +4017,18 @@ public final class RuleConstants {
     private RuleConstants() {}
 
     /** 모든 Plate가 여기서 출발한다. */
-    public static final int BASE_SCORE = 70;
+    public static final int BASE_SCORE = 75;   // 2026-08-20 재캘리브레이션 (#64)
 
     // ---- 룰별 기본 델타 (severityFactor 적용 전) ----
     public static final int R01_HYDRATION_FOOD   =  8;   // 건조 × 수분/오메가3
     public static final int R02_SPICY_REDNESS    = -10;  // 홍조 × 매운 음식
     public static final int R03_SUGAR_TROUBLE    = -12;  // 트러블 × 당류 과다
     public static final int R04_SODIUM           = -8;   // 나트륨 과다
-    public static final int R05_PROTEIN          =  6;   // 단백질 충분
-    public static final int R06_VITAMIN          =  5;   // 비타민/항산화
+    public static final int R05_PROTEIN          =  7;   // 단백질 충분
+    public static final int R06_VITAMIN          =  7;   // 비타민/항산화
     public static final int R07_FRIED_OIL        = -10;  // 유분 × 튀김
     public static final int R08_OMEGA3_BARRIER   =  7;   // 장벽 약화 × 오메가3
-    public static final int R09_PROBIOTIC        =  4;   // 발효식품
+    public static final int R09_PROBIOTIC        =  5;   // 발효식품
     // 2026-08-17 구현됨. 피부 지표와 직접 매지 않는 보조 룰이라 심각도 계수를
     // 태우지 않는 고정 델타다(HighCalorieRule · ConcernRules 에도 매지 않는다).
     public static final int R10_HIGH_CALORIE     = -5;   // 고열량
@@ -4045,9 +4046,14 @@ public final class RuleConstants {
 
     // ---- 점수 범위 ----
     public static final int MIN_SCORE = 0;
-    public static final int MAX_SCORE = 100;
+    public static final int MAX_SCORE = 97;    // 2026-08-20 재캘리브레이션 (#64)
 }
 ```
+
+> ⚠️ **위 블록은 스켈레톤 스냅샷이다 — 델타의 원본은 `RuleConstants.java` 다.**
+> 실제 파일에는 여기 없는 것이 더 있다: 나트륨 3단계(R04 −4/−8/−12) · 포화지방 3단계(R11) ·
+> 정제탄수(R12) · 오메가3 음식(R14 +9) · 식이섬유 2단계(R15 +6/+9) · 열량 2단계(R10 −4/−7).
+> 값을 확인할 때는 이 표가 아니라 코드를 본다. (2026-08-20 대조)
 
 ### 1.21.2 심각도 계수
 

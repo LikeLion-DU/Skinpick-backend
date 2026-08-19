@@ -15,7 +15,7 @@ import java.util.List;
  * <p>저장하지 않고 조회할 때마다 다시 센다. 그래서 <b>매핑표를 바꾸면 과거 리포트의
  * 이 값도 바뀐다</b> — 왜 스냅샷을 두지 않는지는 {@code ConcernRules} 주석에 있다.
  *
- * @param score              0~100. <b>기간 평균</b>이다(일일이면 그날 값)
+ * @param score              0~97(MAX_SCORE). <b>기간 평균</b>이다(일일이면 그날 값)
  * @param changeFromFirstDay 기간의 <b>첫 기록일 → 마지막 기록일</b> 변화. 기록일이
  *                           하나뿐이거나 일일 리포트면 null 이라 키가 빠진다(non_null).
  *                           <p>이름을 길게 둔 이유가 있다 — {@code score} 와 축이 다르다.

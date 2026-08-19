@@ -18,6 +18,13 @@
     표준 테이블 적중 이름이 회차마다 같을 것 · spiciness 강도 계수가 갈리지 않을 것
     · R02(매움)·R07(튀김/기름) 발동 여부가 갈리지 않을 것
 
+판정 값 네 가지 — **인식 실패를 안정으로 세지 않는다**
+    PASS    위 세 경로가 갈리지 않았고 표준표에도 적중했다
+    WARN    세 경로는 갈리지 않았으나 표준표에 일관되게 미적중이다
+            → 그 음식의 점수는 AI 추정 영양값에 얹힌다(결정론이 아니다)
+    FAIL    세 경로 중 하나가 갈렸거나, 인식 성공/실패가 회차마다 갈렸다
+    INVALID 전 회차 인식 실패 — 잴 것이 없다. 실제 음식 사진인지 먼저 본다
+
 ★ 계정 일일 요청 한도를 먼저 확인한다. Free 티어는 모델당 하루 50회이고
   이 스크립트는 음식수 × 반복 만큼 쓴다. 5장 × 5회 = 25회다.
 """
@@ -158,7 +165,7 @@ def main():
         sys.exit(f"{FOODS} 안에 음식 사진(jpg/png)이 없다.")
     print(f"음식 {len(photos)}장 × {RUNS}회 → 총 {len(photos) * RUNS} 요청  ({model})\n")
 
-    failures = []
+    failures, warnings = [], []
     for photo in photos:
         content = content_for(f"{FOODS}/{photo}", user_prompt)
         rounds = []
@@ -173,10 +180,28 @@ def main():
             else:
                 print(f"  {photo:24} {i + 1}/{RUNS}  ✗ {result['error']}")
             time.sleep(2)
-        if len(rounds) < 2:
-            print(f"  {photo}: 표본 부족 — 판정 불가\n")
+        # **인식 실패 회차는 표본이 아니다.** 그건 실제 서비스라면
+        # FoodAnalysisService 가 FOOD_NOT_DETECTED(422) 로 거절하는 응답이라
+        # 사용자에게 점수가 나가지 않는다. 세면 "다섯 번 다 인식 못 했다"가
+        # "다섯 번 다 같았다"로 둔갑해 PASS 가 찍힌다 — 실제로 그렇게 찍혔다.
+        detected = [d for d in rounds
+                    if d.get("foodDetected") and (d.get("foodName") or "").strip()]
+        missed = len(rounds) - len(detected)
+
+        if not detected:
+            print(f"  {photo}: 전 회차 인식 실패 — 판정 불가(INVALID)\n")
+            failures.append(f"{photo}: 전 회차 음식 인식 실패 — 실제 음식 사진인지 확인한다")
+            continue
+        if missed:
+            # 일부만 인식됐다는 것 자체가 반복성 실패다 — 같은 사진을 올린 사용자가
+            # 어떤 날은 결과를, 어떤 날은 422 를 받는다.
+            print(f"  {photo}: {len(rounds)}회 중 {missed}회 인식 실패")
+            failures.append(f"{photo}: 인식 성공/실패가 회차마다 갈림 ({missed}/{len(rounds)} 실패)")
+        if len(detected) < 2:
+            print(f"  {photo}: 인식된 표본 {len(detected)}회 — 판정 불가\n")
             continue
 
+        rounds = detected
         hits = {standard_hit(table, d.get("foodName")) for d in rounds}
         # 강도는 enum 이 아니라 계수로 비교한다 — MEDIUM 과 UNKNOWN 은 같은 1.0 이라
         # 그 사이의 흔들림은 점수를 안 움직인다. 갈렸다고 잡으면 거짓 경보다.
@@ -199,8 +224,15 @@ def main():
 
         names = sorted({d.get("foodName", "?") for d in rounds})
         portions = sorted({d.get("portionSize", "?") for d in rounds})
-        status = "PASS" if not problems else "FAIL"
+        # 매칭이 회차마다 같더라도 그 값이 전부 None 이면 "안정적으로 못 찾았다"는 뜻이다.
+        # 그 음식의 점수는 표준표가 아니라 AI 추정 영양값에 얹히므로 결정론이 아니다 —
+        # 실패로 세지는 않되(그 판정은 위 네 조건이 한다) PASS 라고 쓰지도 않는다.
+        unmatched = hits == {None}
+        status = "FAIL" if problems else ("WARN" if unmatched else "PASS")
         print(f"  → {status}  이름 {names} · 적중 {sorted(str(h) for h in hits)} · 양 {portions} (참고)")
+        if unmatched:
+            print("     ! 표준표 미적중 — 이 음식의 점수는 AI 추정 영양값에 얹힌다(결정론 아님)")
+            warnings.append(f"{photo}: 표준표 미적중 — 점수가 AI 추정 영양값에 얹힌다")
         for problem in problems:
             print(f"     ✗ {problem}")
             failures.append(f"{photo}: {problem}")
@@ -210,7 +242,14 @@ def main():
         print(f"게이트 실패 {len(failures)}건 — 해당 음식의 특성을 표준 테이블에 심거나 "
               f"(tools/build_standard_food.py) OPENAI_MODEL=gpt-4o 롤백을 검토한다")
         sys.exit(1)
-    print("게이트 통과 — 점수에 닿는 세 경로가 전부 안정적이다")
+    if warnings:
+        # 세 경로는 갈리지 않았지만 "일관되게 못 찾았다"는 통과가 아니다 —
+        # 그 음식만은 표준표가 아니라 AI 추정치로 채점된다.
+        print(f"게이트 통과(WARN {len(warnings)}건) — 세 경로는 안정적이나 아래는 결정론이 아니다")
+        for warning in warnings:
+            print(f"  ! {warning}")
+    else:
+        print("게이트 통과 — 점수에 닿는 세 경로가 전부 안정적이다")
 
 
 if __name__ == "__main__":

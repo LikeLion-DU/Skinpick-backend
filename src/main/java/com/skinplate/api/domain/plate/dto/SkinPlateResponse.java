@@ -37,7 +37,10 @@ public record SkinPlateResponse(
          * 같은 68점이 화면마다 다른 등급으로 뜬다.
          */
         SkinLevel grade,
-        int baseScore,        // 항상 RuleConstants.BASE_SCORE(70). 계산 내역 카드 첫 줄
+        int baseScore,        // 항상 RuleConstants.BASE_SCORE(75).
+                              // ⚠️ 상한(MAX_SCORE=97)에 걸린 한 끼에서는 기본+델타 합이 plateScore
+                              // 보다 크다(예시 B: 107 vs 97). 계산 내역 카드를 만들 때 그대로
+                              // 더해 보이면 카드가 자기 총점과 어긋난다.
         String summary,
         FoodAnalysisDto food,
         FeedbackGroupDto feedbacks,
