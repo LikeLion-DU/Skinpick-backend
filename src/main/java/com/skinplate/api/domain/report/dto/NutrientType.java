@@ -48,6 +48,10 @@ public enum NutrientType {
      *
      * <p>기준 1회는 하루에 한 번은 챙기자는 뜻이고, 정밀한 영양 권고가 아니다
      * (이 enum 의 다른 기준값과 같은 성격이다).
+     *
+     * <p><b>2회 이상이면 {@code Status.HIGH} 가 나간다</b> — 200% 라서다. 과다 경고가
+     * 아니라 "충분히 챙겼다"는 뜻이고, {@code higherIsWorse=false} 가 그 방향을 말한다.
+     * 자세한 것은 {@link Status} 에 적었다.
      */
     OMEGA3("오메가3", "회", 1, false, Group.SKIN),
     ZINC("아연", "mg", 10, false, Group.SKIN);
@@ -109,8 +113,24 @@ public enum NutrientType {
     }
 
     /**
-     * 좋고 나쁨이 아니라 위치다. 어느 쪽이 나쁜지는 {@link #higherIsWorse} 가 말한다 —
-     * 단백질 LOW 와 나트륨 LOW 를 같은 색으로 칠하면 화면이 거짓말을 한다.
+     * 좋고 나쁨이 아니라 <b>위치</b>다. 어느 쪽이 나쁜지는 {@link #higherIsWorse} 가
+     * 말한다 — 단백질 LOW 와 나트륨 LOW 를 같은 색으로 칠하면 화면이 거짓말을 한다.
+     *
+     * <p>앱이 상태어를 그릴 때 두 값을 <b>함께</b> 읽어야 하는 이유다:
+     *
+     * <pre>
+     *   higherIsWorse=true  (칼로리·탄수화물·지방·나트륨·당류)
+     *       LOW = 적음 · NORMAL = 적정 · HIGH = <b>과다</b>(경고색)
+     *
+     *   higherIsWorse=false (단백질 · 비타민C · 오메가3 · 아연)
+     *       LOW = <b>부족</b>(경고색) · NORMAL = 적정 · HIGH = 충분/높음(경고 아님)
+     * </pre>
+     *
+     * <p><b>오메가3 HIGH 는 과다 섭취 경고가 아니다.</b> 기준이 하루 1회라 두 끼만
+     * 걸려도 200% 가 되어 HIGH 가 나간다. 단백질과 정확히 같은 의미론이고
+     * ({@code higherIsWorse=false}), 여기에 "100% 이상은 NORMAL" 같은 특례를 두면
+     * 같은 판정이 항목마다 갈린다. 상태어 자체는 그대로 두고 <b>읽는 쪽이 방향을
+     * 본다</b> — 그것이 이 두 필드를 나란히 내려보내는 이유다.
      */
     public enum Status { LOW, NORMAL, HIGH }
 }

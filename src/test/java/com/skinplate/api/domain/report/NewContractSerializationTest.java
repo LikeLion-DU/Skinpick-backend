@@ -4,12 +4,14 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.skinplate.api.domain.plate.dto.PlateHistoryItemDto;
+import com.skinplate.api.domain.plate.dto.SkinPlateResponse;
 import com.skinplate.api.domain.report.dto.ConcernScoreDto;
 import com.skinplate.api.domain.report.dto.DailyReportResponse;
 import com.skinplate.api.domain.report.dto.DailyScoreDto;
 import com.skinplate.api.domain.report.dto.NutrientType;
 import com.skinplate.api.domain.report.dto.NutritionItemDto;
 import com.skinplate.api.domain.skin.dto.CareFocusDto;
+import com.skinplate.api.domain.skin.dto.SkinAnalysisResponse;
 import com.skinplate.api.domain.skin.entity.SkinCareFocus;
 import com.skinplate.api.domain.skin.entity.SkinLevel;
 import com.skinplate.api.domain.user.entity.SkinConcern;
@@ -18,6 +20,7 @@ import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -54,8 +57,14 @@ class NewContractSerializationTest {
         assertThat(json).contains("\"nutrition\"").contains("\"skinNutrients\"");
         assertThat(json).contains("\"nutrient\":\"VITAMIN_C\"").contains("\"unit\":\"mg\"");
         // 측정 못 한 항목은 status 키가 통째로 빠진다 — 앱은 키 없음을 "알 수 없음"으로 읽는다.
-        assertThat(json).contains("\"nutrient\":\"ZINC\"");
-        assertThat(json).doesNotContain("\"status\":null");
+        // 잰 항목에는 status 가 있고 못 잰 항목에는 없다는 것을 항목별로 못 박는다
+        // (전체 문자열에 "status":null 이 없다는 단언은 NON_NULL 아래서 절대 실패하지 않는다).
+        assertThat(json).contains(
+                "\"nutrient\":\"VITAMIN_C\",\"label\":\"비타민C\",\"unit\":\"mg\","
+                        + "\"amount\":45.0,\"target\":100,\"percent\":45,\"status\":\"LOW\"");
+        assertThat(json).contains(
+                "\"nutrient\":\"ZINC\",\"label\":\"아연\",\"unit\":\"mg\","
+                        + "\"amount\":0.0,\"target\":10,\"percent\":0,\"higherIsWorse\":false");
     }
 
     @Test
@@ -115,5 +124,51 @@ class NewContractSerializationTest {
                 List.of(CareFocusDto.from(SkinCareFocus.HYDRATION)));
 
         assertThat(json).contains("\"focus\":\"HYDRATION\"").contains("\"label\":\"수분·장벽\"");
+    }
+
+    @Test
+    @DisplayName("피부 분석 응답이 grade·careFocus·careMessage 를 함께 싣는다")
+    void skinAnalysisCarriesGradeAndCare() throws Exception {
+        String json = mapper.writeValueAsString(skinAnalysis(
+                List.of(CareFocusDto.from(SkinCareFocus.HYDRATION)),
+                "수분이 부족하거나 장벽이 약한 편이라, 수분 유지에 도움이 되는 식습관을 챙겨보세요."));
+
+        // 68 → GOOD. 앱은 이 값을 그대로 쓰고 점수에서 등급을 다시 내지 않는다.
+        assertThat(json).contains("\"skinScore\":68").contains("\"grade\":\"GOOD\"");
+        assertThat(json).contains("\"careFocus\":[{\"focus\":\"HYDRATION\"");
+        assertThat(json).contains("\"careMessage\":\"수분이 부족하거나");
+    }
+
+    @Test
+    @DisplayName("careMessage 가 없으면 키가 빠지고, careFocus 는 빈 배열로 남는다")
+    void skinAnalysisOmitsNullCareMessage() throws Exception {
+        String json = mapper.writeValueAsString(skinAnalysis(List.of(), null));
+
+        assertThat(json).doesNotContain("\"careMessage\"").contains("\"careFocus\":[]");
+        // grade 는 점수에서 늘 만들어지므로 빠지지 않는다.
+        assertThat(json).contains("\"grade\":\"GOOD\"");
+    }
+
+    @Test
+    @DisplayName("기록 응답도 plateScore 옆에 grade 를 싣는다 — 결과 화면 배지의 출처다")
+    void skinPlateCarriesGrade() throws Exception {
+        String json = mapper.writeValueAsString(new SkinPlateResponse(
+                27L, 101L, null, null,
+                58, SkinLevel.of(58), 70, "요약",
+                null, null, List.of(), null,
+                LocalDateTime.of(2026, 8, 12, 12, 0)));
+
+        assertThat(json).contains("\"plateScore\":58").contains("\"grade\":\"NORMAL\"");
+        // 생성 실패 시 키가 빠지는 기존 계약은 그대로다.
+        assertThat(json).doesNotContain("\"aiTip\"");
+    }
+
+    /** grade·careFocus·careMessage 외의 자리는 이 테스트의 관심사가 아니라 비워 둔다. */
+    private static SkinAnalysisResponse skinAnalysis(List<CareFocusDto> careFocus,
+                                                     String careMessage) {
+        return new SkinAnalysisResponse(
+                101L, 68, SkinLevel.of(68), null, List.of(), null, null,
+                "요약", List.of(), careFocus, careMessage, null,
+                LocalDateTime.of(2026, 8, 13, 12, 30));
     }
 }

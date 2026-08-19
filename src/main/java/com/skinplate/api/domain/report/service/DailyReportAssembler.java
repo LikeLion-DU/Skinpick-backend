@@ -3,6 +3,8 @@ package com.skinplate.api.domain.report.service;
 import com.skinplate.api.domain.food.entity.FoodAnalysis;
 import com.skinplate.api.domain.food.entity.IngredientTag;
 import com.skinplate.api.domain.food.entity.Nutrition;
+import com.skinplate.api.domain.food.service.StandardFood;
+import com.skinplate.api.domain.food.service.StandardFoodTable;
 import com.skinplate.api.domain.plate.dto.PlateHistoryItemDto;
 import com.skinplate.api.domain.plate.engine.RuleConstants;
 import com.skinplate.api.domain.plate.entity.FeedbackType;
@@ -131,22 +133,39 @@ public final class DailyReportAssembler {
     /**
      * 피부 영양 포인트 3종. 시안이 영양 밸런스와 다른 카드로 그리는 묶음이다.
      *
-     * <p><b>표준 음식표에 매칭된 끼니만 센다.</b> 비타민C·아연은 실측 컬럼(V9)이지만
-     * 값이 없으면 0 으로 저장되고(그 규약이 룰에서는 "모르면 발동 안 함"으로 안전하다),
-     * AI 추정만 있는 음식은 애초에 이 다섯 컬럼이 전부 0 이다. 그 0 을 합계에 넣으면
-     * 화면이 "비타민C 부족"이라고 <b>단정</b>하는데 사실은 재지 못한 것이다.
+     * <p><b>측정 여부를 영양소마다 따로 본다.</b> "표준 음식표에 매칭됐다"는 그 음식의
+     * <b>행이 있다</b>는 뜻이지 <b>그 행에 이 영양소가 있다</b>는 뜻이 아니다. 원본
+     * (전국통합식품영양성분정보)에서 요리 계열 4,268행 기준 비타민C 는 8%, 아연은 29%가
+     * <b>빈칸</b>이고, 그 빈칸은 값 0 과 별개로 존재한다(비타민C 는 실제 0 인 행도 398개다).
      *
-     * <p>매칭된 끼니가 하나도 없는 날은 두 항목을 {@code unmeasured} 로 낸다 — 앱이
-     * 상태어 자리를 비우고 회색으로 그린다. 배열에서 빼지는 않는다(타일 수가 흔들린다).
+     * <p><b>그래서 DB 값 0 을 미측정 신호로 쓰지 않는다.</b> {@code food_analysis} 의
+     * 다섯 컬럼은 {@code NOT NULL DEFAULT 0}(V9)이라 "원본이 0" 과 "원본이 빈칸"이 같은
+     * 0 으로 합쳐져 있다 — 그 자리에서는 둘을 가를 수 없다. 대신 매칭 때 저장해 둔
+     * {@code standardFoodName} 으로 표준표를 되짚는다. 표준 JSON 은 빈칸을 <b>키 없음</b>
+     * 으로 남기고({@code build_standard_food.py} 가 "0 으로 채우면 거짓"이라 그렇게 만든다)
+     * {@link StandardFoodTable} 이 그것을 {@code null} 로 싣기 때문에, 구분이 그대로 살아 있다.
+     *
+     * <p>잰 끼니가 하나도 없는 영양소는 {@code unmeasured} 다 — {@code status} 키가 빠지고
+     * 앱이 "알 수 없음"으로 그린다. 항목 자체는 배열에서 빼지 않는다(타일 수가 흔들린다).
+     * 이 구분이 없으면 화면이 "비타민C 부족"이라고 <b>단정</b>하는데, V9 가 그 0 을
+     * "없다"가 아니라 <b>"모른다"</b>로 정의해 두었다.
+     *
+     * <p><b>룰 엔진은 그대로다.</b> R06·R11·R15 는 0 을 "발동 안 함"으로 쓰고 그 의미는
+     * 바뀌지 않았다 — 여기만 0 을 <b>양</b>으로 읽는 유일한 소비자라서 따로 가른다.
      *
      * <p>오메가3만 셈이 다르다 — 양이 아니라 <b>OMEGA3 태그가 붙은 끼니 수</b>다.
      * 이유는 {@link NutrientType#OMEGA3} 에 적었다. 태그는 매칭 여부와 무관하게 실제
      * 관찰값이라 매칭된 끼니가 없어도 셀 수 있다.
+     *
+     * <p><b>남은 한계 — 부분 측정.</b> 세 끼 중 한 끼만 잰 날은 그 한 끼의 합계를 하루
+     * 합계처럼 그린다. 계약에 "몇 끼를 쟀는가"를 실을 자리가 없어서인데, 이건 과소 표시라
+     * "못 잰 것을 부족이라 단정"하는 것과 성격이 다르다. 후속 이슈로 둔다.
      */
     private static List<NutritionItemDto> skinNutrients(List<SkinPlate> plates) {
         BigDecimal vitaminC = BigDecimal.ZERO;
         BigDecimal zinc     = BigDecimal.ZERO;
-        int measuredMeals   = 0;
+        int vitaminCMeals   = 0;
+        int zincMeals       = 0;
         int omega3Meals     = 0;
 
         for (SkinPlate plate : plates) {
@@ -156,20 +175,39 @@ public final class DailyReportAssembler {
 
             if (!food.isStandardMatched()) continue;
 
-            measuredMeals++;
+            // 매칭된 표준 음식 행을 되짚는다. 저장된 이름은 표준표의 정식 이름이라
+            // (FoodAnalysisService 가 matched.name() 을 넣는다) 완전 일치로 걸린다.
+            // find() 가 아니라 findExact() 다 — 저쪽은 못 찾으면 낱말을 잘라 근사값을 내므로,
+            // 표를 다시 만들며 이름이 사라진 날 "김치찌개_참치" 가 "참치" 행의 결측 여부를
+            // 물려받는다. 여기서는 모르는 것을 모르는 채로 둔다.
+            StandardFood standard =
+                    StandardFoodTable.findExact(food.getStandardFoodName()).orElse(null);
+            if (standard == null) continue;
+
             BigDecimal portion = food.getTraits().getPortionSize().getFactor();
-            vitaminC = vitaminC.add(food.getNutrition().getVitaminCMg().multiply(portion));
-            zinc     = zinc.add(food.getNutrition().getZincMg().multiply(portion));
+
+            if (standard.vitaminCMg() != null) {
+                vitaminCMeals++;
+                vitaminC = vitaminC.add(food.getNutrition().getVitaminCMg().multiply(portion));
+            }
+            if (standard.zincMg() != null) {
+                zincMeals++;
+                zinc = zinc.add(food.getNutrition().getZincMg().multiply(portion));
+            }
         }
 
         return List.of(
-                measuredMeals == 0
-                        ? NutritionItemDto.unmeasured(NutrientType.VITAMIN_C)
-                        : NutritionItemDto.of(NutrientType.VITAMIN_C, vitaminC),
+                itemOrUnmeasured(NutrientType.VITAMIN_C, vitaminCMeals, vitaminC),
                 NutritionItemDto.of(NutrientType.OMEGA3, BigDecimal.valueOf(omega3Meals)),
-                measuredMeals == 0
-                        ? NutritionItemDto.unmeasured(NutrientType.ZINC)
-                        : NutritionItemDto.of(NutrientType.ZINC, zinc));
+                itemOrUnmeasured(NutrientType.ZINC, zincMeals, zinc));
+    }
+
+    /** 그 영양소를 잰 끼니가 하나도 없으면 {@code status} 를 비운다(키 생략). */
+    private static NutritionItemDto itemOrUnmeasured(NutrientType type, int measuredMeals,
+                                                     BigDecimal amount) {
+        return measuredMeals == 0
+                ? NutritionItemDto.unmeasured(type)
+                : NutritionItemDto.of(type, amount);
     }
 
     /** 재료 태그에 OMEGA3 가 있는가. 표준표에서 온 태그든 AI 태그든 실제 관찰값이다. */

@@ -89,6 +89,69 @@ class SkinCareGuideTest {
                 .isEqualTo("수분·장벽");
     }
 
+    /**
+     * 조건이 {@code ||} 인 축 셋(수분·장벽 / 항산화 / 식이섬유)은 <b>한쪽만 걸려도</b> 뜬다.
+     * 문장은 상태와 무관한 상수 하나뿐이므로, 그 문장은 <b>가장 약한 경우(한쪽만)에도 참</b>
+     * 이어야 한다.
+     *
+     * <p>실제로 있던 버그다 — "수분이 부족<b>하고</b> 장벽이 약한 편이라"는 수분 80·장벽 30
+     * 인 사용자에게도 나갔고, 그 사용자는 같은 응답의 {@code metricDetails} 에서 수분 GOOD 을
+     * 보면서 수분이 부족하다는 문장을 읽었다. 축이 뜨는지만 보는 테스트는 이걸 못 잡는다.
+     */
+    @Test
+    @DisplayName("|| 축은 한쪽만 걸려도 뜨고, 문장이 둘 다 걸렸다고 단정하지 않는다")
+    void orAxisSentenceNeverAssertsBoth() {
+        // of(hydration, oil, redness, trouble, barrier)
+        record OrAxis(SkinCareFocus focus, SkinMetrics firstOnly, SkinMetrics secondOnly,
+                      SkinMetrics both) {}
+
+        List<OrAxis> axes = List.of(
+                new OrAxis(SkinCareFocus.HYDRATION,          // isDry() || isBarrierWeak()
+                        SkinMetrics.of(30, 40, 20, 20, 80),  // 건조만
+                        SkinMetrics.of(80, 40, 20, 20, 30),  // 장벽 약화만
+                        SkinMetrics.of(30, 40, 20, 20, 30)),
+                new OrAxis(SkinCareFocus.ANTIOXIDANT,        // hasRedness() || hasTrouble()
+                        SkinMetrics.of(80, 40, 70, 20, 80),  // 붉은기만
+                        SkinMetrics.of(80, 40, 20, 70, 80),  // 트러블만
+                        SkinMetrics.of(80, 40, 70, 70, 80)),
+                new OrAxis(SkinCareFocus.FIBER,              // hasTrouble() || isOily()
+                        SkinMetrics.of(80, 40, 20, 70, 80),  // 트러블만
+                        SkinMetrics.of(80, 80, 20, 20, 80),  // 유분만
+                        SkinMetrics.of(80, 80, 20, 70, 80)));
+
+        for (OrAxis axis : axes) {
+            for (SkinMetrics metrics : List.of(axis.firstOnly(), axis.secondOnly(), axis.both())) {
+                assertThat(guide.focus(metrics)).extracting(CareFocusDto::focus)
+                        .as("%s 는 한쪽만 걸려도 떠야 한다", axis.focus())
+                        .contains(axis.focus());
+                assertThat(guide.message(metrics))
+                        .as("%s 의 문장이 문단에 실려야 한다", axis.focus())
+                        .contains(axis.focus().getGuidance());
+            }
+
+            // 진단절은 첫 쉼표 앞이다. 뒤쪽 권고절("채소와 과일처럼 …")은 접속사를 써도 된다.
+            String diagnosis = axis.focus().getGuidance().split(",")[0];
+
+            assertThat(diagnosis)
+                    .as("%s 진단절이 두 지표를 둘 다 단정한다: %s", axis.focus(), diagnosis)
+                    .doesNotContain("부족하고", "붉은기와", "함께")
+                    .containsAnyOf("거나", "이나", "기나");
+        }
+    }
+
+    @Test
+    @DisplayName("&& 축이 아닌 단일 조건 축은 그대로 단정해도 된다 — 조건이 하나뿐이다")
+    void singleConditionAxisMayAssert() {
+        // 장벽 30 → HEALTHY_FAT(isBarrierWeak 하나), 유분 80 → SEBUM_CARE(isOily 하나)
+        assertThat(SkinCareFocus.HEALTHY_FAT.getGuidance()).startsWith("장벽이 약한 편이라");
+        assertThat(SkinCareFocus.SEBUM_CARE.getGuidance()).startsWith("유분이 많은 편이라");
+
+        assertThat(guide.focus(SkinMetrics.of(80, 40, 20, 20, 30)))
+                .extracting(CareFocusDto::focus).contains(SkinCareFocus.HEALTHY_FAT);
+        assertThat(guide.focus(SkinMetrics.of(80, 80, 20, 20, 80)))
+                .extracting(CareFocusDto::focus).contains(SkinCareFocus.SEBUM_CARE);
+    }
+
     // ─────────────────────────── ⑦ 수부지 (자가 신고 전용) ───────────────────────────
 
     @Test

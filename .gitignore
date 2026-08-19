@@ -26,3 +26,8 @@ build/
 
 # 반복성 테스트용 얼굴 사진. 실제 사람 얼굴이라 저장소에 올리지 않는다.
 faces/
+
+# 표준 음식 원본(공공데이터 11MB). tools/build_standard_food.py 의 입력이고
+# 결과물인 src/main/resources/food/standard-food.json 만 저장소에 둔다 —
+# 런타임 의존이 아니라 재생성·검증용이라 받아서 쓰면 된다.
+*음식DB*.xlsx

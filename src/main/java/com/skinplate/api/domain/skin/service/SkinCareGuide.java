@@ -9,7 +9,11 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * S05 의 "지금 피부가 필요로 하는 관리" — 관리 축 칩과 권고 문단을 만든다. (PRD §4.1)
+ * S05 의 "지금 피부가 필요로 하는 관리" — 관리 축 칩과 권고 문단을 만든다.
+ *
+ * <p>계약의 원본은 설계서 Part 3 대조표(`SkinAnalysisResponse.careFocus` · `careMessage`)와
+ * 부록 v1.10 이다. <b>PRD 에는 이 기능의 정의가 없다</b> — 확정 시안이 요구한 카드라
+ * 설계서 쪽에서 계약이 먼저 섰다. PRD 를 인용하지 않는 이유가 그것이다.
  *
  * <p><b>AI 를 부르지 않는다.</b> {@link SkinHighlightBuilder} 와 같은 자리다 — 지표에서
  * 규칙으로 도출하므로 같은 사진은 언제 열어도 같은 문구이고, 예전에 저장된 분석에도
