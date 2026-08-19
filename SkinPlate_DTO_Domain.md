@@ -3358,9 +3358,19 @@ public record ScoredItemDto(String key, int score, SkinLevel level, List<String>
      */
     public static ScoredItemDto of(String key, int score, boolean higherIsWorse,
                                    List<String> evidence, int maxEvidence) {
-        int clamped = Math.max(0, Math.min(100, score));
-        int aligned = higherIsWorse ? 100 - clamped : clamped;
-        return new ScoredItemDto(key, clamped, SkinLevel.of(aligned), trim(evidence, maxEvidence));
+
+        int aligned = higherIsWorse ? 100 - score : score;
+
+        return new ScoredItemDto(key, score, SkinLevel.of(aligned), trim(evidence, maxEvidence));
+    }
+
+    /**
+     * 0~100 밖이면 못 믿는 값이라는 뜻이다. <b>clamp 로 살리지 않는다</b> — {@code score}
+     * 키가 빠진 응답은 Jackson 이 0 으로 채우는데, 그걸 깎아 두면 "피부결 0점 · SEVERE"
+     * 라는 없는 등급이 화면에 그려진다. 부르는 쪽이 이 값으로 거른다.
+     */
+    public static boolean isUsableScore(int score) {
+        return score >= 0 && score <= 100;
     }
 }
 ```
@@ -7203,7 +7213,8 @@ npx wrangler pages deploy build/web --project-name=skinplate
 
 **그런데도 지금 추가하지 않는다.** 이유는 셋이다.
 
-1. **중복이 실제로 없어지지 않는다.** 필드를 더해도 앱은 값이 없을 때(롤아웃 중 앱이 서버보다 먼저 나간 순간)를 위해 지금 표를 남겨야 한다. 그러면 **표는 그대로 두고 계약 필드가 하나 늘 뿐**이라 움직이는 부품이 오히려 많아진다. 표를 지우려면 상태어를 안 그리는 쪽을 택해야 하는데, 그건 화면 후퇴다.
+1. **중복이 잘 안 없어진다.** 필드를 더해도 앱은 값이 없을 때(앱이 서버보다 먼저 나간 순간)를 위해 널 분기가 필요하고, 이 앱에서 그 분기의 자연스러운 구현이 지금 표다 — 상태어를 안 그리는 쪽을 택하면 그건 화면 후퇴다. 그러면 **표는 남고 계약 필드만 하나 늘어** 움직이는 부품이 많아진다.
+   <br>다만 이건 절대적이지 않다: 이 값은 키별 리터럴이라 **서버를 먼저 배포하면 모든 응답에 항상 실리고**(옛 분석도 조회할 때 `metricDetails` 를 다시 만든다), 배포 대상이 VM 하나에 `deploy.sh` 도 우리 손에 있어 그 창은 닫을 수 있다. 그때는 표를 지우고 널 분기를 실제로는 안 밟는 방어 코드로 남길 수 있다. 그래도 **아래 2·3 만으로 보류 결론은 그대로**다.
 2. **드리프트 위험이 닫혀 있다.** 5개 키는 AI 스키마가 고정한다 — 지표를 늘리려면 스키마·프롬프트를 고쳐야 하고, 그건 이 릴리스에서 금지된 변경이다. 지표가 안 늘어나는 동안 두 표가 갈릴 길이 없다.
 3. **사용자에게 보이는 것이 하나도 안 바뀐다.** 계약을 늘리는 변경은 그만한 이유가 있어야 한다.
 
