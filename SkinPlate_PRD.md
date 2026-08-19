@@ -3741,7 +3741,7 @@ public record RuleResult(
 @RequiredArgsConstructor
 public class PlateRuleEngine {
 
-    private static final int BASE_SCORE = 70;
+    private static final int BASE_SCORE = 75;   // 2026-08-20 재캘리브레이션 (#64)
     private final List<PlateRule> rules;     // Spring이 모든 구현체 주입
 
     public PlateEvaluation evaluate(PlateContext ctx) {
@@ -3753,7 +3753,7 @@ public class PlateRuleEngine {
                 .toList();
 
         int raw = BASE_SCORE + applied.stream().mapToInt(RuleResult::delta).sum();
-        int score = Math.max(0, Math.min(100, raw));
+        int score = Math.max(MIN_SCORE, Math.min(MAX_SCORE, raw));   // 0 ~ 97
 
         return new PlateEvaluation(score, applied, buildSummary(applied));
     }
@@ -3762,20 +3762,20 @@ public class PlateRuleEngine {
 
 > **핵심** — 룰을 추가하려면 `PlateRule`을 구현한 `@Component` 클래스를 하나 만들면 끝이다. 엔진 코드도, 기존 룰도 건드리지 않는다. 이것이 "확장 가능한 아키텍처"의 실질적 의미다.
 
-### 18.6 룰 정의표 (14종 — 2026-08-18 재캘리브레이션)
+### 18.6 룰 정의표 (14종 — 2026-08-20 재캘리브레이션 #64)
 
-최종 점수 = `clamp(0, 100, 70 + 음식 축 + 피부 축)`. 엔진은 그대로 `BASE_SCORE + Σdelta` 하나다 —
+최종 점수 = `clamp(0, 97, 75 + 음식 축 + 피부 축)`. 엔진은 그대로 `BASE_SCORE + Σdelta` 하나다 —
 **게이트가 없는 룰이 음식 축, 게이트가 있는 룰이 피부 축**이다.
 
 **음식 축** — 같은 음식이면 누구에게나 같다. 실측 범위 −33 ~ +18.
 
 | 코드 | 조건 | Δ | 타입 | 메시지 | 추천 행동 |
 |---|---|---|---|---|---|
-| **R05** | 단백질 ≥ 20g | **+6** | GOOD | 단백질 충분 | — |
-| **R06** | VITAMIN_A/C·ANTIOXIDANT 태그 **또는** 실측 비타민A ≥ 36μg·비타민C ≥ 4mg (100kcal당) | **+5** | GOOD | 비타민 풍부 | — |
-| **R09** | PROBIOTIC 태그 | **+4** | GOOD | 발효식품 포함 | — |
-| **R14** | OMEGA3 태그 | **+4** | GOOD | 오메가3 재료 | — |
-| **R15** | 식이섬유 100kcal당 ≥ 3.0g / ≥ 5.0g | **+4 / +6** | GOOD | 식이섬유 풍부 | — |
+| **R05** | 단백질 ≥ 20g | **+7** | GOOD | 단백질 충분 | — |
+| **R06** | VITAMIN_A/C·ANTIOXIDANT 태그 **또는** 실측 비타민A ≥ 36μg·비타민C ≥ 4mg (100kcal당) | **+7** | GOOD | 비타민 풍부 | — |
+| **R09** | PROBIOTIC 태그 | **+5** | GOOD | 발효식품 포함 | — |
+| **R14** | OMEGA3 태그 | **+9** | GOOD | 오메가3 재료 | — |
+| **R15** | 식이섬유 100kcal당 ≥ 3.0g / ≥ 5.0g | **+6 / +9** | GOOD | 식이섬유 풍부 | — |
 | **R03** | 당류 > 15g (40g 초과 시 기본 델타에 −4) | **−12** × 심각도 | CAUTION | 당류 과다 | 단 음료 대신 물 (계산) |
 | **R04** | 나트륨 > 1150 / 1700 / 2300mg | **−4 / −8 / −12** | CAUTION | 나트륨 과다 | 국물 절반 (계산) |
 | **R07** | 튀김(FRIED) 또는 관찰 기름기 HIGH | **−10** × 심각도 (비튀김 ×0.7) | CAUTION | 튀김 조리 / 기름진 음식 | 튀김옷 제거 (계산 · 튀김만) |
@@ -3845,30 +3845,38 @@ public class PlateRuleEngine {
 **예시 A — 돼지고기 김치찌개 (520kcal, 나트륨 1850mg, 단백질 28.5g, 포화지방 6.0g, 매운맛)**
 
 ```
-BASE                                          70
-R05  단백질 28.5g ≥ 20g                       +6
-R09  김치 = PROBIOTIC                         +4
+BASE                                          75
+R05  단백질 28.5g ≥ 20g                       +7
+R09  김치 = PROBIOTIC                         +5
 R04  나트륨 1850mg → 2단계                    -8
 R11  포화지방 6.0g → 1단계                    -2
 R02  매운 음식 × 홍조 64 (factor 1.2)        -12    (-10 × 1.2)
 ──────────────────────────────────────────────────
-최종 Skin Plate Score                         58
+최종 Skin Plate Score                         65
 ```
 
 **예시 B — 연어구이 정식 (610kcal, 연어·브로콜리·된장국, 나트륨 1600mg, 단백질 32g, 포화지방 4.4g)**
 
 ```
-BASE                                          70
+BASE                                          75
 R01  건조 38 × OMEGA3 (연어, factor 1.2)     +10    (+8 × 1.2)
-R05  단백질 32g ≥ 20g                         +6
-R06  브로콜리 = ANTIOXIDANT                   +5
-R09  된장 = PROBIOTIC                         +4
-R14  연어 = OMEGA3                            +4
+R05  단백질 32g ≥ 20g                         +7
+R06  브로콜리 = ANTIOXIDANT                   +7
+R09  된장 = PROBIOTIC                         +5
+R14  연어 = OMEGA3                            +9
 R04  나트륨 1600mg → 1단계                    -4
 R11  포화지방 4.4g → 1단계                    -2
 ──────────────────────────────────────────────────
-최종 Skin Plate Score                         93
+원점수                                       107
+상한(MAX_SCORE) 적용                          97
 ```
+
+> ⚠️ **예시 B 는 상한에 걸린다(2026-08-20 실측).** 델타 합은 107 인데 화면에는 97 이 뜬다.
+> 그래서 이 예시에서는 **"기본 + 델타 = 총점" 이 성립하지 않는다** — 계산 내역 카드를 만들 때
+> 그대로 더해 보이면 카드가 자기 총점과 어긋난다(현재 앱은 이 카드를 그리지 않는다).
+> 같은 이유로 **행동 시뮬레이션도 이 예시에서는 0점 움직인다** — R04 카드가 +4 를 광고해도
+> 97 → 97 이다. 시뮬레이션 버튼은 현재 `FeatureFlags.actionSimulation = false` 로 꺼져 있고,
+> 데모에서 켜려면 상한에 걸리지 않는 음식(예시 A 등)으로 보여야 한다.
 
 > **같은 사람, 다른 한 끼 — 65점과 97점.** 이 32점 차이가 제품이 존재하는 이유다. 두 음식 모두
 > 나트륨은 높지만, 오늘의 피부가 건조하고 홍조가 있기 때문에 매운 찌개는 더 크게 감점되고
@@ -4118,7 +4126,7 @@ skin_plate(+feedback) ─1회 범위조회→ 날짜별 그룹 ─DailyReportAss
 
 #### 고민별 점수 — 저장하지 않는다
 
-끼니마다 `BASE_SCORE(70) + 그 고민에 매핑된 룰의 score_delta` 를 내고 평균한다. 매핑표는 `ConcernRules` 한 파일이다.
+끼니마다 `BASE_SCORE(75) + 그 고민에 매핑된 룰의 score_delta` 를 내고 평균한다. 매핑표는 `ConcernRules` 한 파일이다.
 
 > **⚠️ 이 매핑표를 바꾸면 과거 일일·주간 리포트의 고민 점수도 함께 바뀐다.** DB 에 확정돼 있는 것은 룰별 `score_delta` 이고, "어느 룰이 어느 고민에 속하는가"는 코드에만 있기 때문이다. **알고 택한 것이며, 스냅샷 테이블을 만들지 않는다:**
 >
@@ -4461,7 +4469,7 @@ curl http://localhost:8080/api/v1/auth/me \
 |---|---|
 | **Skin Score** | 얼굴 사진 기반 5개 지표를 종합한 0~100 점수 |
 | **Skin Plate** | 특정 음식 1건 × 특정 피부 분석 1건의 매칭 결과 |
-| **Skin Plate Score** | 해당 음식이 현재 피부 상태에 얼마나 적합한지 나타내는 0~100 점수 |
+| **Skin Plate Score** | 해당 음식이 현재 피부 상태에 얼마나 적합한지 나타내는 0~97 점수 (상한은 `RuleConstants.MAX_SCORE`) |
 | **Rule** | 피부 지표와 음식 속성의 조합에 점수 델타와 메시지를 부여하는 단위 규칙 |
 | **추천 행동** | 감점 룰에 연결된, 사용자가 지금 실행 가능한 한 문장 제안 |
 | **severityFactor** | 피부 지표 심각도에 따라 룰 델타를 증폭하는 계수 (1.0~1.5) |

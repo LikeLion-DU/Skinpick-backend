@@ -81,7 +81,7 @@ public final class WeeklyReportPrompt {
                 .append(report.recordedDays()).append("일 기록 · 총 ")
                 .append(report.recordCount()).append("끼)\n\n");
 
-        text.append("[일별 피부 식단 점수] (0~100 · 높을수록 좋음)\n");
+        text.append("[일별 피부 식단 점수] (0~97 · 높을수록 좋음)\n");
         for (DailyScoreDto day : report.dailyScores()) {
             text.append(day.date()).append(' ').append(day.dailyScore())
                     .append(" (").append(gradeLabel(day.grade())).append(")\n");
@@ -106,7 +106,7 @@ public final class WeeklyReportPrompt {
         }
 
         if (!report.concerns().isEmpty()) {
-            text.append("\n[고민별 식단 점수] (0~100 · 높을수록 그 고민에 유리)\n");
+            text.append("\n[고민별 식단 점수] (0~97 · 높을수록 그 고민에 유리)\n");
             for (ConcernScoreDto concern : report.concerns()) {
                 text.append(concern.label()).append(' ').append(concern.score())
                         .append(" (").append(gradeLabel(concern.status())).append(')');

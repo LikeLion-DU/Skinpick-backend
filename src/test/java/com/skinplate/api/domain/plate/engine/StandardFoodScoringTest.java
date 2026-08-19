@@ -65,17 +65,23 @@ class StandardFoodScoringTest {
     }
 
     @Test
-    @DisplayName("정상 피부에서도 음식마다 점수가 갈린다 — 70점에 몰리지 않는다")
+    @DisplayName("정상 피부에서도 음식마다 점수가 갈린다 — 기준점수에 몰리지 않는다")
     void scoresSpreadOnCalmSkin() {
         List<Integer> scores = allScores(CALM);
 
-        long exactlySeventy = scores.stream().filter(score -> score == 70).count();
-        double share = exactlySeventy * 100.0 / scores.size();
+        // 리터럴 70 을 쓰면 BASE_SCORE 를 옮기는 순간(2026-08-20 70→75) 이 가드가 조용히
+        // 무의미해진다 — "아무 룰도 안 걸린 음식"이 더는 70 이 아니라서 세는 대상이 사라지고,
+        // 표가 아무리 몰려도 통과한다. 세야 하는 것은 숫자가 아니라 기준점수 그 자체다.
+        long atBaseScore = scores.stream()
+                .filter(score -> score == RuleConstants.BASE_SCORE).count();
+        double share = atBaseScore * 100.0 / scores.size();
 
         // 게이트가 있던 시절 이 값이 50% 였다. 룰이 다시 게이트 뒤로 숨으면 여기서 걸린다.
         assertThat(share).isLessThan(30.0);
-        // 정상 피부에서 81점 이상에 닿는 음식이 하나도 없던 것이 개편 전 상태다.
-        assertThat(scores.stream().filter(score -> score > 80).count()).isPositive();
+        // 기준점수보다 확실히 위로 올라가는 음식이 있어야 한다. 여기도 리터럴을 쓰지 않는다 —
+        // BASE 가 오르면 "80 초과"는 가점 하나로 넘겨져 아무것도 검증하지 않는다.
+        assertThat(scores.stream()
+                .filter(score -> score > RuleConstants.BASE_SCORE + 10).count()).isPositive();
         assertThat(standardDeviation(scores)).isGreaterThan(7.0);
     }
 
@@ -106,8 +112,18 @@ class StandardFoodScoringTest {
         }
 
         // 표가 비면 이름이 바뀐 것이다 — 조용히 통과하지 않게 막는다.
-        assertThat(board).hasSize(names.size()).allSatisfy((name, score) ->
-                assertThat(score).as(name).isBetween(1, 100));
+        //
+        // `isBetween(1, MAX_SCORE)` 로는 아무것도 못 잡는다 — 엔진이 이미 MAX_SCORE 로
+        // clamp 하므로 위쪽 경계가 깨질 입력이 없다(리터럴 100 이던 시절에도 같았다).
+        //
+        // 대신 **상한에 붙지 않는다**를 본다. 상한에 닿은 점수는 원점수를 잘라낸 값이라
+        // 서로 다른 음식이 같은 숫자로 뭉개지고, 그 구간에서는 행동 카드가 광고한
+        // 회복치도 0 이 된다. 시연 대본에 쓰는 표만은 그 평탄면 밖에 있어야 한다.
+        // (동점 자체는 정상이다 — 다른 음식이 같은 점수를 받을 수 있다.)
+        assertThat(board).hasSize(names.size()).allSatisfy((name, score) -> {
+            assertThat(score).as(name).isPositive();
+            assertThat(score).as(name + " — 상한에 붙었다").isLessThan(RuleConstants.MAX_SCORE);
+        });
     }
 
     // ---- 표준 테이블 → 엔진 입력 ----
