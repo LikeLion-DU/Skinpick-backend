@@ -192,13 +192,18 @@ def main():
             print(f"  {photo}: 전 회차 인식 실패 — 판정 불가(INVALID)\n")
             failures.append(f"{photo}: 전 회차 음식 인식 실패 — 실제 음식 사진인지 확인한다")
             continue
-        if missed:
-            # 일부만 인식됐다는 것 자체가 반복성 실패다 — 같은 사진을 올린 사용자가
-            # 어떤 날은 결과를, 어떤 날은 422 를 받는다.
-            print(f"  {photo}: {len(rounds)}회 중 {missed}회 인식 실패")
-            failures.append(f"{photo}: 인식 성공/실패가 회차마다 갈림 ({missed}/{len(rounds)} 실패)")
+        # 일부만 인식됐다는 것 자체가 반복성 실패다 — 같은 사진을 올린 사용자가
+        # 어떤 날은 결과를, 어떤 날은 422 를 받는다.
+        #
+        # **아래 problems 에 넣는다.** 여기서 바로 failures 에만 담으면 판정 줄은
+        # 인식된 회차만 보고 PASS 를 찍는다 — "3회 인식 실패" 바로 밑에 "→ PASS" 가
+        # 붙는다. 전체 exit code 는 1 이라 놓치지는 않지만, 사람이 읽는 줄이 거짓말한다.
+        partial = (f"인식 성공/실패가 회차마다 갈림 ({missed}/{len(rounds)} 실패) — "
+                   "같은 사진에 어떤 날은 결과, 어떤 날은 422 다") if missed else None
+
         if len(detected) < 2:
-            print(f"  {photo}: 인식된 표본 {len(detected)}회 — 판정 불가\n")
+            print(f"  {photo}: 인식된 표본 {len(detected)}회 — 판정 불가(INVALID)\n")
+            failures.append(f"{photo}: {partial or '인식된 표본이 2회 미만이라 잴 수 없다'}")
             continue
 
         rounds = detected
@@ -212,7 +217,7 @@ def main():
         r07_triggers = {d.get("cookingMethod") == "FRIED" or d.get("oiliness") == "HIGH"
                         for d in rounds}
 
-        problems = []
+        problems = [partial] if partial else []
         if len(hits) > 1:
             problems.append(f"표준 적중 갈림 {sorted(str(h) for h in hits)} — 영양값이 사진과 무관하게 바뀐다")
         if len(spicy_factors) > 1:
