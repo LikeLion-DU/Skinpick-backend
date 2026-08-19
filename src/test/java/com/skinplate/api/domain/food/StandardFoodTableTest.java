@@ -144,14 +144,18 @@ class StandardFoodTableTest {
 
         // 감점 재료는 이름으로 얹지 않는다 — "고추냉이 연어"가 매운 음식이 되면 안 된다.
         //
-        // 예전 이 자리는 `돼지고기 김치찌개` 가 PROBIOTIC 을 갖는지 봤는데, 그 행은
-        // standard-food.json 에 이미 `"tags": ["PROBIOTIC"]` 로 실려 있어서
-        // withNameTags 를 통째로 지워도 통과했다 — 아무것도 지키지 않는 단언이었다.
-        // 지켜야 하는 것은 "감점 태그는 이름으로 붙지 않는다" 이므로 그것을 직접 본다.
-        StandardFood wasabiSalmon = StandardFoodTable.find("고추냉이 연어구이").orElseThrow();
-        assertThat(wasabiSalmon.tags()).contains(IngredientTag.OMEGA3);   // 가점은 붙고
-        assertThat(wasabiSalmon.tags()).doesNotContain(IngredientTag.CAPSAICIN);  // 감점은 안 붙는다
-        assertThat(StandardFoodTable.find("치즈 감자튀김").orElseThrow().tags())
+        // **단언이 이빨을 가지려면 매칭된 행이 그 태그를 원래 안 갖고 있어야 한다.**
+        // 예전 이 자리는 `돼지고기 김치찌개` 의 PROBIOTIC 을 봤는데 그 행에 이미
+        // `"tags": ["PROBIOTIC"]` 이 실려 있어 withNameTags 를 지워도 통과했다.
+        // `연어구이` 도 마찬가지로 OMEGA3 를 이미 갖고 있어 같은 함정이다.
+        // `고추냉이 연어 샐러드` 는 `샐러드` 행(태그 ETC 하나)에 떨어지므로,
+        // OMEGA3 가 붙었다면 그건 오직 이름에서 온 것이다.
+        StandardFood wasabiSalmonSalad =
+                StandardFoodTable.find("고추냉이 연어 샐러드").orElseThrow();
+        assertThat(wasabiSalmonSalad.name()).isEqualTo("샐러드");
+        assertThat(wasabiSalmonSalad.tags()).contains(IngredientTag.OMEGA3);   // 가점은 이름에서 붙고
+        assertThat(wasabiSalmonSalad.tags()).doesNotContain(IngredientTag.CAPSAICIN);  // 감점은 안 붙는다
+        assertThat(StandardFoodTable.find("치즈 연어 샐러드").orElseThrow().tags())
                 .doesNotContain(IngredientTag.DAIRY);
     }
 

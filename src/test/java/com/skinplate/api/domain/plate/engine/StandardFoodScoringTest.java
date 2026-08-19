@@ -112,8 +112,18 @@ class StandardFoodScoringTest {
         }
 
         // 표가 비면 이름이 바뀐 것이다 — 조용히 통과하지 않게 막는다.
-        assertThat(board).hasSize(names.size()).allSatisfy((name, score) ->
-                assertThat(score).as(name).isBetween(1, RuleConstants.MAX_SCORE));
+        //
+        // `isBetween(1, MAX_SCORE)` 로는 아무것도 못 잡는다 — 엔진이 이미 MAX_SCORE 로
+        // clamp 하므로 위쪽 경계가 깨질 입력이 없다(리터럴 100 이던 시절에도 같았다).
+        //
+        // 대신 **상한에 붙지 않는다**를 본다. 상한에 닿은 점수는 원점수를 잘라낸 값이라
+        // 서로 다른 음식이 같은 숫자로 뭉개지고, 그 구간에서는 행동 카드가 광고한
+        // 회복치도 0 이 된다. 시연 대본에 쓰는 표만은 그 평탄면 밖에 있어야 한다.
+        // (동점 자체는 정상이다 — 다른 음식이 같은 점수를 받을 수 있다.)
+        assertThat(board).hasSize(names.size()).allSatisfy((name, score) -> {
+            assertThat(score).as(name).isPositive();
+            assertThat(score).as(name + " — 상한에 붙었다").isLessThan(RuleConstants.MAX_SCORE);
+        });
     }
 
     // ---- 표준 테이블 → 엔진 입력 ----

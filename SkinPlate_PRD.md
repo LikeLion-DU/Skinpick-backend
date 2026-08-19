@@ -3753,7 +3753,7 @@ public class PlateRuleEngine {
                 .toList();
 
         int raw = BASE_SCORE + applied.stream().mapToInt(RuleResult::delta).sum();
-        int score = Math.max(0, Math.min(100, raw));
+        int score = Math.max(MIN_SCORE, Math.min(MAX_SCORE, raw));   // 0 ~ 97
 
         return new PlateEvaluation(score, applied, buildSummary(applied));
     }
@@ -3762,20 +3762,20 @@ public class PlateRuleEngine {
 
 > **핵심** — 룰을 추가하려면 `PlateRule`을 구현한 `@Component` 클래스를 하나 만들면 끝이다. 엔진 코드도, 기존 룰도 건드리지 않는다. 이것이 "확장 가능한 아키텍처"의 실질적 의미다.
 
-### 18.6 룰 정의표 (14종 — 2026-08-18 재캘리브레이션)
+### 18.6 룰 정의표 (14종 — 2026-08-20 재캘리브레이션 #64)
 
-최종 점수 = `clamp(0, 100, 70 + 음식 축 + 피부 축)`. 엔진은 그대로 `BASE_SCORE + Σdelta` 하나다 —
+최종 점수 = `clamp(0, 97, 75 + 음식 축 + 피부 축)`. 엔진은 그대로 `BASE_SCORE + Σdelta` 하나다 —
 **게이트가 없는 룰이 음식 축, 게이트가 있는 룰이 피부 축**이다.
 
 **음식 축** — 같은 음식이면 누구에게나 같다. 실측 범위 −33 ~ +18.
 
 | 코드 | 조건 | Δ | 타입 | 메시지 | 추천 행동 |
 |---|---|---|---|---|---|
-| **R05** | 단백질 ≥ 20g | **+6** | GOOD | 단백질 충분 | — |
-| **R06** | VITAMIN_A/C·ANTIOXIDANT 태그 **또는** 실측 비타민A ≥ 36μg·비타민C ≥ 4mg (100kcal당) | **+5** | GOOD | 비타민 풍부 | — |
-| **R09** | PROBIOTIC 태그 | **+4** | GOOD | 발효식품 포함 | — |
-| **R14** | OMEGA3 태그 | **+4** | GOOD | 오메가3 재료 | — |
-| **R15** | 식이섬유 100kcal당 ≥ 3.0g / ≥ 5.0g | **+4 / +6** | GOOD | 식이섬유 풍부 | — |
+| **R05** | 단백질 ≥ 20g | **+7** | GOOD | 단백질 충분 | — |
+| **R06** | VITAMIN_A/C·ANTIOXIDANT 태그 **또는** 실측 비타민A ≥ 36μg·비타민C ≥ 4mg (100kcal당) | **+7** | GOOD | 비타민 풍부 | — |
+| **R09** | PROBIOTIC 태그 | **+5** | GOOD | 발효식품 포함 | — |
+| **R14** | OMEGA3 태그 | **+9** | GOOD | 오메가3 재료 | — |
+| **R15** | 식이섬유 100kcal당 ≥ 3.0g / ≥ 5.0g | **+6 / +9** | GOOD | 식이섬유 풍부 | — |
 | **R03** | 당류 > 15g (40g 초과 시 기본 델타에 −4) | **−12** × 심각도 | CAUTION | 당류 과다 | 단 음료 대신 물 (계산) |
 | **R04** | 나트륨 > 1150 / 1700 / 2300mg | **−4 / −8 / −12** | CAUTION | 나트륨 과다 | 국물 절반 (계산) |
 | **R07** | 튀김(FRIED) 또는 관찰 기름기 HIGH | **−10** × 심각도 (비튀김 ×0.7) | CAUTION | 튀김 조리 / 기름진 음식 | 튀김옷 제거 (계산 · 튀김만) |
@@ -4469,7 +4469,7 @@ curl http://localhost:8080/api/v1/auth/me \
 |---|---|
 | **Skin Score** | 얼굴 사진 기반 5개 지표를 종합한 0~100 점수 |
 | **Skin Plate** | 특정 음식 1건 × 특정 피부 분석 1건의 매칭 결과 |
-| **Skin Plate Score** | 해당 음식이 현재 피부 상태에 얼마나 적합한지 나타내는 0~100 점수 |
+| **Skin Plate Score** | 해당 음식이 현재 피부 상태에 얼마나 적합한지 나타내는 0~97 점수 (상한은 `RuleConstants.MAX_SCORE`) |
 | **Rule** | 피부 지표와 음식 속성의 조합에 점수 델타와 메시지를 부여하는 단위 규칙 |
 | **추천 행동** | 감점 룰에 연결된, 사용자가 지금 실행 가능한 한 문장 제안 |
 | **severityFactor** | 피부 지표 심각도에 따라 룰 델타를 증폭하는 계수 (1.0~1.5) |

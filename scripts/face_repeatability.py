@@ -259,6 +259,9 @@ def main():
           f"→ 총 {len(people) * RUNS * len(models)} 요청  ({', '.join(models)})\n")
 
     summary = {}
+    # 모델별로 따로 센다 — 루프 변수를 루프 뒤에서 읽으면 MODELS 를 둘 준 날
+    # 마지막 모델의 실패 원인이 전체 진단이 된다.
+    totals = {"failed": 0, "no_face": 0}
     for model in models:
         per_person, limited, failed, no_face = [], 0, 0, 0
 
@@ -336,15 +339,18 @@ def main():
                 "unstable_levels": sorted({k for p in per_person for k in p["unstable_levels"]}),
                 "rate_limited": limited, "failed": failed, "no_face": no_face,
             }
+        totals["failed"] += failed
+        totals["no_face"] += no_face
 
     if not summary:
         # 원인을 지목해서 끝낸다. 예전에는 무조건 "일일 한도"를 가리켰는데,
         # 실제로는 사진에 얼굴이 없는 경우가 더 흔하고 그때 모델을 의심하게 된다.
-        if no_face and no_face == failed:
+        if totals["no_face"] and totals["no_face"] == totals["failed"]:
             sys.exit("\n전 회차 얼굴 미검출 — 모델 문제가 아니라 사진 문제다. "
                      "얼굴이 크게·밝게 나온 사진으로 다시 넣는다.")
         sys.exit("\n성공한 호출이 없다. 얼굴 미검출 %d회 · 그 밖의 실패 %d회 — "
-                 "미검출이 0 이면 일일 요청 한도부터 확인한다." % (no_face, failed - no_face))
+                 "미검출이 0 이면 일일 요청 한도부터 확인한다."
+                 % (totals["no_face"], totals["failed"] - totals["no_face"]))
 
     models = list(summary)
     rows = [("실제 얼굴 평균 latency", lambda s: f"{s['latency']:.1f}초"),
@@ -355,7 +361,10 @@ def main():
              ("피부 나이 축 평균 변동", lambda s: f"{s['axis_range']:.1f}"),
              ("평균 토큰/건", lambda s: f"{s['cost_tokens']:.0f}"),
              ("429 발생", lambda s: f"{s['rate_limited']}건"),
-             ("실패", lambda s: f"{s['failed']}건")]
+             # 실패를 한 줄로만 찍으면 사진 문제인데 모델을 의심하게 된다.
+             # 전 회차 실패 경로에서 가른 것을 부분 실패 경로에서도 보여준다.
+             ("실패(그중 얼굴 미검출)",
+              lambda s: f"{s['failed']}건 ({s['no_face']}건)")]
 
     print("\n\n" + f"{'항목':<26}" + "".join(f"{m:>18}" for m in models))
     print("-" * (26 + 18 * len(models)))

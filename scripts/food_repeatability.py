@@ -34,6 +34,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PROMPT = f"{ROOT}/src/main/java/com/skinplate/api/infra/openai/prompt/FoodAnalysisPrompt.java"
 CLIENT = f"{ROOT}/src/main/java/com/skinplate/api/infra/openai/OpenAiVisionClient.java"
 CONSTANTS = f"{ROOT}/src/main/java/com/skinplate/api/domain/plate/engine/RuleConstants.java"
+TABLE_SRC = f"{ROOT}/src/main/java/com/skinplate/api/domain/food/service/StandardFoodTable.java"
 
 FOODS = sys.argv[1] if len(sys.argv) > 1 else f"{ROOT}/foods"
 RUNS = int(sys.argv[2]) if len(sys.argv) > 2 else 5
@@ -92,17 +93,69 @@ def standard_table():
     return table
 
 
-def standard_hit(table, food_name):
-    """StandardFoodTable.find 와 같은 2단계 조회 — 정확한 이름 → 뒤 낱말의 긴 접미사."""
+def matcher_rules():
+    """StandardFoodTable 의 표기 교정표와 수식절 표지를 **소스에서 직접 읽는다.**
+
+    손으로 옮겨 적으면 저쪽을 고친 날 게이트만 옛 규칙으로 재고, 그 측정이
+    "같은 사진에 같은 점수" 의 유일한 근거가 된다. 프롬프트·상수를 소스에서
+    읽는 것과 같은 이유다.
+    """
+    src = open(TABLE_SRC).read()
+    spellings = dict(re.findall(
+        r'"([^"]+)",\s*"([^"]+)"',
+        re.search(r"SPELLINGS = Map\.of\((.*?)\);", src, re.S).group(1)))
+    modifier = re.search(r'MODIFIER_CLAUSE =\s*\n?\s*Pattern\.compile\("(.*?)"\);',
+                         src, re.S).group(1).replace("\\\\", "\\")
+    if not spellings or not modifier:
+        sys.exit("StandardFoodTable 에서 SPELLINGS / MODIFIER_CLAUSE 를 못 읽었다")
+    return spellings, modifier
+
+
+def _find_suffix(table, word):
+    """접미사를 긴 쪽부터. StandardFoodTable.findSuffix 와 같다."""
+    for start in range(len(word)):
+        if word[start:] in table:
+            return word[start:]
+    return None
+
+
+def standard_hit(table, food_name, spellings, modifier):
+    """`StandardFoodTable.find` 를 그대로 옮긴 것 — 세 단계다.
+
+    예전에는 "정확한 이름 → 뒤 낱말의 접미사" 두 단계만 옮겨 놓아서 <b>운영과
+    다른 답</b>을 냈다. 이 함수가 PASS/WARN 을 가르므로 그 차이가 곧 오판이다:
+
+      "돈가스와 양배추 샐러드"  운영 → 돈가스(704kcal) · 옛 게이트 → 샐러드(293kcal)
+      "돈까스"                운영 → 돈가스           · 옛 게이트 → 미적중(WARN)
+
+    빠져 있던 둘을 채운다 — 표기 교정(normalizeSpelling)과, 나열의 첫 조각을
+    본체로 보되 수식절이면 쓰지 않는 지름길(locate).
+    """
     if not food_name or not food_name.strip():
         return None
+
     trimmed = food_name.strip()
+    for wrong, right in spellings.items():
+        trimmed = trimmed.replace(wrong, right)
+
     if trimmed in table:
         return trimmed
+
+    # Java 의 split("(와|과)\\s|,") — 캡처 그룹이 결과에 안 들어가므로 (?:) 로 옮긴다.
+    first_chunk = re.split(r"(?:와|과)\s|,", trimmed)[0]
+    head = first_chunk.strip()
+    rest = trimmed[len(first_chunk):]
+    if head and head != trimmed and not re.search(modifier, rest):
+        words = head.split()
+        if words:
+            hit = _find_suffix(table, words[-1])
+            if hit:
+                return hit
+
     for word in reversed(trimmed.split()):
-        for start in range(len(word)):
-            if word[start:] in table:
-                return word[start:]
+        hit = _find_suffix(table, word)
+        if hit:
+            return hit
     return None
 
 
@@ -158,6 +211,7 @@ def main():
     key, system, user_prompt, sch = api_key(), block("SYSTEM"), block("USER"), schema()
     model, max_tokens = deployed_model(), food_max_tokens()
     factors, table = spiciness_factors(), standard_table()
+    spellings, modifier = matcher_rules()
 
     photos = sorted(f for f in (os.listdir(FOODS) if os.path.isdir(FOODS) else [])
                     if f.lower().endswith((".jpg", ".jpeg", ".png")))
@@ -168,7 +222,7 @@ def main():
     failures, warnings = [], []
     for photo in photos:
         content = content_for(f"{FOODS}/{photo}", user_prompt)
-        rounds = []
+        rounds, call_failed = [], 0
         for i in range(RUNS):
             result = call(key, model, system, content, sch, max_tokens)
             if result["ok"]:
@@ -178,6 +232,7 @@ def main():
                       f"매움={d.get('spiciness', '?'):7} 기름={d.get('oiliness', '?'):7} "
                       f"양={d.get('portionSize', '?'):7} {result['latency']:.1f}s")
             else:
+                call_failed += 1
                 print(f"  {photo:24} {i + 1}/{RUNS}  ✗ {result['error']}")
             time.sleep(2)
         # **인식 실패 회차는 표본이 아니다.** 그건 실제 서비스라면
@@ -189,8 +244,17 @@ def main():
         missed = len(rounds) - len(detected)
 
         if not detected:
-            print(f"  {photo}: 전 회차 인식 실패 — 판정 불가(INVALID)\n")
-            failures.append(f"{photo}: 전 회차 음식 인식 실패 — 실제 음식 사진인지 확인한다")
+            # **호출이 실패한 것과 음식을 못 알아본 것은 다른 일이다.** 429·타임아웃으로
+            # 다섯 번 다 실패한 사람에게 "실제 음식 사진인지 확인한다" 라고 하면 한도를
+            # 다 쓴 줄 모르고 사진을 바꾼다. 얼굴 게이트에서 no-face 와 shape 를 가른
+            # 것과 같은 이유다.
+            if not rounds:
+                print(f"  {photo}: 전 회차 호출 실패({call_failed}회) — 판정 불가(INVALID)\n")
+                failures.append(f"{photo}: 전 회차 API 호출 실패 {call_failed}회 — "
+                                "일일 요청 한도·네트워크부터 확인한다(사진 문제가 아니다)")
+            else:
+                print(f"  {photo}: 전 회차 인식 실패 — 판정 불가(INVALID)\n")
+                failures.append(f"{photo}: 전 회차 음식 인식 실패 — 실제 음식 사진인지 확인한다")
             continue
         # 일부만 인식됐다는 것 자체가 반복성 실패다 — 같은 사진을 올린 사용자가
         # 어떤 날은 결과를, 어떤 날은 422 를 받는다.
@@ -203,11 +267,12 @@ def main():
 
         if len(detected) < 2:
             print(f"  {photo}: 인식된 표본 {len(detected)}회 — 판정 불가(INVALID)\n")
-            failures.append(f"{photo}: {partial or '인식된 표본이 2회 미만이라 잴 수 없다'}")
+            reason = partial or f"인식된 표본이 2회 미만이다 (호출 실패 {call_failed}회)"
+            failures.append(f"{photo}: {reason}")
             continue
 
         rounds = detected
-        hits = {standard_hit(table, d.get("foodName")) for d in rounds}
+        hits = {standard_hit(table, d.get("foodName"), spellings, modifier) for d in rounds}
         # 강도는 enum 이 아니라 계수로 비교한다 — MEDIUM 과 UNKNOWN 은 같은 1.0 이라
         # 그 사이의 흔들림은 점수를 안 움직인다. 갈렸다고 잡으면 거짓 경보다.
         spicy_factors = {factors.get(d.get("spiciness", "UNKNOWN"), 1.0) for d in rounds}
@@ -244,8 +309,11 @@ def main():
         print()
 
     if failures:
-        print(f"게이트 실패 {len(failures)}건 — 해당 음식의 특성을 표준 테이블에 심거나 "
-              f"(tools/build_standard_food.py) OPENAI_MODEL=gpt-4o 롤백을 검토한다")
+        print(f"게이트 실패 {len(failures)}건")
+        for failure in failures:
+            print(f"  ✗ {failure}")
+        print("  → 호출 실패면 한도·네트워크부터, 인식이 갈리면 표준 테이블에 특성을 심거나 "
+              "(tools/build_standard_food.py) OPENAI_MODEL=gpt-4o 롤백을 검토한다")
         sys.exit(1)
     if warnings:
         # 세 경로는 갈리지 않았지만 "일관되게 못 찾았다"는 통과가 아니다 —

@@ -210,12 +210,19 @@ public final class StandardFoodTable {
      * <p><b>가점 태그만 얹는다.</b> 감점 재료(당·유제품·매운맛)는 영양값과 spicy 가
      * 이미 잡고 있고, 낱말 하나로 벌을 주면 "고추냉이 연어"류 오탐이 점수를 깎는다.
      * <p><b>낱말 목록은 TAG_RULES 와 같지 않다.</b> OMEGA3·ANTIOXIDANT·PROBIOTIC 세 벌은
-     * {@code tools/build_standard_food.py} 의 TAG_RULES 를 그대로 옮긴 것이라 표준표에
-     * 새로 붙는 행이 0 이다. 실제로 점수를 움직이는 것은 TAG_RULES 에 <b>없는</b> 두 낱말,
-     * VITAMIN_C 의 {@code 샐러드} 와 VITAMIN_A 의 {@code 나물} 이다 — 재료가 아니라
-     * 조리 형태라서 감자 샐러드·마카로니 샐러드·콩나물무침처럼 <b>실측 비타민이 임계
-     * 아래인 행에도 R06(+7)이 붙는다.</b> 표를 다시 만들면 두 소스가 갈리므로,
-     * 값을 손댈 때는 양쪽을 같이 본다.
+     * {@code tools/build_standard_food.py} 의 TAG_RULES 를 그대로 옮긴 것이고, VITAMIN_C 의
+     * {@code 샐러드} 와 VITAMIN_A 의 {@code 나물} 두 낱말만 여기에 더 있다.
+     *
+     * <p><b>세 벌이 죽은 목록이라는 뜻이 아니다 — 지우면 이 메서드의 존재 이유가 사라진다.</b>
+     * 표의 각 행을 <b>제 이름 그대로</b> 조회하면 새로 붙는 태그가 없는 것이 맞다(빌드
+     * 스크립트가 이미 같은 규칙을 적용해 두었다). 그러나 이 메서드가 필요한 자리는
+     * <b>기본명으로 떨어진 조회</b>다 — "연어 샐러드" 는 태그가 {@code [ETC]} 뿐인
+     * {@code 샐러드} 행에 걸리고, 거기에 OMEGA3 를 세우는 것이 바로 이 OMEGA3 목록이다.
+     * {@code StandardFoodTableTest} 가 그 경로를 고정한다.
+     *
+     * <p>대신 더 있는 두 낱말은 <b>재료가 아니라 조리 형태</b>라, 감자 샐러드·마카로니
+     * 샐러드·콩나물무침처럼 실측 비타민이 임계 아래인 행에도 R06(+7)이 붙는다.
+     * 의도한 선택이지만 표를 다시 만들면 두 소스가 갈리므로, 값을 손댈 때는 양쪽을 같이 본다.
      */
     private record BonusNameTag(IngredientTag tag, List<String> words) {}
 
