@@ -6182,7 +6182,7 @@ class SkinPlate {
   const SkinPlate({
     required this.id,
     required this.plateScore,
-    this.baseScore = 70,
+    this.baseScore,
     required this.summary,
     required this.food,
     required this.good,
@@ -6196,7 +6196,7 @@ class SkinPlate {
   final int plateScore;
 
   /// 계산 내역 카드의 첫 줄("기본 70"). 앱이 하드코딩하면 클램프된 점수에서 역산이 틀린다.
-  final int baseScore;
+  final int? baseScore;
 
   final String summary;
   final FoodAnalysis food;
@@ -6456,7 +6456,7 @@ class SkinPlateDto with _$SkinPlateDto {
     /// [plateScore] 의 등급. **서버가 매겨서 보낸다** — 앱에 경계표를 두지 않는다.
     /// 이 필드가 없던 서버와 붙으면 null 이고, 화면은 배지를 비운다.
     String? grade,
-    @Default(70) int baseScore,
+    int? baseScore,                    // 서버 RuleConstants.BASE_SCORE 가 주인 — 앱 기본값을 두지 않는다
     @Default('') String summary,
     required FoodAnalysisDto food,
     required FeedbackGroupDto feedbacks,
