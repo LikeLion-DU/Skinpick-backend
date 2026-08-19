@@ -389,7 +389,7 @@ class WeeklyReportServiceTest {
 
         assertThat(report.concerns()).hasSize(1);
         assertThat(report.concerns().get(0).concern()).isEqualTo(SkinConcern.PUFFINESS);
-        assertThat(report.concerns().get(0).score()).isEqualTo(62);   // 70 − 8, 이틀 모두
+        assertThat(report.concerns().get(0).score()).isEqualTo(67);   // 75 − 8, 이틀 모두
         assertThat(report.concerns().get(0).changeFromFirstDay()).isZero();
     }
 
