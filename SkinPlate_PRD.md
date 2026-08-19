@@ -3741,7 +3741,7 @@ public record RuleResult(
 @RequiredArgsConstructor
 public class PlateRuleEngine {
 
-    private static final int BASE_SCORE = 70;
+    private static final int BASE_SCORE = 75;   // 2026-08-20 재캘리브레이션 (#64)
     private final List<PlateRule> rules;     // Spring이 모든 구현체 주입
 
     public PlateEvaluation evaluate(PlateContext ctx) {
@@ -4126,7 +4126,7 @@ skin_plate(+feedback) ─1회 범위조회→ 날짜별 그룹 ─DailyReportAss
 
 #### 고민별 점수 — 저장하지 않는다
 
-끼니마다 `BASE_SCORE(70) + 그 고민에 매핑된 룰의 score_delta` 를 내고 평균한다. 매핑표는 `ConcernRules` 한 파일이다.
+끼니마다 `BASE_SCORE(75) + 그 고민에 매핑된 룰의 score_delta` 를 내고 평균한다. 매핑표는 `ConcernRules` 한 파일이다.
 
 > **⚠️ 이 매핑표를 바꾸면 과거 일일·주간 리포트의 고민 점수도 함께 바뀐다.** DB 에 확정돼 있는 것은 룰별 `score_delta` 이고, "어느 룰이 어느 고민에 속하는가"는 코드에만 있기 때문이다. **알고 택한 것이며, 스냅샷 테이블을 만들지 않는다:**
 >
