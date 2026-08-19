@@ -29,6 +29,7 @@ import com.skinplate.api.domain.plate.entity.PlateActionCode;
 import com.skinplate.api.domain.plate.entity.SkinPlate;
 import com.skinplate.api.domain.plate.repository.SkinPlateRepository;
 import com.skinplate.api.domain.skin.entity.SkinAnalysis;
+import com.skinplate.api.domain.skin.entity.SkinLevel;
 import com.skinplate.api.domain.skin.entity.SkinMetrics;
 import com.skinplate.api.domain.skin.repository.SkinAnalysisRepository;
 import com.skinplate.api.domain.user.entity.AppUser;
@@ -129,6 +130,7 @@ public class SkinPlateService {
                 SkinBasis.of(skinMeasuredAt, LocalDate.now(DateRange.KST)),
                 skinMeasuredAt == null ? null : skinMeasuredAt.toLocalDate(),
                 evaluation.score(),
+                SkinLevel.of(evaluation.score()),
                 RuleConstants.BASE_SCORE,
                 evaluation.summary(),
                 FoodAnalysisDto.from(food),

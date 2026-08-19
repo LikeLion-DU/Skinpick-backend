@@ -2,6 +2,7 @@ package com.skinplate.api.domain.skin;
 
 import com.skinplate.api.domain.skin.controller.SkinAnalysisController;
 import com.skinplate.api.domain.skin.dto.SkinAnalysisResponse;
+import com.skinplate.api.domain.skin.entity.SkinLevel;
 import com.skinplate.api.domain.skin.service.SkinAnalysisService;
 import com.skinplate.api.global.exception.GlobalExceptionHandler;
 import com.skinplate.api.global.security.CurrentUser;
@@ -100,8 +101,9 @@ class SkinAnalysisControllerTest {
     }
 
     private static SkinAnalysisResponse response() {
-        return new SkinAnalysisResponse(101L, 55, null, List.of(), null, null,
-                "요약", List.of(), null, LocalDateTime.of(2026, 8, 13, 12, 30));
+        return new SkinAnalysisResponse(101L, 55, SkinLevel.of(55), null, List.of(), null, null,
+                "요약", List.of(), List.of(), null, null,
+                LocalDateTime.of(2026, 8, 13, 12, 30));
     }
 
     /** 인증은 이 테스트의 관심사가 아니다. 필터가 넣어 주는 값만 흉내 낸다. */

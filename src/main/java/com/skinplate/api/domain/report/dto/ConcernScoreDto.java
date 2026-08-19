@@ -3,6 +3,8 @@ package com.skinplate.api.domain.report.dto;
 import com.skinplate.api.domain.skin.entity.SkinLevel;
 import com.skinplate.api.domain.user.entity.SkinConcern;
 
+import java.util.List;
+
 /**
  * 자가 신고 피부 고민 하나에 대한 식단 점수.
  *
@@ -20,12 +22,24 @@ import com.skinplate.api.domain.user.entity.SkinConcern;
  *                           54·62·70 인 사흘은 {@code score=62, changeFromFirstDay=+16} 인데,
  *                           이것을 "평균 대비 변화"로 읽으면 이전 값이 46 이었다는 뜻이 되고
  *                           그런 날은 없었다
+ * @param message            이 고민에 관해 <b>가장 크게 움직인 룰의 이유 문장</b>. 룰이
+ *                           판정할 때 만들어 저장해 둔 {@code reason}(V8) 을 그대로 고른
+ *                           것이고 <b>새로 쓰지 않는다</b> — 그래서 이 카드의 문장과 음식
+ *                           결과 화면의 문장이 같은 말을 한다. V8 이전 기록이거나 그 고민에
+ *                           걸린 룰이 없으면 null 이라 키가 빠진다
+ * @param tags               같은 근거의 짧은 라벨들("나트륨 과다" · "단백질 충분").
+ *                           빈도순 최대 2개. 없으면 빈 배열이다 — {@code message} 처럼
+ *                           키를 빼지 않는 이유는 배열이 비는 것과 없는 것을 앱이 같게
+ *                           다루기 때문이다(둘 다 칩을 안 그린다)
  */
 public record ConcernScoreDto(SkinConcern concern, String label, int score,
-                              SkinLevel status, Integer changeFromFirstDay) {
+                              SkinLevel status, Integer changeFromFirstDay,
+                              String message, List<String> tags) {
 
-    public static ConcernScoreDto of(SkinConcern concern, int score, Integer changeFromFirstDay) {
+    public static ConcernScoreDto of(SkinConcern concern, int score, Integer changeFromFirstDay,
+                                     String message, List<String> tags) {
         return new ConcernScoreDto(concern, concern.getLabel(), score,
-                SkinLevel.of(score), changeFromFirstDay);
+                SkinLevel.of(score), changeFromFirstDay,
+                message, tags == null ? List.of() : tags);
     }
 }

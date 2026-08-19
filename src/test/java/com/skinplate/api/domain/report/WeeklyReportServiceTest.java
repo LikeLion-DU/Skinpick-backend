@@ -164,6 +164,40 @@ class WeeklyReportServiceTest {
     }
 
     @Test
+    @DisplayName("BEST·WORST 카드에는 그날 기록의 id 가 실린다 — 앱이 로컬 사진을 찾는 열쇠다")
+    void bestAndWorstCarryPlateIds() {
+        givenDays(day(MONDAY, 91), day(MONDAY.plusDays(2), 64));
+
+        WeeklyReportResponse report = weekly();
+
+        assertThat(report.bestDay().date()).isEqualTo(MONDAY);
+        assertThat(report.bestDay().plateIds()).containsExactly(1L);
+        assertThat(report.worstDay().date()).isEqualTo(MONDAY.plusDays(2));
+        assertThat(report.worstDay().plateIds()).containsExactly(1L);
+    }
+
+    @Test
+    @DisplayName("추이 그래프 7칸에는 id 를 싣지 않는다 — 쓰지 않는 배열이 일곱 개 붙는다")
+    void trendHasNoPlateIds() {
+        givenDays(day(MONDAY, 72), day(MONDAY.plusDays(1), 88));
+
+        assertThat(weekly().dailyScores())
+                .allSatisfy(score -> assertThat(score.plateIds()).isNull());
+    }
+
+    @Test
+    @DisplayName("고민 태그는 기간 전체에서 모으고, 문장은 싣지 않는다 — 하루 문장이 한 주를 설명하면 안 된다")
+    void concernTagsAggregateWithoutMessage() {
+        givenDays(dayWithConcern(MONDAY, 72, SkinConcern.ACNE, 60),
+                  dayWithConcern(MONDAY.plusDays(1), 72, SkinConcern.ACNE, 80));
+
+        ConcernScoreDto acne = weekly().concerns().get(0);
+
+        assertThat(acne.tags()).containsExactly("당류 과다");
+        assertThat(acne.message()).isNull();
+    }
+
+    @Test
     @DisplayName("주간 영양은 기록한 날의 하루 평균이다 — 기록 없는 날이 분모에 들어가지 않는다")
     void nutritionAverageExcludesEmptyDays() {
         // 7일 기간인데 기록은 이틀뿐이다. 1000 + 2000 → 1500 이어야 한다.
@@ -400,22 +434,30 @@ class WeeklyReportServiceTest {
     private static DailyReportResponse dayWithConcern(LocalDate date, int score,
                                                       SkinConcern concern, int concernScore) {
         return build(date, score, 1, 1500,
-                List.of(ConcernScoreDto.of(concern, concernScore, null)));
+                List.of(ConcernScoreDto.of(concern, concernScore, null,
+                        "당류가 높은 편이에요.", List.of("당류 과다"))));
     }
 
     private static DailyReportResponse build(LocalDate date, int score, int recordCount,
                                              int calories, List<ConcernScoreDto> concerns) {
+        // 영양 밸런스는 MACRO 여섯 개다. values() 로 돌면 피부 영양 포인트 3종까지
+        // nutrition 배열에 섞여, 실제 응답에 없는 모양으로 주간 집계를 검증하게 된다.
         List<NutritionItemDto> nutrition = new ArrayList<>();
-        for (NutrientType type : NutrientType.values()) {
+        for (NutrientType type : NutrientType.of(NutrientType.Group.MACRO)) {
             nutrition.add(NutritionItemDto.of(type, type == NutrientType.CALORIES
                     ? BigDecimal.valueOf(calories)
                     : BigDecimal.ZERO));
         }
 
+        List<NutritionItemDto> skinNutrients =
+                NutrientType.of(NutrientType.Group.SKIN).stream()
+                        .map(NutritionItemDto::unmeasured)
+                        .toList();
+
         return new DailyReportResponse(date, score, SkinLevel.of(score), recordCount,
-                nutrition, concerns,
-                List.of(new PlateHistoryItemDto(1L, "김치찌개", score,
-                        MealType.LUNCH, date.atTime(12, 0))),
+                nutrition, skinNutrients, concerns,
+                List.of(new PlateHistoryItemDto(1L, "김치찌개", score, SkinLevel.of(score),
+                        MealType.LUNCH, date.atTime(12, 0), List.of("나트륨"))),
                 "오늘의 코멘트", List.of("발효식품 포함"), List.of("나트륨 과다"));
     }
 }

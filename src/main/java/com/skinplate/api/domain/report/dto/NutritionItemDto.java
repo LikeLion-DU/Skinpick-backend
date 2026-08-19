@@ -19,6 +19,10 @@ import java.math.RoundingMode;
  *
  * @param amount  그날(주간이면 하루 평균) 합계. 소수 첫째 자리까지
  * @param percent 기준 대비 비율(%)
+ * @param status  기준 대비 위치. <b>null 이면 "재지 못했다"</b>는 뜻이다 —
+ *                {@link NutrientType.Group#SKIN} 항목은 표준 음식표에 매칭된 끼니에서만
+ *                값이 나오므로, 그날 매칭된 기록이 하나도 없으면 0 이 아니라 null 이다.
+ *                0 을 내려보내면 화면이 "부족"이라고 단정하는데 사실은 모르는 것이다
  */
 public record NutritionItemDto(NutrientType nutrient, String label, String unit,
                                BigDecimal amount, int target, int percent,
@@ -30,5 +34,18 @@ public record NutritionItemDto(NutrientType nutrient, String label, String unit,
         return new NutritionItemDto(nutrient, nutrient.getLabel(), nutrient.getUnit(),
                 rounded, nutrient.getDailyTarget(), nutrient.percentOf(rounded),
                 nutrient.statusOf(rounded), nutrient.isHigherIsWorse());
+    }
+
+    /**
+     * 값을 재지 못한 항목. 막대는 비고 상태어 자리는 비운다.
+     *
+     * <p><b>항목을 배열에서 빼지 않는 이유</b>는 여섯 항목을 늘 함께 내려보내는 것과
+     * 같다 — 날마다 타일 수가 달라지면 화면이 흔들리고, 무엇보다 "이 영양소를 재지
+     * 못했다"는 것 자체가 사용자가 알아야 할 정보다(표준 음식표에 없는 음식을 먹었다).
+     */
+    public static NutritionItemDto unmeasured(NutrientType nutrient) {
+        return new NutritionItemDto(nutrient, nutrient.getLabel(), nutrient.getUnit(),
+                BigDecimal.ZERO.setScale(1, RoundingMode.UNNECESSARY),
+                nutrient.getDailyTarget(), 0, null, nutrient.isHigherIsWorse());
     }
 }

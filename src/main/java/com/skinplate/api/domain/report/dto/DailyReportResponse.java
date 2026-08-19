@@ -18,6 +18,10 @@ import java.util.List;
  * @param dailyScore    그날 기록들의 평균 식단 점수. <b>기록이 없으면 null</b> —
  *                      0 을 내려보내면 화면이 "0점"으로 그린다
  * @param nutrition     기록된 끼니의 영양 합계. 항목 순서는 {@link NutrientType} 선언 순서다
+ * @param skinNutrients 피부 영양 포인트 3종(비타민C·오메가3·아연). 시안이 영양 밸런스와
+ *                      <b>다른 카드</b>로 그리고, 측정 가능 여부도 다르다 — 표준 음식표에
+ *                      매칭된 끼니에서만 값이 나오므로 {@code status} 가 null 일 수 있다.
+ *                      {@link NutritionItemDto} 와 같은 모양이라 앱은 같은 위젯으로 그린다
  * @param concerns      사용자가 고른 고민에 한해서만 채운다. 안 고른 사람은 빈 배열
  * @param meals         히스토리와 같은 모양을 쓴다 — 같은 카드를 두 화면이 그린다
  * @param aiComment     저장된 "오늘의 AI 코멘트". 리포트를 열 때 새로 만들지 않는다
@@ -30,6 +34,7 @@ public record DailyReportResponse(
         SkinLevel grade,
         int recordCount,
         List<NutritionItemDto> nutrition,
+        List<NutritionItemDto> skinNutrients,
         List<ConcernScoreDto> concerns,
         List<PlateHistoryItemDto> meals,
         String aiComment,
@@ -39,6 +44,6 @@ public record DailyReportResponse(
     /** 기록이 하나도 없는 날. 빈 배열과 null 로만 이루어진다. */
     public static DailyReportResponse empty(LocalDate date) {
         return new DailyReportResponse(date, null, null, 0,
-                List.of(), List.of(), List.of(), null, List.of(), List.of());
+                List.of(), List.of(), List.of(), List.of(), null, List.of(), List.of());
     }
 }

@@ -4,7 +4,7 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | v1.9 |
+| 문서 버전 | v1.10 |
 | 기준 문서 | Skin Plate PRD & Technical Design **v1.8** |
 | 범위 | 설정, 마이그레이션, Entity, Enum, Repository, DTO, Rule Engine 골격 (Backend) / DTO, Entity, Repository 인터페이스 (Flutter) |
 | 제외 | Service·Controller 구현체, OpenAI 호출 구현, UI 위젯 |
@@ -6879,17 +6879,17 @@ if (_consecutiveFailures >= 3) {
 | API | 서버 DTO | JSON 키 | 앱 DTO |
 |---|---|---|---|
 | `POST /auth/signup`<br>`POST /auth/login`<br>`POST /auth/test-login` | `AuthResponse` | `accessToken` · `tokenType` · `expiresIn` · `user{userId,email,nickname}` | `AuthResponseDto` |
-| `GET /auth/me`<br>`PATCH /auth/me` | `MeResponse` | `userId` · `email` · `nickname` · **`declaredSkinType`**(미선택 시 키 생략) · `skinConcerns[]` · `sleepPattern` · `stressLevel` · `exerciseHabit` · **`waterIntake`**(습관 4종 모두 미선택 시 키 생략) · **`isTestAccount`** · `joinedAt` | `MeResponseDto` |
-| `POST /skin/analyses`<br>`GET /skin/analyses/latest`<br>`GET /skin/analyses/{id}` | `SkinAnalysisResponse` | `skinAnalysisId` · `skinScore` · `metrics{5}` · **`metricDetails[{key,score,level,evidence[]}]`** · **`skinType{primary,traits[],label}`**(지표에서 도출 — **항상 채워진다**) · **`skinAge{estimatedSkinAge,axes[7],assessment}`**(예전 분석이면 키 생략) · `summary` · `highlights[{label,status}]` · **`skinTypeGap{declared,observed,matched,message}`**(미선택 시 키 생략) · `analyzedAt` | `SkinAnalysisDto` |
-| `POST /plates/analyze` | `PlateAnalysisResponse` | **`analysisToken`** · `skinAnalysisId` · **`skinBasis`**(`TODAY`/`RECENT` — 기준 피부가 오늘(KST) 측정인지) · **`skinMeasuredAt`** · `plateScore` · `baseScore` · `summary` · `food{...}`(**`foodAnalysisId` 없음**) · `feedbacks{good,caution,action}` · `appliedRules[]` — **`plateId`·`createdAt` 없음(저장 전)** | `PlateAnalysisDto` |
-| `POST /plates/records`<br>`GET /plates/{id}` | `SkinPlateResponse` | `plateId` · **`skinAnalysisId`** · **`skinBasis`**(기록 저장일 대비 판정 — 과거 기록을 언제 열어도 불변) · **`skinMeasuredAt`** · `plateScore` · **`baseScore`** · `summary` · `food{...}` · `feedbacks{good,caution,action}` · `appliedRules[]` · **`aiTip`**(생성 실패 시 키 생략) · `createdAt` | `SkinPlateDto` |
+| `GET /auth/me`<br>`PATCH /auth/me` | `MeResponse` | `userId` · `email` · `nickname` · **`declaredSkinType`**(미선택 시 키 생략 · 선택 가능 값 6종 — `DRY` `OILY` `COMBINATION` `SENSITIVE` **`DEHYDRATED_OILY`** `UNKNOWN`) · `skinConcerns[]` · `sleepPattern` · `stressLevel` · `exerciseHabit` · **`waterIntake`**(습관 4종 모두 미선택 시 키 생략) · **`isTestAccount`** · `joinedAt` | `MeResponseDto` |
+| `POST /skin/analyses`<br>`GET /skin/analyses/latest`<br>`GET /skin/analyses/{id}` | `SkinAnalysisResponse` | `skinAnalysisId` · `skinScore` · **`grade`**(=`skinScore` 의 등급 · 앱에 경계표를 두지 않는다) · `metrics{5}` · **`metricDetails[{key,score,level,evidence[]}]`** · **`skinType{primary,traits[],label}`**(지표에서 도출 — **항상 채워진다**) · **`skinAge{estimatedSkinAge,axes[7],assessment}`**(예전 분석이면 키 생략) · `summary` · `highlights[{label,status}]` · **`careFocus[{focus,label}]`**(지표에서 규칙으로 도출 — **예전 분석에도 온다** · 최소 1개) · **`careMessage`**(위 축들의 권고 문단 · **AI 문장이 아니다**) · **`skinTypeGap{declared,observed,matched,message}`**(미선택 시 키 생략) · `analyzedAt` | `SkinAnalysisDto` |
+| `POST /plates/analyze` | `PlateAnalysisResponse` | **`analysisToken`** · `skinAnalysisId` · **`skinBasis`**(`TODAY`/`RECENT` — 기준 피부가 오늘(KST) 측정인지) · **`skinMeasuredAt`** · `plateScore` · **`grade`** · `baseScore` · `summary` · `food{...}`(**`foodAnalysisId` 없음**) · `feedbacks{good,caution,action}` · `appliedRules[]` — **`plateId`·`createdAt` 없음(저장 전)** | `PlateAnalysisDto` |
+| `POST /plates/records`<br>`GET /plates/{id}` | `SkinPlateResponse` | `plateId` · **`skinAnalysisId`** · **`skinBasis`**(기록 저장일 대비 판정 — 과거 기록을 언제 열어도 불변) · **`skinMeasuredAt`** · `plateScore` · **`grade`** · **`baseScore`** · `summary` · `food{...}` · `feedbacks{good,caution,action}` · `appliedRules[]` · **`aiTip`**(생성 실패 시 키 생략) · `createdAt` | `SkinPlateDto` |
 | `DELETE /plates/{id}` | — | 본문 없음(`204`) | 앱이 확인 창 뒤에 부른다 |
 | `POST /plates/{id}/simulate` | `PlateSimulateResponse` | `plateId` · `beforeScore` · `afterScore` · `appliedActions[]` · `removedRules[]` · `summary` | `PlateSimulationDto` |
 | `POST /plates/simulate` | `PlateAnalysisSimulateResponse` | `beforeScore` · `afterScore` · `appliedActions[]` · `removedRules[]` · `summary` — **`plateId` 없음(저장 전, analysisToken 이 대상을 지목)** | `PlateSimulationDto` |
-| `GET /plates?from=&to=` | `PlateHistoryResponse` | `days[{date, skinScore, **plateScore**, **targetScore**, **aiComment**(없으면 키 생략), plates[{plateId, foodName, plateScore, **mealType**, recordedAt}]}]` — **기록 없는 날은 `days[]` 에 항목 자체가 없다** | `PlateHistoryDto` |
+| `GET /plates?from=&to=` | `PlateHistoryResponse` | `days[{date, skinScore, **plateScore**, **grade**, **targetScore**, **aiComment**(없으면 키 생략), plates[{plateId, foodName, plateScore, **grade**, **mealType**, recordedAt, **highlightTags[]**}]}]` — **`highlightTags`** 는 서버가 고른 주요영양 라벨 2~3개(없으면 빈 배열) — **기록 없는 날은 `days[]` 에 항목 자체가 없다** | `PlateHistoryDto` |
 | ~~`GET /reports?period=`~~ | — | **삭제됨(2026-08-17)** — 앱이 `/reports/daily`·`/reports/weekly` 로 옮겨 가 읽는 곳이 없어졌다. `averagePlateScore`(끼니 평균)와 `averageDailyScore`(일 평균의 평균)는 정의가 달라 함께 두면 화면마다 다른 숫자가 뜬다 | — |
-| `GET /reports/daily?date=` | `DailyReportResponse` | `date` · `dailyScore`(기록 없으면 키 생략) · `grade` · `recordCount` · `nutrition[{nutrient,label,unit,amount,target,percent,status,higherIsWorse}]`(**`amount` 는 `portionSize` 환산 후 합계 · UNKNOWN=1.0**) · `concerns[{concern,label,score,status}]` · `meals[{plateId,foodName,plateScore,mealType,recordedAt}]` · `aiComment`(없으면 키 생략) · `goodPoints[]` · `improvePoints[]` — **`date` 생략 시 서버의 오늘(KST)** | `DailyReportDto` → `DailyReport` |
-| `GET /reports/weekly?from=&to=` | `WeeklyReportResponse` | `from` · `to` · `averageDailyScore`(기록 없으면 키 생략) · `grade` · `totalDays` · `recordedDays` · `recordCount` · `dailyScores[{date,dailyScore,grade}]` · `nutrition[]`(일일과 같은 모양 · **기록일 하루 평균**) · `concerns[{…,changeFromFirstDay}]`(기록일 1일이면 키 생략 · **`score`(기간 평균)와 축이 다르다**) · `bestDay` · `worstDay` · `aiComment{goodPoint,improvePoint,habit,nextWeek}`(생성 실패 시 키 생략) — **둘 다 생략 시 오늘 포함 7일 · 기록 없는 날은 `dailyScores[]` 에 없다** | `WeeklyReportDto` → `WeeklyReport` |
+| `GET /reports/daily?date=` | `DailyReportResponse` | `date` · `dailyScore`(기록 없으면 키 생략) · `grade` · `recordCount` · `nutrition[{nutrient,label,unit,amount,target,percent,status,higherIsWorse}]`(**`amount` 는 `portionSize` 환산 후 합계 · UNKNOWN=1.0**) · **`skinNutrients[{nutrient,label,unit,amount,target,percent,status,higherIsWorse}]`**(비타민C·오메가3·아연 — **`status` 키가 없을 수 있다**: 표준 음식표에 매칭된 끼니가 없어 못 잰 것이지 부족이 아니다 · 오메가3는 단위가 `회`) · `concerns[{concern,label,score,status,**message**(없으면 키 생략),**tags[]**}]` · `meals[{plateId,foodName,plateScore,**grade**,mealType,recordedAt,**highlightTags[]**}]` · `aiComment`(없으면 키 생략) · `goodPoints[]` · `improvePoints[]` — **`date` 생략 시 서버의 오늘(KST)** | `DailyReportDto` → `DailyReport` |
+| `GET /reports/weekly?from=&to=` | `WeeklyReportResponse` | `from` · `to` · `averageDailyScore`(기록 없으면 키 생략) · `grade` · `totalDays` · `recordedDays` · `recordCount` · `dailyScores[{date,dailyScore,grade}]` · `nutrition[]`(일일과 같은 모양 · **기록일 하루 평균**) · `concerns[{…,changeFromFirstDay,**tags[]**}]`(기록일 1일이면 `changeFromFirstDay` 키 생략 · **`score`(기간 평균)와 축이 다르다** · **`message` 는 주간에 없다** — 한 끼를 설명하는 문장이 기간 평균 옆에 붙으면 한 주를 설명하는 것으로 읽힌다) · `bestDay{…,**plateIds[]**}` · `worstDay{…,**plateIds[]**}`(**추이 `dailyScores[]` 에는 `plateIds` 키가 없다** — 썸네일을 그리지 않는 자리다) · `aiComment{goodPoint,improvePoint,habit,nextWeek}`(생성 실패 시 키 생략) — **둘 다 생략 시 오늘 포함 7일 · 기록 없는 날은 `dailyScores[]` 에 없다** | `WeeklyReportDto` → `WeeklyReport` |
 | `GET /recommendations` | `RecommendationResponse` | `skinAnalysisId` · `recommend[]` · `avoid[]` · `generatedAt` | `RecommendationDto` |
 | `GET /skin-insights` | `SkinInsightResponse` | `skinAnalysisId` · `summary` · **`changes{hydration,oil,redness,trouble,barrier,skinScore}`**(직전 분석 없으면 키 생략) · `insights[{category,**priority**,title,description}]` · `todayActions[{category,title}]` · `generatedAt` | *(앱 미구현)* |
 
@@ -6919,7 +6919,9 @@ if (_consecutiveFailures >= 3) {
 | 6 | `declaredSkinType` · `skinTypeGap` 이 **없는 것**과 **`UNKNOWN`인 것** | 앱 파서에 기본값을 두지 않는다. `null`이면 선택 칩, 값이 있으면 갭 카드 |
 | 8 | `skinType.primary` 와 `skinTypeGap.observed` | **항상 같은 값이다** — 둘 다 `SkinType.observe(metrics)` 다. 제목 하나로 그리고 타입 칩을 따로 달지 마라. 예전에 AI 관찰값이던 시절의 "갈릴 수 있다" 를 보고 칩을 다시 붙이면 프론트 #40 이 되돌아간다 |
 | 9 | `skinAge` 키가 **없는 것** | 이 기능 이전에 저장된 분석이거나 AI 응답이 쓸 수 없는 경우다. 나이 카드를 통째로 숨긴다 — 빈 값으로 그리지 않는다. **`skinType` 은 여기 해당하지 않는다**(8번 참고) |
-| 10 | `metricDetails[].level` 과 `highlights[].status` | 같은 지표라도 <b>등급은 5단, 뱃지는 3단</b>이라 경계가 정확히 40·60 인 한 점에서 한 칸 어긋난다. 의도된 것이고, 앱은 둘을 각자 그리면 된다 |
+| 10 | `metricDetails[].level` 과 `highlights[].status` | 같은 지표라도 <b>등급은 5단, 뱃지는 3단</b>이라 경계가 정확히 40·60 인 한 점에서 한 칸 어긋난다. 의도된 것이고, 앱은 둘을 각자 그린다. **앱의 지표 상태어는 `level` 하나에서 나온다(2026-08-19)** — 예전에는 앱이 값에서 60/40 으로 다시 잘라 표가 두 벌이었고, 값이 딱 40·60 인 날 서버와 갈렸다 |
+| 11 | 점수를 보내는 응답에는 **등급도 같이 온다** | `grade`(총점) · `metricDetails[].level`(지표) · `concerns[].status`(고민). 앱은 점수에서 등급을 만들지 않는다 — 서버 경계를 옮긴 날 한쪽만 따라가는 것을 막기 위해서다. 등급 키가 없는 옛 응답에서는 **배지만 사라지고** 숫자는 그대로 나온다 |
+| 12 | `skinNutrients[].status` 가 **없는 것**과 `LOW` **인 것** | 없음 = 표준 음식표에 매칭된 끼니가 없어 못 쟀다. 앱은 "알 수 없음"으로 그린다 — 0 을 부족으로 읽으면 안 먹은 것과 못 잰 것이 섞인다. 오메가3만 예외로 빈도(`회`)라 0회에도 `LOW` 가 온다(원본 결측 46% 라 g 으로는 못 잰다) |
 | 7 | `days[].skinScore`(그 날 분석이 없으면 그 날 첫 Plate 채점 당시 점수로 폴백돼 **항상 존재**) | 앱은 history 의 skinScore 를 "그날의 측정"이 아니라 **기준(baseline) 점수**로 라벨링한다. ~~`skinScoreTrend[]` 와의 대조~~ 는 없어졌다 — 그 배열을 내려보내던 `GET /reports?period=` 가 삭제됐다(2026-08-17). 피부 점수 추이를 다시 그려야 하면 새 엔드포인트를 만드는 것이지, 없는 필드를 찾을 일이 아니다 |
 
 ---
@@ -6988,6 +6990,24 @@ npx wrangler pages deploy build/web --project-name=skinplate
 ---
 
 ## 부록. 리뷰 반영 이력
+
+### v1.10 (2026-08-19 · 확정 시안 계약 — 새 컬럼 없이 저장된 데이터에서 낸다)
+
+Figma 최종 시안이 요구하는 값 7종을 계약에 올렸다. **마이그레이션이 하나도 없다** — 전부 이미 저장된
+데이터(표준 음식 매칭·재료 태그·룰 이유·기록 id·지표)에서 서버가 낸다. 그래서 예전에 저장된 기록도
+같은 응답을 받는다.
+
+| 항목 | 변경 |
+|---|---|
+| **`NutrientType.Group` + SKIN 3종** | `VITAMIN_C`(mg·100) · `OMEGA3`(**회**·1) · `ZINC`(mg·10) 를 `skinNutrients[]` 로 내려보낸다. 주간 `nutrition[]` 은 `of(MACRO)` 만 돈다 — `values()` 로 두면 6칸 표에 9칸이 들어간다. **오메가3는 g 이 아니라 빈도다**: 원본 결측 46% 라 g 으로 재면 "없어서 못 걸림"과 "적어서 부족"이 구분되지 않는다 |
+| **`NutritionItemDto.unmeasured`** | 표준표에 매칭된 끼니가 없으면 `status` 를 **비운다**(키 생략). 0 을 `LOW` 로 두면 화면이 "아연 부족"이라고 단정하는데, 실제로는 잰 적이 없다 |
+| **`ConcernScoreDto.message` · `tags[]`** | 그 고민에 가장 크게 걸린 룰의 **저장된 이유 문장**(V8 `feedback.reason`)과 짧은 라벨 2개. 앱이 문장을 조합하지 않는다. 주간에는 `message` 를 싣지 않는다 |
+| **`FoodHighlightTags` [신설]** | 히스토리·리포트 끼니 카드의 "주요영양" 칩. **기존 `Nutrition` 임계값과 `IngredientTag` 만으로 고른다** — 새 임계값을 만들면 룰과 두 벌이 된다. 부담(나트륨·당류·포화지방·열량) 먼저, 최대 3개 |
+| **`DailyScoreDto.plateIds[]`** | BEST/WORST 카드의 썸네일. 앱은 이 id 로 로컬 사진(`plates/{id}.jpg`)을 찾는다(PRD §9.6). **추이 그래프 칸에는 싣지 않는다** — 그 자리에 사진이 없다 |
+| **`SkinCareFocus` · `SkinCareGuide` [신설]** | "지금 피부가 필요로 하는 관리" 축과 문단. **지표를 실제로 움직이는 룰 게이트와 같은 조건**을 쓴다(`isDry`·`hasRedness`…). 걸리는 축이 없으면 `BALANCE` 하나다. `summary`(AI 관찰)와 다른 것을 말하므로 별도 필드이고, 새 엔드포인트를 만들지 않았다 |
+| **`SkinType.DEHYDRATED_OILY`("수부지")** | **선언 전용 타입**이다(`SENSITIVE` 와 같은 부류). 지표로 관찰하는 값이 아니라 이미 `SkinTrait.DEHYDRATED` 가 같은 상태를 말하므로, AI 스키마·프롬프트·마이그레이션은 건드리지 않았다. 갭 분석이 `isDeclaredOnly()` 로 갈라 문장을 만든다 |
+| **`KoreanParticle` [신설]** | 갭 문장의 조사. "민감성라고"·"수부지이라고" 를 막는다 — 종성 유무로 `이라고`/`라고` 를 고른다 |
+| **`grade` 를 점수 옆에 같이 싣는다** | `PlateAnalysisResponse` · `SkinPlateResponse` · `PlateHistoryDayDto` · `PlateHistoryItemDto` · `SkinAnalysisResponse`. 앱에 있던 경계표(20/40/60/80)를 지우기 위한 것이다 — 표가 두 벌이면 서버가 경계를 옮긴 날 한쪽만 따라간다 |
 
 ### v1.9 (2026-08-15 · 개인화 피부 인사이트 — PRD v1.8 대응)
 

@@ -1,5 +1,7 @@
 package com.skinplate.api.domain.plate.dto;
 
+import com.skinplate.api.domain.skin.entity.SkinLevel;
+
 import java.time.LocalDate;
 import java.util.List;
 
@@ -15,6 +17,18 @@ import java.util.List;
  *                        null 이면 non_null 직렬화로 키가 빠지고 앱은 카드를 숨긴다
  */
 public record PlateHistoryDayDto(LocalDate date, Integer skinScore,
-                                 int plateScore, int targetScore,
+                                 int plateScore, SkinLevel grade, int targetScore,
                                  String aiComment,
-                                 List<PlateHistoryItemDto> plates) {}
+                                 List<PlateHistoryItemDto> plates) {
+
+    /**
+     * {@code plateScore} 의 등급을 함께 싣는다 — 앱이 점수에서 등급을 다시 내면
+     * 경계표가 두 벌이 되고, 서버가 경계를 옮긴 날 한쪽만 따라간다.
+     */
+    public static PlateHistoryDayDto of(LocalDate date, Integer skinScore, int plateScore,
+                                        int targetScore, String aiComment,
+                                        List<PlateHistoryItemDto> plates) {
+        return new PlateHistoryDayDto(date, skinScore, plateScore, SkinLevel.of(plateScore),
+                targetScore, aiComment, plates);
+    }
+}

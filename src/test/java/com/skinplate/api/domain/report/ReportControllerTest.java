@@ -60,7 +60,8 @@ class ReportControllerTest {
     void dailyWithDate() throws Exception {
         given(dailyReportService.get(eq(1L), eq(LocalDate.of(2026, 8, 12))))
                 .willReturn(new DailyReportResponse(LocalDate.of(2026, 8, 12), 72, SkinLevel.GOOD,
-                        3, List.of(), List.of(), List.of(), "좋은 하루였어요", List.of(), List.of()));
+                        3, List.of(), List.of(), List.of(), List.of(),
+                        "좋은 하루였어요", List.of(), List.of()));
 
         mockMvc.perform(get("/api/v1/reports/daily").param("date", "2026-08-12"))
                 .andExpect(status().isOk())

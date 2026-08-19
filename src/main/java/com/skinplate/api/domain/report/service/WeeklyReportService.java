@@ -45,6 +45,9 @@ import java.util.stream.Stream;
 @RequiredArgsConstructor
 public class WeeklyReportService {
 
+    /** 고민 카드 하나에 붙는 태그 수. 일일과 같은 값이어야 카드 모양이 갈리지 않는다. */
+    private static final int CONCERN_TAG_COUNT = 2;
+
     /** 기본 조회 폭. 오늘을 포함한 7일이다(리포트 토글의 "이번 주"와 같은 정의). */
     private static final int DEFAULT_DAYS = 7;
 
@@ -129,8 +132,26 @@ public class WeeklyReportService {
                 dailyScores,
                 nutrition(days),
                 concerns(days),
-                bestDay(dailyScores), worstDay(dailyScores),
+                withPlateIds(bestDay(dailyScores), days),
+                withPlateIds(worstDay(dailyScores), days),
                 null);
+    }
+
+    /**
+     * BEST/WORST 카드에 그날 기록의 id 를 얹는다. 시안이 그 두 카드에만 썸네일을 그린다.
+     *
+     * <p>이미 조회해 둔 하루치({@code days})에서 꺼낸다 — 날짜로 다시 조회하면 쿼리가
+     * 두 번 늘고, 그 사이에 저장된 기록이 그래프에는 없고 썸네일에만 있는 상태가 된다.
+     */
+    private static DailyScoreDto withPlateIds(DailyScoreDto day,
+                                              List<DailyReportResponse> days) {
+        return day.withPlateIds(days.stream()
+                .filter(candidate -> candidate.date().equals(day.date()))
+                .findFirst()
+                .map(candidate -> candidate.meals().stream()
+                        .map(PlateHistoryItemDto::plateId)
+                        .toList())
+                .orElse(List.of()));
     }
 
     /**
@@ -155,9 +176,14 @@ public class WeeklyReportService {
     /**
      * 기록이 있는 날의 <b>하루 평균</b>이다. 주간 합계가 아니다 — 항목마다 하루 기준값이
      * 붙어 있어서, 합계를 넣으면 5일치 나트륨이 기준의 500% 로 뜬다.
+     *
+     * <p><b>MACRO 여섯 개만 돈다.</b> {@code values()} 로 돌면 피부 영양 포인트 3종이
+     * 함께 섞이는데, 그 값들은 일일 응답의 {@code skinNutrients} 에 있고 이 메서드가
+     * 보는 {@code nutrition} 배열에는 없다 — 전부 0 인 항목 세 개가 "부족"으로 붙는다.
+     * 주간 시안에는 피부 영양 포인트 카드가 없어 집계도 하지 않는다.
      */
     private static List<NutritionItemDto> nutrition(List<DailyReportResponse> days) {
-        return Arrays.stream(NutrientType.values())
+        return NutrientType.of(NutrientType.Group.MACRO).stream()
                 .map(type -> NutritionItemDto.of(type, average(days.stream()
                         .map(day -> amountOf(day, type))
                         .toList())))
@@ -204,9 +230,26 @@ public class WeeklyReportService {
                     Integer changeFromFirstDay = days.size() < 2 ? null
                             : scoreOf(last, base.concern()) - base.score();
 
-                    return ConcernScoreDto.of(base.concern(), average, changeFromFirstDay);
+                    // 태그는 기간 전체에서 자주 나온 것을 모은다. **문장(message)은 싣지
+                    // 않는다** — 룰의 이유 문장은 한 끼를 설명하는 말이라, 기간 평균 점수
+                    // 옆에 그날 하루의 문장을 붙이면 그 문장이 한 주를 설명하는 것처럼
+                    // 읽힌다. 한 주를 설명하는 문장은 aiComment 가 따로 맡는다.
+                    return ConcernScoreDto.of(base.concern(), average, changeFromFirstDay,
+                            null, periodTags(days, base.concern()));
                 })
                 .toList();
+    }
+
+    /**
+     * 기간 안에서 그 고민에 가장 자주 붙은 태그. 일일이 이미 골라 둔 것을 다시 센다 —
+     * 원본 피드백을 여기서 또 훑으면 "어느 룰이 어느 고민인가"가 두 곳에 생긴다.
+     */
+    private static List<String> periodTags(List<DailyReportResponse> days, SkinConcern concern) {
+        return DailyReportAssembler.topCounts(days.stream()
+                        .flatMap(day -> day.concerns().stream())
+                        .filter(item -> item.concern() == concern)
+                        .flatMap(item -> item.tags().stream()),
+                CONCERN_TAG_COUNT).stream().map(Map.Entry::getKey).toList();
     }
 
     private static int scoreOf(List<ConcernScoreDto> concerns, SkinConcern concern) {
