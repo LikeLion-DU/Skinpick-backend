@@ -3358,9 +3358,19 @@ public record ScoredItemDto(String key, int score, SkinLevel level, List<String>
      */
     public static ScoredItemDto of(String key, int score, boolean higherIsWorse,
                                    List<String> evidence, int maxEvidence) {
-        int clamped = Math.max(0, Math.min(100, score));
-        int aligned = higherIsWorse ? 100 - clamped : clamped;
-        return new ScoredItemDto(key, clamped, SkinLevel.of(aligned), trim(evidence, maxEvidence));
+
+        int aligned = higherIsWorse ? 100 - score : score;
+
+        return new ScoredItemDto(key, score, SkinLevel.of(aligned), trim(evidence, maxEvidence));
+    }
+
+    /**
+     * 0~100 밖이면 못 믿는 값이라는 뜻이다. <b>clamp 로 살리지 않는다</b> — {@code score}
+     * 키가 빠진 응답은 Jackson 이 0 으로 채우는데, 그걸 깎아 두면 "피부결 0점 · SEVERE"
+     * 라는 없는 등급이 화면에 그려진다. 부르는 쪽이 이 값으로 거른다.
+     */
+    public static boolean isUsableScore(int score) {
+        return score >= 0 && score <= 100;
     }
 }
 ```
@@ -7185,6 +7195,36 @@ npx wrangler pages deploy build/web --project-name=skinplate
 ```
 
 > **`android/app/src/main/res/xml/network_security_config.xml`을 Day 2에 넣어라.** 로컬 개발은 HTTP이고 Flutter 디버그 매니페스트는 cleartext를 켜주지 않는다. 빠뜨리면 Day 3 첫 API 호출이 막히고, 그때는 서버를 뒤지게 된다(PRD §9.6).
+
+---
+
+## 후속 계약 개선 후보 (지금은 하지 않는다)
+
+### `ScoredItemDto.higherIsWorse` — 지표 방향을 서버가 내려보내기 (2026-08-19 검토, **보류**)
+
+**중복은 실재한다.** 피부 5지표의 방향(높을수록 좋은가)이 두 저장소에 각각 있다:
+
+| 어디 | 무엇 | 쓰임 |
+|---|---|---|
+| 서버 `SkinAnalysisService:207-211` | `ScoredItemDto.of(..., higherIsWorse, ...)` 에 리터럴 5개 | **점수 정렬에만** 쓰고 버린다(`aligned = 100 - score`). 응답에 안 실린다 |
+| 앱 `skin_analysis.dart` `toBars()` | 같은 5개를 `higherIsBetter` 로 | **어휘 선택에만** 쓴다 — 수분이 낮으면 "부족", 홍조가 높으면 "주의" |
+
+리포트 쪽은 이미 서버가 내려보내는 구조다(`NutritionItemDto.higherIsWorse` → 앱 `NutrientStatus.label(higherIsWorse:)`). 그래서 "피부 지표만 앱이 방향을 안다"는 지적 자체는 사실이다.
+
+**그런데도 지금 추가하지 않는다.** 이유는 셋이다.
+
+1. **중복이 잘 안 없어진다.** 필드를 더해도 앱은 값이 없을 때(앱이 서버보다 먼저 나간 순간)를 위해 널 분기가 필요하고, 이 앱에서 그 분기의 자연스러운 구현이 지금 표다 — 상태어를 안 그리는 쪽을 택하면 그건 화면 후퇴다. 그러면 **표는 남고 계약 필드만 하나 늘어** 움직이는 부품이 많아진다.
+   <br>다만 이건 절대적이지 않다: 이 값은 키별 리터럴이라 **서버를 먼저 배포하면 모든 응답에 항상 실리고**(옛 분석도 조회할 때 `metricDetails` 를 다시 만든다), 배포 대상이 VM 하나에 `deploy.sh` 도 우리 손에 있어 그 창은 닫을 수 있다. 그때는 표를 지우고 널 분기를 실제로는 안 밟는 방어 코드로 남길 수 있다. 그래도 **아래 2·3 만으로 보류 결론은 그대로**다.
+2. **드리프트 위험이 닫혀 있다.** 5개 키는 AI 스키마가 고정한다 — 지표를 늘리려면 스키마·프롬프트를 고쳐야 하고, 그건 이 릴리스에서 금지된 변경이다. 지표가 안 늘어나는 동안 두 표가 갈릴 길이 없다.
+3. **사용자에게 보이는 것이 하나도 안 바뀐다.** 계약을 늘리는 변경은 그만한 이유가 있어야 한다.
+
+**다시 볼 조건** — 아래 중 하나라도 생기면 그때는 넣는 편이 맞다.
+
+- 피부 지표가 6개 이상이 된다(= AI 스키마가 바뀐다). 그 순간 앱 표가 조용히 낡는다.
+- 지표별 방향이 사용자 설정이나 지표 정의 변경으로 **바뀔 수 있게** 된다.
+- 앱이 상태어를 서버 문자열로 받게 되어 방향 자체가 앱에 필요 없어진다(그때는 필드가 아니라 문자열이 답이다).
+
+넣게 되면 모양은 리포트와 같다 — `ScoredItemDto` 에 `boolean higherIsWorse` 를 더하고, **판정은 그대로 서버가** 한다(앱은 `value > threshold` 같은 계산을 하지 않는다). 기존 `level`·`grade` 를 대체하지 않는 **추가** 필드이므로 옛 응답과도 호환된다.
 
 ---
 
