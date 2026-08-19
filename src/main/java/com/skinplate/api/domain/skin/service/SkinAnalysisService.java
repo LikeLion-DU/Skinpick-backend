@@ -87,6 +87,7 @@ public class SkinAnalysisService {
     private final VisionClient visionClient;
     private final SkinScoreCalculator scoreCalculator;
     private final SkinHighlightBuilder highlightBuilder;
+    private final SkinCareGuide careGuide;
     private final SkinTypeGapAnalyzer skinTypeGapAnalyzer;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transactionTemplate;
@@ -171,6 +172,8 @@ public class SkinAnalysisService {
                 skinType(metrics, detail),
                 skinAge(detail),
                 highlightBuilder.build(metrics),
+                careGuide.focus(metrics),
+                careGuide.message(metrics),
                 skinTypeGapAnalyzer.analyze(analysis.getUser().getDeclaredSkinType(), metrics));
     }
 

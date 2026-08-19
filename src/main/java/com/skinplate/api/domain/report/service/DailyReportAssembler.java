@@ -1,6 +1,10 @@
 package com.skinplate.api.domain.report.service;
 
+import com.skinplate.api.domain.food.entity.FoodAnalysis;
+import com.skinplate.api.domain.food.entity.IngredientTag;
 import com.skinplate.api.domain.food.entity.Nutrition;
+import com.skinplate.api.domain.food.service.StandardFood;
+import com.skinplate.api.domain.food.service.StandardFoodTable;
 import com.skinplate.api.domain.plate.dto.PlateHistoryItemDto;
 import com.skinplate.api.domain.plate.engine.RuleConstants;
 import com.skinplate.api.domain.plate.entity.FeedbackType;
@@ -36,6 +40,9 @@ public final class DailyReportAssembler {
     /** 화면이 감당하는 줄 수. 늘리면 반복되는 문구가 목록으로 보이기 시작한다. */
     private static final int TOP_MESSAGE_COUNT = 3;
 
+    /** 고민 카드 하나에 붙는 태그 수. 시안이 카드마다 두 개를 그린다. */
+    private static final int CONCERN_TAG_COUNT = 2;
+
     public static DailyReportResponse of(LocalDate date, List<SkinPlate> plates,
                                          Set<SkinConcern> concerns) {
         if (plates.isEmpty()) return DailyReportResponse.empty(date);
@@ -55,6 +62,7 @@ public final class DailyReportAssembler {
                 SkinLevel.of(dailyScore),
                 sorted.size(),
                 nutrition(sorted),
+                skinNutrients(sorted),
                 concerns(sorted, concerns),
                 sorted.stream().map(PlateHistoryItemDto::from).toList(),
                 dailyComment(sorted),
@@ -123,6 +131,92 @@ public final class DailyReportAssembler {
     }
 
     /**
+     * 피부 영양 포인트 3종. 시안이 영양 밸런스와 다른 카드로 그리는 묶음이다.
+     *
+     * <p><b>측정 여부를 영양소마다 따로 본다.</b> "표준 음식표에 매칭됐다"는 그 음식의
+     * <b>행이 있다</b>는 뜻이지 <b>그 행에 이 영양소가 있다</b>는 뜻이 아니다. 원본
+     * (전국통합식품영양성분정보)에서 요리 계열 4,268행 기준 비타민C 는 8%, 아연은 29%가
+     * <b>빈칸</b>이고, 그 빈칸은 값 0 과 별개로 존재한다(비타민C 는 실제 0 인 행도 398개다).
+     *
+     * <p><b>그래서 DB 값 0 을 미측정 신호로 쓰지 않는다.</b> {@code food_analysis} 의
+     * 다섯 컬럼은 {@code NOT NULL DEFAULT 0}(V9)이라 "원본이 0" 과 "원본이 빈칸"이 같은
+     * 0 으로 합쳐져 있다 — 그 자리에서는 둘을 가를 수 없다. 대신 매칭 때 저장해 둔
+     * {@code standardFoodName} 으로 표준표를 되짚는다. 표준 JSON 은 빈칸을 <b>키 없음</b>
+     * 으로 남기고({@code build_standard_food.py} 가 "0 으로 채우면 거짓"이라 그렇게 만든다)
+     * {@link StandardFoodTable} 이 그것을 {@code null} 로 싣기 때문에, 구분이 그대로 살아 있다.
+     *
+     * <p>잰 끼니가 하나도 없는 영양소는 {@code unmeasured} 다 — {@code status} 키가 빠지고
+     * 앱이 "알 수 없음"으로 그린다. 항목 자체는 배열에서 빼지 않는다(타일 수가 흔들린다).
+     * 이 구분이 없으면 화면이 "비타민C 부족"이라고 <b>단정</b>하는데, V9 가 그 0 을
+     * "없다"가 아니라 <b>"모른다"</b>로 정의해 두었다.
+     *
+     * <p><b>룰 엔진은 그대로다.</b> R06·R11·R15 는 0 을 "발동 안 함"으로 쓰고 그 의미는
+     * 바뀌지 않았다 — 여기만 0 을 <b>양</b>으로 읽는 유일한 소비자라서 따로 가른다.
+     *
+     * <p>오메가3만 셈이 다르다 — 양이 아니라 <b>OMEGA3 태그가 붙은 끼니 수</b>다.
+     * 이유는 {@link NutrientType#OMEGA3} 에 적었다. 태그는 매칭 여부와 무관하게 실제
+     * 관찰값이라 매칭된 끼니가 없어도 셀 수 있다.
+     *
+     * <p><b>남은 한계 — 부분 측정.</b> 세 끼 중 한 끼만 잰 날은 그 한 끼의 합계를 하루
+     * 합계처럼 그린다. 계약에 "몇 끼를 쟀는가"를 실을 자리가 없어서인데, 이건 과소 표시라
+     * "못 잰 것을 부족이라 단정"하는 것과 성격이 다르다. 후속 이슈로 둔다.
+     */
+    private static List<NutritionItemDto> skinNutrients(List<SkinPlate> plates) {
+        BigDecimal vitaminC = BigDecimal.ZERO;
+        BigDecimal zinc     = BigDecimal.ZERO;
+        int vitaminCMeals   = 0;
+        int zincMeals       = 0;
+        int omega3Meals     = 0;
+
+        for (SkinPlate plate : plates) {
+            FoodAnalysis food = plate.getFoodAnalysis();
+
+            if (hasOmega3(food)) omega3Meals++;
+
+            if (!food.isStandardMatched()) continue;
+
+            // 매칭된 표준 음식 행을 되짚는다. 저장된 이름은 표준표의 정식 이름이라
+            // (FoodAnalysisService 가 matched.name() 을 넣는다) 완전 일치로 걸린다.
+            // find() 가 아니라 findExact() 다 — 저쪽은 못 찾으면 낱말을 잘라 근사값을 내므로,
+            // 표를 다시 만들며 이름이 사라진 날 "김치찌개_참치" 가 "참치" 행의 결측 여부를
+            // 물려받는다. 여기서는 모르는 것을 모르는 채로 둔다.
+            StandardFood standard =
+                    StandardFoodTable.findExact(food.getStandardFoodName()).orElse(null);
+            if (standard == null) continue;
+
+            BigDecimal portion = food.getTraits().getPortionSize().getFactor();
+
+            if (standard.vitaminCMg() != null) {
+                vitaminCMeals++;
+                vitaminC = vitaminC.add(food.getNutrition().getVitaminCMg().multiply(portion));
+            }
+            if (standard.zincMg() != null) {
+                zincMeals++;
+                zinc = zinc.add(food.getNutrition().getZincMg().multiply(portion));
+            }
+        }
+
+        return List.of(
+                itemOrUnmeasured(NutrientType.VITAMIN_C, vitaminCMeals, vitaminC),
+                NutritionItemDto.of(NutrientType.OMEGA3, BigDecimal.valueOf(omega3Meals)),
+                itemOrUnmeasured(NutrientType.ZINC, zincMeals, zinc));
+    }
+
+    /** 그 영양소를 잰 끼니가 하나도 없으면 {@code status} 를 비운다(키 생략). */
+    private static NutritionItemDto itemOrUnmeasured(NutrientType type, int measuredMeals,
+                                                     BigDecimal amount) {
+        return measuredMeals == 0
+                ? NutritionItemDto.unmeasured(type)
+                : NutritionItemDto.of(type, amount);
+    }
+
+    /** 재료 태그에 OMEGA3 가 있는가. 표준표에서 온 태그든 AI 태그든 실제 관찰값이다. */
+    private static boolean hasOmega3(FoodAnalysis food) {
+        return food.getIngredients().stream()
+                .anyMatch(ingredient -> ingredient.getTag() == IngredientTag.OMEGA3);
+    }
+
+    /**
      * 고민별 점수. 끼니마다 "기준선 + 그 고민에 걸린 룰의 델타"를 내고 평균한다.
      *
      * <p>델타를 하루치로 한 번에 더하지 않는다. 그러면 같은 식단이라도 세 끼를 기록한
@@ -132,8 +226,61 @@ public final class DailyReportAssembler {
     private static List<ConcernScoreDto> concerns(List<SkinPlate> plates,
                                                   Set<SkinConcern> concerns) {
         return ConcernRules.scorable(concerns).stream()
-                .map(concern -> ConcernScoreDto.of(concern, concernScore(plates, concern), null))
+                .map(concern -> ConcernScoreDto.of(concern, concernScore(plates, concern), null,
+                        concernMessage(plates, concern), concernTags(plates, concern)))
                 .toList();
+    }
+
+    /**
+     * 그 고민에 관해 <b>가장 크게 움직인 룰의 이유 문장</b>. 없으면 null 이라 키가 빠진다.
+     *
+     * <p><b>새 문장을 쓰지 않는다.</b> 룰이 판정할 때 만들어 저장해 둔 {@code reason} 을
+     * 그대로 고른다(V8). 그래서 고민 카드의 문장과 음식 결과 화면의 문장이 같은 말을
+     * 하고, AI 를 부르지 않으므로 같은 기록은 언제 열어도 같은 문장이다.
+     *
+     * <p>고르는 기준은 |{@code scoreDelta}| 다 — 그 고민의 점수를 실제로 가장 많이
+     * 움직인 항목이 설명으로도 맞다. 동점이면 문구 사전순으로 고정한다(같은 날을
+     * 두 번 열었을 때 문장이 바뀌지 않아야 한다).
+     *
+     * <p>V8 이전 기록은 {@code reason} 이 없다. 그때는 null 이고, 화면은 태그만 그린다.
+     */
+    private static String concernMessage(List<SkinPlate> plates, SkinConcern concern) {
+        return relatedFeedbacks(plates, concern)
+                .filter(feedback -> feedback.getReason() != null
+                        && !feedback.getReason().isBlank())
+                .max(Comparator.comparingInt((SkinPlateFeedback feedback) ->
+                                Math.abs(feedback.getScoreDelta()))
+                        .thenComparing(Comparator.comparing(SkinPlateFeedback::getReason).reversed()))
+                .map(SkinPlateFeedback::getReason)
+                .orElse(null);
+    }
+
+    /**
+     * 그 고민에 걸린 룰의 짧은 라벨들. 시안의 해시태그 칩 자리다.
+     *
+     * <p>{@code message} 와 같은 출처(저장된 피드백)를 쓰되 {@code message} 필드를 본다 —
+     * 룰이 돌려주는 짧은 리터럴("나트륨 과다" · "단백질 충분")이라 칩에 그대로 들어간다.
+     * 빈도순으로 두 개까지다(시안이 카드마다 두 개를 그린다).
+     */
+    private static List<String> concernTags(List<SkinPlate> plates, SkinConcern concern) {
+        return topCounts(relatedFeedbacks(plates, concern).map(SkinPlateFeedback::getMessage),
+                CONCERN_TAG_COUNT).stream().map(Map.Entry::getKey).toList();
+    }
+
+    /**
+     * 그 고민의 룰 코드에 해당하는 피드백만. {@code concernScore} 와 <b>같은 필터</b>를
+     * 쓴다 — 점수를 만든 근거와 화면에 적히는 근거가 갈리면 카드가 자기 숫자를 설명하지
+     * 못한다. ACTION 행과 rule_code 가 NULL 인 행을 거르는 이유도 그쪽과 같다.
+     */
+    private static Stream<SkinPlateFeedback> relatedFeedbacks(List<SkinPlate> plates,
+                                                              SkinConcern concern) {
+        Set<String> ruleCodes = ConcernRules.of(concern);
+
+        return plates.stream()
+                .flatMap(plate -> plate.getFeedbacks().stream())
+                .filter(feedback -> feedback.getType() != FeedbackType.ACTION)
+                .filter(feedback -> feedback.getRuleCode() != null)
+                .filter(feedback -> ruleCodes.contains(feedback.getRuleCode()));
     }
 
     private static int concernScore(List<SkinPlate> plates, SkinConcern concern) {

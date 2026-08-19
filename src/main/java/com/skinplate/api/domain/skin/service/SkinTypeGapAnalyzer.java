@@ -3,6 +3,7 @@ package com.skinplate.api.domain.skin.service;
 import com.skinplate.api.domain.skin.dto.SkinTypeGapDto;
 import com.skinplate.api.domain.skin.entity.SkinMetrics;
 import com.skinplate.api.domain.user.entity.SkinType;
+import com.skinplate.api.global.common.KoreanParticle;
 import org.springframework.stereotype.Component;
 
 import java.util.Map;
@@ -49,16 +50,13 @@ public class SkinTypeGapAnalyzer {
                     "오늘 측정 기준으로는 " + observed.getLabel() + "에 가깝습니다.");
         }
 
-        // SENSITIVE 는 observe() 가 낼 수 없는 값이다 — 붉은기는 타입이 아니라 오늘의 상태로 본다.
-        // 이 분기가 없으면 민감성을 고른 사용자는 무슨 사진을 찍든 영영 "일치하지 않음"이고,
-        // 붉은기가 실제로 관찰된 날조차 그 사실이 갭 카드에 한 글자도 안 나온다.
-        if (declared == SkinType.SENSITIVE) {
-            String state = metrics.hasRedness()
-                    ? "오늘도 붉은기가 관찰됩니다"
-                    : "오늘은 자극이 적은 안정된 상태입니다";
+        // SENSITIVE·DEHYDRATED_OILY 는 observe() 가 낼 수 없는 값이다 — 붉은기도 수부지도
+        // 타입이 아니라 오늘의 상태로 본다. 이 분기가 없으면 그 둘을 고른 사용자는 무슨
+        // 사진을 찍든 영영 "일치하지 않음"이고, 그 상태가 실제로 관찰된 날조차 그 사실이
+        // 갭 카드에 한 글자도 안 나온다.
+        if (declared.isDeclaredOnly()) {
             return new SkinTypeGapDto(declared, observed, false,
-                    "민감성이라고 하셨는데 " + state + ". "
-                            + "수분과 유분 기준으로는 " + observed.getLabel() + "에 가깝습니다.");
+                    declaredOnlyMessage(declared, observed, metrics));
         }
 
         if (declared == observed) {
@@ -67,10 +65,37 @@ public class SkinTypeGapAnalyzer {
         }
 
         String message = SPECIAL.getOrDefault(key(declared, observed),
-                "평소 " + declared.getLabel() + "이라고 생각하셨지만, "
+                // 조사를 붙박이로 두면 '수부지' 같은 모음 종결 라벨에서 "수부지이라고" 가 된다.
+                "평소 " + KoreanParticle.iRago(declared.getLabel()) + " 생각하셨지만, "
                         + "오늘 측정은 " + observed.getLabel() + "에 가깝습니다.");
 
         return new SkinTypeGapDto(declared, observed, false, message);
+    }
+
+    /**
+     * 자가 신고 전용 상태(민감성·수부지)를 고른 사용자용 문구.
+     *
+     * <p>{@code matched} 는 항상 false 다 — 관찰 타입과 같은 축이 아니라서 "일치"라고
+     * 말할 대상이 없다. 대신 <b>그 상태가 오늘 관찰됐는지</b>를 문장으로 말한다.
+     * 판정은 {@link SkinMetrics} 를 그대로 쓴다(수부지는 {@code SkinTrait.DEHYDRATED} 와
+     * 같은 조건이다 — 건조하면서 유분이 올라와 있는 상태).
+     */
+    private static String declaredOnlyMessage(SkinType declared, SkinType observed,
+                                              SkinMetrics metrics) {
+        String state = switch (declared) {
+            case SENSITIVE -> metrics.hasRedness()
+                    ? "오늘도 붉은기가 관찰됩니다"
+                    : "오늘은 자극이 적은 안정된 상태입니다";
+            // SkinTrait.DEHYDRATED 와 같은 조건이다. 두 곳이 갈리면 갭 카드가 "수부지가
+            // 아니다"라고 하는 날 타입 라벨에는 "(수부지)"가 붙는다.
+            case DEHYDRATED_OILY -> metrics.isDry() && metrics.isOilElevated()
+                    ? "오늘도 수분이 부족한데 유분은 올라와 있습니다"
+                    : "오늘은 수분과 유분이 그만큼 벌어져 있지 않습니다";
+            default -> throw new IllegalStateException("자가 신고 전용이 아닌 타입: " + declared);
+        };
+
+        return KoreanParticle.iRago(declared.getLabel()) + " 하셨는데 " + state + ". "
+                + "수분과 유분 기준으로는 " + observed.getLabel() + "에 가깝습니다.";
     }
 
     private static String key(SkinType declared, SkinType observed) {

@@ -185,6 +185,21 @@ public final class StandardFoodTable {
     }
 
     /**
+     * <b>완전 일치만</b> 본다. 접미사 fallback 이 없다.
+     *
+     * <p>{@link #find} 는 AI 가 답한 자유 문장에서 음식을 <b>찾아내는</b> 것이 일이라
+     * 못 찾으면 낱말을 잘라 가며 근사값을 낸다. 반대로 이 메서드는 이미
+     * {@code standardFoodName} 으로 <b>저장해 둔 정식 이름</b>을 되짚는 자리다 —
+     * 그 이름이 표에 없다면 표를 다시 만들면서 사라진 것이고, 그때 근사값을 주면
+     * "김치찌개_참치" 가 "참치" 행의 결측 여부를 물려받는다. 모르는 것은 모르는 채로
+     * 두는 편이 낫다.
+     */
+    public static Optional<StandardFood> findExact(String standardFoodName) {
+        if (standardFoodName == null || standardFoodName.isBlank()) return Optional.empty();
+        return Optional.ofNullable(TABLE.get(standardFoodName.trim()));
+    }
+
+    /**
      * 2단계 조회. 정확한 이름이 먼저다.
      *
      * <pre>

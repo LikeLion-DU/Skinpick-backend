@@ -63,7 +63,7 @@ public class PlateHistoryService {
                 // DESC 정렬의 마지막 = 그날 첫 기록. get(0) 으로 "고치면" 최신 기록이 돼 버린다.
                 sorted.get(sorted.size() - 1).getSkinAnalysis().getSkinScore());
 
-        return new PlateHistoryDayDto(date, skinScore, averagePlateScore(sorted), TARGET_SCORE,
+        return PlateHistoryDayDto.of(date, skinScore, averagePlateScore(sorted), TARGET_SCORE,
                 dailyComment(sorted),
                 sorted.stream().map(PlateHistoryItemDto::from).toList());
     }

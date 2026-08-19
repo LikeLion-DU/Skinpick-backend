@@ -5,8 +5,8 @@
 
 | 항목 | 내용 |
 |---|---|
-| 문서 버전 | v1.10 |
-| 작성일 | 2026-08-07 · **v1.10 개정 2026-08-18** (가비아 VM 실배포 완료 — 배포 URL·검증 결과 반영) · v1.9 개정 2026-08-17 (일일 리포트 신규 · 주간 리포트를 일일 집계로 개편) |
+| 문서 버전 | v1.11 |
+| 작성일 | 2026-08-07 · **v1.11 개정 2026-08-19** (확정 시안 계약 동기화 — `grade`·`careFocus`·`careMessage`·`skinNutrients`·`highlightTags`·`plateIds`·`DEHYDRATED_OILY`) · v1.10 개정 2026-08-18 (가비아 VM 실배포 완료) · v1.9 개정 2026-08-17 (일일 리포트 신규 · 주간 리포트를 일일 집계로 개편) |
 | 문서 범위 | 제품 요구사항(PRD) + 기술 설계(Architecture / API / DB / Rule Engine) |
 | 개발 기간 | **2026-08-08 ~ 08-21** · GitHub 업로드 마감 **08-21** · 발표 **08-25** |
 | 대상 플랫폼 | **Android (Flutter) → iOS → Web (Flutter Web)** — 이 순서로 개발한다 (v1.7 §9.6) |
@@ -969,7 +969,7 @@ npx wrangler pages deploy build/web --project-name=skinplate
 | 결정 | 결과 |
 |---|---|
 | 결과 화면은 앱이 30초 전에 찍은 **로컬 파일**을 표시 | S05·S07이 서버 이미지를 안 쓴다 |
-| 히스토리(S09) 응답에 사진 필드가 없다(§14.2 #13) | 과거 사진을 다시 꺼내 볼 화면이 없다 |
+| 히스토리(S09)·리포트 응답에 사진 필드가 없다(§14.2 #13) | 과거 사진을 꺼내는 화면도 **서버가 아니라 로컬 파일**을 읽는다 |
 
 그런데도 `ImageStorage` · 리소스 핸들러 · `/uploads/**` 공개 · `STORAGE_BASE_URL`을 만들면, **아무도 안 읽는 데이터를 PaaS 컨테이너 재배포마다 잃는 코드**를 유지하게 된다.
 
@@ -988,7 +988,11 @@ OpenAiSkinResult ai = visionClient.analyzeSkin(photos);   // 호출 1회
 2. **리스크 소멸** — 호스트 불일치(R17)와 배포 환경 이미지 유실이 함께 사라진다
 3. **심사 답변 확보** — *"얼굴 사진은 서버에 저장하지 않습니다. 분석에만 쓰고 버립니다."* 피부 사진이라 이 답이 실제로 세다
 
-디버깅은 `raw_ai_response`(jsonb)가 DB에 남으므로 그대로 된다. 히스토리에 사진을 붙일 소비자가 생기면 그때 저장을 붙이면 되고, **지금 안 붙일 거면 지금 없는 게 맞다.**
+디버깅은 `raw_ai_response`(jsonb)가 DB에 남으므로 그대로 된다.
+
+> **과거 사진을 꺼내는 소비자가 생겼다 (2026-08-19) — 그래도 서버 저장은 안 붙인다.** 주간 리포트의 BEST/WORST 카드가 그날 먹은 음식 썸네일을 그린다. 서버가 내려보내는 것은 **`plateIds[]` 뿐**이고(§14.3), 앱이 그 id 로 저장할 때 남긴 로컬 파일 `<documents>/plates/{plateId}.jpg` 를 읽는다 — 경로 규약은 설계서 §2.13 에 정식으로 정의했다. 사진이 없으면 음식 아이콘으로 떨어진다.
+>
+> 즉 **"저장된 이미지를 읽을 소비자가 없다"는 근거는 낡았지만 결론은 그대로다.** 필요한 것은 서버 저장이 아니라 id 였고, id 는 이미 있었다. 위의 세 가지 이득(반나절 회수 · 리스크 소멸 · 심사 답변)도 그대로 유지된다.
 
 #### 환경별 설정 3벌
 
@@ -2098,6 +2102,18 @@ public class Recommendation extends BaseTimeEntity {
 
 > **로그아웃 API가 없는 이유** — Access Token 단독 구조에서 서버는 상태를 갖지 않는다. 로그아웃은 클라이언트가 저장된 토큰을 지우는 것으로 끝난다. 서버 측 무효화(블랙리스트)는 Redis가 필요하고, 해커톤에서 그 비용을 치를 이유가 없다.
 
+> **13 · 14-b · 14-c 의 응답 계약 원본은 설계서 Part 3 대조표다.** PRD 에는 이 셋의 상세 절이 없다 — 여기에 필드를 다시 적으면 계약이 두 벌이 되고, 한쪽만 고쳐지는 날이 온다. 확정 시안(2026-08-19)으로 들어온 필드는 아래 다섯이고 **전부 저장된 데이터에서 파생하므로 마이그레이션이 없다**:
+>
+> | 필드 | 어디에 | 무엇 |
+> |---|---|---|
+> | **`skinNutrients[]`** | `/reports/daily` | 비타민C(mg·100) · 오메가3(**회**·1) · 아연(mg·10). 영양 밸런스(`nutrition[]` 6종)와 **다른 카드**다. **표준 음식표에 매칭된 끼니에서만** 값이 나오므로 매칭이 하나도 없으면 `status` 키가 **빠진다** — 0 을 `LOW` 로 두면 "못 잰 것"이 "부족"으로 읽힌다. 오메가3만 양이 아니라 **빈도**다(원본 결측 46%) |
+> | **`concerns[].message` · `tags[]`** | `/reports/daily` · `/reports/weekly` | 그 고민에 가장 크게 걸린 룰이 **저장해 둔 이유 문장**(`feedback.reason`)과 짧은 라벨 2개. 앱이 문장을 조합하지 않는다. **주간에는 `message` 를 싣지 않는다** — 한 끼를 설명하는 문장이 기간 평균 옆에 붙으면 한 주를 설명하는 것으로 읽힌다 |
+> | **`highlightTags[]`** | `/plates` · `/reports/daily` 의 끼니 카드 | 그 끼니의 "주요영양" 칩 **0~3개**. 기존 영양 임계값과 재료 태그만으로 서버가 고른다. **룰 발동 표시가 아니라 관찰 요약**이다 |
+> | **`plateIds[]`** | `/reports/weekly` 의 `bestDay`·`worstDay` | 썸네일용 기록 id. 앱이 `<documents>/plates/{plateId}.jpg`(설계서 §2.13)를 읽는다. **추이 `dailyScores[]` 에는 없다** — 그 자리에 사진이 없다 |
+> | **`grade`** | 점수를 싣는 모든 응답 | 그 점수의 등급. 앱은 점수에서 등급을 만들지 않는다(§14.3 ⑤ 참고) |
+>
+> `status` 는 좋고 나쁨이 아니라 **위치**이고 방향은 `higherIsWorse` 가 말한다. `higherIsWorse=false` 인 항목(단백질·비타민C·오메가3·아연)에서 **`HIGH` 는 과다 경고가 아니라 "충분히 챙겼다"**이다 — 오메가3는 기준이 하루 1회라 두 끼만 걸려도 `HIGH` 가 나간다.
+
 ---
 
 ### 14.3 상세 명세
@@ -2256,7 +2272,7 @@ public class Recommendation extends BaseTimeEntity {
 
 | 필드 | 필수 | 값 |
 |---|---|---|
-| `declaredSkinType` | ❌ | `DRY` · `OILY` · `COMBINATION` · `SENSITIVE` · `UNKNOWN` |
+| `declaredSkinType` | ❌ | `DRY` · `OILY` · `COMBINATION` · `SENSITIVE` · **`DEHYDRATED_OILY`**(수부지) · `UNKNOWN` — S01c 선택지 6종이자 화면 순서다. `NORMAL`(보통)은 **관찰 전용**이라 선택지에 없다 |
 | `nickname` | ❌ | 2~10자 |
 | `skinConcerns` | ❌ | `SkinConcern` 배열(복수 선택, 9종) — `[]`=전부 해제, 생략=변경 없음 |
 | `sleepPattern` | ❌ | `LACKING` · `NORMAL` · `ENOUGH` |
@@ -2302,6 +2318,7 @@ public class Recommendation extends BaseTimeEntity {
   "data": {
     "skinAnalysisId": 101,
     "skinScore": 55,
+    "grade": "NORMAL",
     "metrics": {
       "hydration": 38,
       "oil": 52,
@@ -2340,6 +2357,11 @@ public class Recommendation extends BaseTimeEntity {
       { "label": "건조 주의",     "status": "CAUTION" },
       { "label": "홍조 주의",     "status": "CAUTION" }
     ],
+    "careFocus": [
+      { "focus": "HYDRATION",   "label": "수분·장벽" },
+      { "focus": "ANTIOXIDANT", "label": "항산화" }
+    ],
+    "careMessage": "수분이 부족하거나 장벽이 약한 편이라, 수분 유지에 도움이 되는 식습관을 챙겨보세요. 붉은기나 트러블이 관찰되니, 채소와 과일처럼 항산화 성분이 풍부한 식품을 섭취해보세요.",
     "skinTypeGap": {
       "declared": "OILY",
       "observed": "DRY",
@@ -2367,6 +2389,14 @@ public class Recommendation extends BaseTimeEntity {
 > **`estimatedSkinAge` 는 Skin Score 계산에 들어가지 않는다.** 실제 생물학적 나이의 측정값이 아니라 사진 기반 외관 추정이며, 앱은 "사진 속 피부결, 주름, 탄력, 피부톤 등을 종합한 AI 추정값입니다"를 함께 띄운다.
 >
 > **`metricDetails` 는 `metrics` 를 대체하지 않는다.** `metrics` 는 기존 계약 그대로 남는다. `skinAge` 는 이 기능 이전에 저장된 분석에서는 키가 생략되고, `metricDetails[].evidence` 는 빈 배열이 된다. **`skinType` 은 빠지지 않는다** — AI 원본이 아니라 저장된 지표에서 매번 다시 만들기 때문이다(아래 처리 흐름 참고).
+>
+> **`grade` 는 `skinScore` 의 등급이다 (2026-08-19 추가).** `level` 과 같은 표(`SEVERE 0~20 · CAUTION 21~40 · NORMAL 41~60 · GOOD 61~80 · EXCELLENT 81~100`)를 지난다. 점수를 내려보내는 응답에는 **등급도 같이 싣는다** — `PlateAnalysisResponse` · `SkinPlateResponse` · `PlateHistoryDayDto` · `PlateHistoryItemDto` · 리포트의 `grade`·`dailyScores[].grade` 가 모두 같다. **앱이 점수에서 등급을 만들지 않는 것이 규약이다**: 경계표가 두 벌이면 서버가 경계를 옮긴 날 한쪽만 따라가고, 같은 68점이 화면마다 다른 등급으로 뜬다.
+>
+> **`careFocus` · `careMessage` 는 "지금 피부가 필요로 하는 관리"다 (2026-08-19 추가).** 확정 시안이 S05 에 요구한 카드이고, **AI 문장이 아니라 지표에서 규칙으로 도출한다**(§4.4.1 계열). 축은 다섯 — 수분·장벽(`isDry \|\| isBarrierWeak`) · 항산화(`hasRedness \|\| hasTrouble`) · 건강한 지방(`isBarrierWeak`) · 유분 관리(`isOily`) · 식이섬유(`hasTrouble \|\| isOily`). **새 임계값을 만들지 않았다** — 전부 `SkinMetrics` 의 기존 판정자다. 걸리는 축이 없으면 `BALANCE`("지금 균형 유지") 하나가 나가고, **빈 배열이 되지 않는다**(칩 줄이 사라지면 "분석이 덜 됐다"로 읽힌다). `careMessage` 는 축별 권고 한 문장씩을 최대 셋까지 이어 붙인 문단이고, 배열 자체는 자르지 않는다.
+>
+> `careMessage` 는 `summary` 와 **다른 것을 말한다** — summary 는 AI 가 사진에서 관찰한 것이고, careMessage 는 그 관찰에서 나오는 식단 방향이다. 조건이 `||` 인 축의 문장은 "부족하거나"·"붉은기나" 처럼 **단정하지 않는다**: 한쪽만 걸린 사용자가 같은 응답의 `metricDetails` 에서 정상 등급을 보면서 그 지표가 나쁘다는 문장을 읽게 되기 때문이다.
+>
+> 셋 다 저장된 지표에서 다시 만들므로 **예전에 저장된 분석에도 그대로 나온다.** 마이그레이션이 없다.
 
 **처리 흐름**
 
@@ -2423,6 +2453,7 @@ GET /latest · GET /{id} 는 raw_ai_response 를 되읽어 근거와 나이를 �
     "skinBasis": "TODAY",
     "skinMeasuredAt": "2026-08-17",
     "plateScore": 60,
+    "grade": "NORMAL",
     "baseScore": 70,
     "summary": "...",
     "food": { "…": "⑦-c 와 동일" },
@@ -2461,7 +2492,10 @@ GET /latest · GET /{id} 는 raw_ai_response 를 되읽어 근거와 나이를 �
   "data": {
     "plateId": 205,
     "skinAnalysisId": 101,
+    "skinBasis": "TODAY",
+    "skinMeasuredAt": "2026-08-17",
     "plateScore": 60,
+    "grade": "NORMAL",
     "summary": "단백질 충분, 발효식품 포함. 다만 나트륨 과다, 매운맛 자극.",
     "food": {
       "foodAnalysisId": 305,
@@ -2482,7 +2516,7 @@ GET /latest · GET /{id} 는 raw_ai_response 를 되읽어 근거와 나이를 �
         "carbG": 32.0,
         "sodiumMg": 1850,
         "sugarG": 6.2
-      },
+      }
     },
     "feedbacks": {
       "good": [
@@ -2816,12 +2850,15 @@ public record MeResponse(
 public record SkinAnalysisResponse(
         Long skinAnalysisId,
         int skinScore,
+        SkinLevel grade,                      // skinScore 의 등급. 앱에 경계표를 두지 않는다
         SkinMetricsDto metrics,               // 기존 계약 그대로. S05 의 지표 바가 읽는다
         List<ScoredItemDto> metricDetails,    // 같은 5개에 등급과 관찰 근거를 붙인 것
         SkinTypeDto skinType,                 // 지표에서 규칙으로 도출 — 항상 채워진다
         SkinAgeDto skinAge,                   // 예전 분석이면 null → 키 생략
         String summary,
         List<HighlightDto> highlights,
+        List<CareFocusDto> careFocus,         // 지표에서 규칙 도출 — 최소 1개(BALANCE)
+        String careMessage,                   // 축별 권고 문단. AI 문장이 아니다
         SkinTypeGapDto skinTypeGap,           // 선언 타입이 없으면 null → 키 생략
         LocalDateTime analyzedAt
 ) {
@@ -2830,7 +2867,15 @@ public record SkinAnalysisResponse(
                                             SkinTypeDto skinType,
                                             SkinAgeDto skinAge,
                                             List<HighlightDto> highlights,
+                                            List<CareFocusDto> careFocus,
+                                            String careMessage,
                                             SkinTypeGapDto gap) { ... }
+}
+
+public record CareFocusDto(SkinCareFocus focus, String label) {
+    public static CareFocusDto from(SkinCareFocus focus) {
+        return new CareFocusDto(focus, focus.getLabel());
+    }
 }
 
 public record SkinMetricsDto(int hydration, int oil, int redness, int trouble, int barrier) {
@@ -2875,12 +2920,16 @@ public record SkinAgeDto(int estimatedSkinAge, List<ScoredItemDto> axes, String 
 public record SkinPlateResponse(
         Long plateId,
         Long skinAnalysisId,    // S07 → S08 전환에 필요하다. 추천 조회가 이 값을 요구한다
+        SkinBasis skinBasis,    // 기록 저장일 대비 판정 — 과거 기록을 언제 열어도 불변
+        LocalDate skinMeasuredAt,
         int plateScore,
+        SkinLevel grade,        // plateScore 의 등급. 앱에 경계표를 두지 않는다
         int baseScore,          // 항상 70. S07 계산 내역 카드가 첫 줄에 쓴다
         String summary,
         FoodAnalysisDto food,
         FeedbackGroupDto feedbacks,
         List<String> appliedRules,
+        String aiTip,           // 생성 실패 시 null → 키 생략
         LocalDateTime createdAt
 ) {}
 

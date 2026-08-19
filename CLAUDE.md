@@ -11,8 +11,8 @@ HTTPS 는 자동이 아니다 — 리버스 프록시가 인증서와 **본문 �
 
 | 파일 | 범위 |
 |---|---|
-| `SkinPlate_PRD.md` (v1.4) | 요구사항 · API 명세 · 룰 정의표 · 일정 · 리스크 |
-| `SkinPlate_DTO_Domain.md` | Entity · DTO · Rule Engine 스켈레톤 (파일 단위 코드) |
+| `SkinPlate_PRD.md` (v1.11) | 요구사항 · API 명세 · 룰 정의표 · 일정 · 리스크 |
+| `SkinPlate_DTO_Domain.md` (v1.11) | Entity · DTO · Rule Engine 스켈레톤 (파일 단위 코드) · **Part 3 계약 대조표가 API 응답 계약의 원본** |
 
 - **문서 원본은 저장소의 이 파일들이다.** 작업 전 **버전 헤더를 확인**하고, 손에 든 사본이 더 최신이면 저장소를 먼저 교체한다 — 오래된 사본으로 리뷰하면 이미 고친 것이 계속 지적된다.
 - **두 문서가 어긋나면 설계서(`_DTO_Domain`)를 따른다.**
@@ -126,7 +126,8 @@ ssh gabia '~/skinplate/deploy.sh'                              # 배포
 - Flyway 기존 마이그레이션 파일 수정
 - Controller에서 Entity 반환
 - 점수 계산을 LLM에 위임 (재현성이 이 제품의 주장이다)
-  - **예외는 `estimatedSkinAge` 하나다.** 8개 축을 종합한 인상이라 기계적 공식을 두지 않기로 결정했다(PRD §17.2). Skin Score·level·highlights·`skinTypeGap.observed` 는 전부 Backend 가 지표에서 다시 만든다 — 피부 나이만 재계산이 불가능하고, 그래서 흔들림도 여기서 가장 크게 보인다
+  - **예외는 `estimatedSkinAge` 하나다.** 8개 축을 종합한 인상이라 기계적 공식을 두지 않기로 결정했다(PRD §17.2). Skin Score·level·`grade`·highlights·`careFocus`·`careMessage`·`skinTypeGap.observed` 는 전부 Backend 가 지표에서 다시 만든다 — 피부 나이만 재계산이 불가능하고, 그래서 흔들림도 여기서 가장 크게 보인다
+  - **등급을 앱이 만들지 않는다.** 점수를 싣는 응답에는 `grade` 를 같이 싣는다(`SkinLevel` 이 유일한 경계표). 두 벌이면 서버가 경계를 옮긴 날 한쪽만 따라간다
 - `declaredSkinType`을 `PlateContext`에 넣기 — 자가 신고값은 표시·비교 전용
 - **`main` 에 직접 커밋.** 배포 브랜치라 리뷰를 건너뛴 코드가 그대로 배포본이 된다. `develop` 에서 `--ff-only` 로만 올린다
 - **배포 서버에서 브랜치 바꾸기** (`deploy.sh` 의 `BRANCH` 수정 포함). 급할 때 `develop` 을 바로 올리고 싶어지는데, 그 순간부터 `main` 은 배포본이 아니고 아무도 그걸 모른다

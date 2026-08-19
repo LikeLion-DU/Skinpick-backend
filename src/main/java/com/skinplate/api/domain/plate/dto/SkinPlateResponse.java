@@ -4,6 +4,8 @@ import com.skinplate.api.domain.food.dto.FoodAnalysisDto;
 import com.skinplate.api.domain.plate.engine.RuleConstants;
 import com.skinplate.api.domain.plate.entity.SkinPlate;
 
+import com.skinplate.api.domain.skin.entity.SkinLevel;
+
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -29,6 +31,12 @@ public record SkinPlateResponse(
         LocalDate skinMeasuredAt,
 
         int plateScore,
+        /**
+         * {@code plateScore} 의 등급. <b>앱이 점수에서 등급을 다시 내지 않게 하려고 싣는다.</b>
+         * 경계표는 {@link SkinLevel} 한 곳뿐이어야 한다 — 두 벌이면 서버가 경계를 옮긴 날
+         * 같은 68점이 화면마다 다른 등급으로 뜬다.
+         */
+        SkinLevel grade,
         int baseScore,        // 항상 RuleConstants.BASE_SCORE(70). 계산 내역 카드 첫 줄
         String summary,
         FoodAnalysisDto food,
@@ -57,6 +65,7 @@ public record SkinPlateResponse(
                         entity.getCreatedAt() == null ? null : entity.getCreatedAt().toLocalDate()),
                 skinMeasuredAt == null ? null : skinMeasuredAt.toLocalDate(),
                 entity.getPlateScore(),
+                SkinLevel.of(entity.getPlateScore()),
                 RuleConstants.BASE_SCORE,
                 entity.getSummary(),
                 FoodAnalysisDto.from(entity.getFoodAnalysis()),

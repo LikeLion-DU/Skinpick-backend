@@ -12,6 +12,7 @@ import com.skinplate.api.domain.skin.entity.SkinMetrics;
 import com.skinplate.api.domain.skin.entity.SkinTrait;
 import com.skinplate.api.domain.skin.repository.SkinAnalysisRepository;
 import com.skinplate.api.domain.skin.service.SkinAnalysisService;
+import com.skinplate.api.domain.skin.service.SkinCareGuide;
 import com.skinplate.api.domain.skin.service.SkinHighlightBuilder;
 import com.skinplate.api.domain.skin.service.SkinScoreCalculator;
 import com.skinplate.api.domain.skin.service.SkinTypeGapAnalyzer;
@@ -80,7 +81,8 @@ class SkinAnalysisServiceTest {
 
         skinAnalysisService = new SkinAnalysisService(
                 userRepository, skinAnalysisRepository, visionClient,
-                new SkinScoreCalculator(), new SkinHighlightBuilder(), new SkinTypeGapAnalyzer(),
+                new SkinScoreCalculator(), new SkinHighlightBuilder(),
+                new SkinCareGuide(), new SkinTypeGapAnalyzer(),
                 new ObjectMapper(), transactionTemplate);
     }
 
