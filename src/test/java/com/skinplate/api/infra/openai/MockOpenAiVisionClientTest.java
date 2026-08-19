@@ -26,7 +26,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Mock 은 네트워크가 끊긴 무대에서 쓰는 백업 플랜이다.
- * 그래서 "값이 나온다"로는 부족하다 — 그 값이 발표에서 말할 58점을 만들어야 한다.
+ * 그래서 "값이 나온다"로는 부족하다 — 그 값이 발표에서 말할 65점을 만들어야 한다.
  */
 class MockOpenAiVisionClientTest {
 
@@ -96,7 +96,7 @@ class MockOpenAiVisionClientTest {
     }
 
     @Test
-    @DisplayName("Mock 응답을 룰 엔진에 넣으면 발표에서 말할 58점이 나온다")
+    @DisplayName("Mock 응답을 룰 엔진에 넣으면 발표에서 말할 65점이 나온다")
     void mockFoodReproducesDemoScore() {
         OpenAiSkinResult skin = client.analyzeSkin(PHOTOS);
         OpenAiFoodResult food = client.analyzeFood("무시된다", "image/jpeg");
@@ -105,7 +105,7 @@ class MockOpenAiVisionClientTest {
                 skin.redness(), skin.trouble(), skin.barrier());
 
         // 시연 음식이 표준 테이블에 실제로 있어야 한다. Mock 의 AI 추정값과 표준값이
-        // 일부러 같은 숫자라, 이 확인이 없으면 테이블이 통째로 안 실려도 58 이 나온다.
+        // 일부러 같은 숫자라, 이 확인이 없으면 테이블이 통째로 안 실려도 65 가 나온다.
         assertThat(StandardFoodTable.find(food.foodName())).isPresent();
 
         // 서비스를 통해 만든다. 손으로 Nutrition 을 조립하면 표준 음식 테이블을 건너뛰어,
@@ -113,7 +113,7 @@ class MockOpenAiVisionClientTest {
         // 실제 무대는 이 경로로 흐른다.
         FoodAnalysis analysis = foodAnalysisService.toEntity(null, food);
 
-        assertThat(engine.evaluate(new PlateContext(metrics, analysis)).score()).isEqualTo(58);
+        assertThat(engine.evaluate(new PlateContext(metrics, analysis)).score()).isEqualTo(65);
     }
 
     @Test

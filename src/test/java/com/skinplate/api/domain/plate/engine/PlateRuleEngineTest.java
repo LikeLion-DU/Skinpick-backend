@@ -31,18 +31,18 @@ class PlateRuleEngineTest {
             new FiberRule(), new Omega3FoodRule()));
 
     @Test
-    @DisplayName("예시 A · 돼지고기 김치찌개 → 58점")
+    @DisplayName("예시 A · 돼지고기 김치찌개 → 65점")
     void kimchiStew() {
         PlateEvaluation result = engine.evaluate(new PlateContext(SKIN, demoStew()));
 
-        // 70 + R05(+6) + R09(+4) + R04(-8) + R11(-2) + R02(-12) = 58
-        assertThat(result.score()).isEqualTo(58);
+        // 75 + R05(+7) + R09(+5) + R04(-8) + R11(-2) + R02(-12) = 65
+        assertThat(result.score()).isEqualTo(65);
         assertThat(result.appliedRuleCodes())
                 .containsExactlyInAnyOrder("R02", "R04", "R05", "R09", "R11");
     }
 
     @Test
-    @DisplayName("예시 B · 연어구이 정식 → 93점")
+    @DisplayName("예시 B · 연어구이 정식 → 97점 (상한)")
     void grilledSalmon() {
         FoodAnalysis food = standardFood("연어구이 정식", CookingMethod.GRILLED, false,
                 nutrition(610, "32.0", 1600, "4.0", "28.0", "45.0", "4.4"),
@@ -50,11 +50,12 @@ class PlateRuleEngineTest {
 
         PlateEvaluation result = engine.evaluate(new PlateContext(SKIN, food));
 
-        // 70 + R01(+10) + R05(+6) + R06(+5) + R09(+4) + R14(+4) + R04(-4) + R11(-2) = 93
-        // 나트륨 1,600mg 은 새 1단계(>1150)라 -4 다. 옛 임계 1,500mg 에서는 -8 이었다.
+        // 75 + R01(+10) + R05(+7) + R06(+7) + R09(+5) + R14(+9) + R04(-4) + R11(-2) = 107 → 97
+        // 상한이 하는 일이 이 예시다 — 가장 좋은 조합이 정확히 천장에 닿는다.
+        // 나트륨 1,600mg 은 1단계(>1150)라 -4 다.
         // R14 는 R01 과 독립이다 — 건조한 사용자의 연어가 두 룰을 다 받는 것은
         // 이중계상이 아니라 "이 사람에게 가장 필요한 음식" 이라는 뜻이다.
-        assertThat(result.score()).isEqualTo(93);
+        assertThat(result.score()).isEqualTo(97);
         assertThat(result.appliedRuleCodes()).contains("R01", "R14");
     }
 
@@ -63,12 +64,12 @@ class PlateRuleEngineTest {
     void sodiumIsTiered() {
         SkinMetrics neutral = SkinMetrics.of(50, 50, 50, 50, 50);   // 다른 룰이 안 걸리는 지표
 
-        assertThat(scoreOfSodium(neutral, 1150)).isEqualTo(70);        // 경계는 초과부터
-        assertThat(scoreOfSodium(neutral, 1151)).isEqualTo(70 - 4);
-        assertThat(scoreOfSodium(neutral, 1701)).isEqualTo(70 - 8);
-        assertThat(scoreOfSodium(neutral, 2301)).isEqualTo(70 - 12);
+        assertThat(scoreOfSodium(neutral, 1150)).isEqualTo(75);        // 경계는 초과부터
+        assertThat(scoreOfSodium(neutral, 1151)).isEqualTo(75 - 4);
+        assertThat(scoreOfSodium(neutral, 1701)).isEqualTo(75 - 8);
+        assertThat(scoreOfSodium(neutral, 2301)).isEqualTo(75 - 12);
         // 초과량 비례에서 계단으로 바꿨으므로 아무리 짜도 -12 를 넘지 않는다.
-        assertThat(scoreOfSodium(neutral, 9000)).isEqualTo(70 - 12);
+        assertThat(scoreOfSodium(neutral, 9000)).isEqualTo(75 - 12);
     }
 
     /**
@@ -136,8 +137,8 @@ class PlateRuleEngineTest {
                 Spiciness.UNKNOWN, Oiliness.UNKNOWN, ProcessingLevel.UNKNOWN));
         PlateEvaluation withUnknown = engine.evaluate(new PlateContext(SKIN, unknownTraits));
 
-        assertThat(withoutTraits.score()).isEqualTo(58);
-        assertThat(withUnknown.score()).isEqualTo(58);
+        assertThat(withoutTraits.score()).isEqualTo(65);
+        assertThat(withUnknown.score()).isEqualTo(65);
         assertThat(withUnknown.appliedRuleCodes())
                 .containsExactlyElementsOf(withoutTraits.appliedRuleCodes());
     }
@@ -148,11 +149,11 @@ class PlateRuleEngineTest {
         // 홍조 64 → 심각도 1.2. R02 만 걸리는 조합(나트륨·당·단백질 전부 임계 아래).
         Nutrition mildNutrition = nutrition(500, "10.0", 1000, "5.0");
 
-        assertThat(scoreOfSpicy(mildNutrition, Spiciness.MILD)).isEqualTo(70 - 8);     // -10×1.2×0.7
-        assertThat(scoreOfSpicy(mildNutrition, Spiciness.MEDIUM)).isEqualTo(70 - 12);  // -10×1.2×1.0
-        assertThat(scoreOfSpicy(mildNutrition, Spiciness.HOT)).isEqualTo(70 - 16);     // -10×1.2×1.3
+        assertThat(scoreOfSpicy(mildNutrition, Spiciness.MILD)).isEqualTo(75 - 8);     // -10×1.2×0.7
+        assertThat(scoreOfSpicy(mildNutrition, Spiciness.MEDIUM)).isEqualTo(75 - 12);  // -10×1.2×1.0
+        assertThat(scoreOfSpicy(mildNutrition, Spiciness.HOT)).isEqualTo(75 - 16);     // -10×1.2×1.3
         // UNKNOWN 은 MEDIUM 과 같다 — 구 데이터가 손해도 이득도 보지 않는다.
-        assertThat(scoreOfSpicy(mildNutrition, Spiciness.UNKNOWN)).isEqualTo(70 - 12);
+        assertThat(scoreOfSpicy(mildNutrition, Spiciness.UNKNOWN)).isEqualTo(75 - 12);
     }
 
     @Test
@@ -164,7 +165,7 @@ class PlateRuleEngineTest {
 
         SkinMetrics calmSkin = SkinMetrics.of(50, 50, 50, 50, 50);
 
-        assertThat(engine.evaluate(new PlateContext(calmSkin, hotFood)).score()).isEqualTo(70);
+        assertThat(engine.evaluate(new PlateContext(calmSkin, hotFood)).score()).isEqualTo(75);
     }
 
     @Test
@@ -180,10 +181,10 @@ class PlateRuleEngineTest {
         FoodAnalysis grilledUnknown = food("닭가슴살 구이", CookingMethod.GRILLED, false, plain, List.of());
 
         // 기름진 비튀김은 튀김보다 약하다: -10×1.2×0.7 = -8 vs 튀김 -10×1.2 = -12
-        assertThat(engine.evaluate(new PlateContext(oilySkin, grilledOily)).score()).isEqualTo(70 - 8);
-        assertThat(engine.evaluate(new PlateContext(oilySkin, fried)).score()).isEqualTo(70 - 12);
+        assertThat(engine.evaluate(new PlateContext(oilySkin, grilledOily)).score()).isEqualTo(75 - 8);
+        assertThat(engine.evaluate(new PlateContext(oilySkin, fried)).score()).isEqualTo(75 - 12);
         // UNKNOWN 은 발동하지 않는다 — 특성이 없던 시절과 동일.
-        assertThat(engine.evaluate(new PlateContext(oilySkin, grilledUnknown)).score()).isEqualTo(70);
+        assertThat(engine.evaluate(new PlateContext(oilySkin, grilledUnknown)).score()).isEqualTo(75);
 
         // 튀김옷이 없으니 REMOVE_BATTER 행동 카드가 붙지 않는다.
         PlateEvaluation evaluation = engine.evaluate(new PlateContext(oilySkin, grilledOily));
@@ -208,9 +209,9 @@ class PlateRuleEngineTest {
                 nutrition(150, "12.0", 300, "3.0"), List.of());
 
         // 심각도 0.6 — 발동하지 않는 것이 아니라 약하게 걸린다.
-        assertThat(engine.evaluate(new PlateContext(calm, fried)).score()).isEqualTo(70 - 6);
-        assertThat(engine.evaluate(new PlateContext(calm, sugary)).score()).isEqualTo(70 - 7);
-        assertThat(engine.evaluate(new PlateContext(calm, plain)).score()).isEqualTo(70);
+        assertThat(engine.evaluate(new PlateContext(calm, fried)).score()).isEqualTo(75 - 6);
+        assertThat(engine.evaluate(new PlateContext(calm, sugary)).score()).isEqualTo(75 - 7);
+        assertThat(engine.evaluate(new PlateContext(calm, plain)).score()).isEqualTo(75);
     }
 
     @Test
@@ -220,11 +221,11 @@ class PlateRuleEngineTest {
                 nutrition(400, "6.0", 300, "1.0"), List.of());
 
         assertThat(engine.evaluate(new PlateContext(SkinMetrics.of(60, 50, 40, 40, 60), fried)).score())
-                .isEqualTo(70 - 6);
+                .isEqualTo(75 - 6);
         assertThat(engine.evaluate(new PlateContext(SkinMetrics.of(60, 75, 40, 40, 60), fried)).score())
-                .isEqualTo(70 - 12);
+                .isEqualTo(75 - 12);
         assertThat(engine.evaluate(new PlateContext(SkinMetrics.of(60, 85, 40, 40, 60), fried)).score())
-                .isEqualTo(70 - 15);
+                .isEqualTo(75 - 15);
     }
 
     /**
@@ -261,8 +262,8 @@ class PlateRuleEngineTest {
         FoodAnalysis overBoundary = food("국물떡볶이", CookingMethod.BOILED, false,
                 nutrition(400, "6.0", 300, "15.1"), List.of());
 
-        assertThat(engine.evaluate(new PlateContext(calm, atBoundary)).score()).isEqualTo(70);
-        assertThat(engine.evaluate(new PlateContext(calm, overBoundary)).score()).isEqualTo(70 - 7);
+        assertThat(engine.evaluate(new PlateContext(calm, atBoundary)).score()).isEqualTo(75);
+        assertThat(engine.evaluate(new PlateContext(calm, overBoundary)).score()).isEqualTo(75 - 7);
     }
 
     /**
@@ -310,8 +311,8 @@ class PlateRuleEngineTest {
         FoodAnalysis veryHigh = food("허니콤보", CookingMethod.ETC, false,
                 nutrition(500, "5.0", 300, "45.0"), List.of());          // -16×1.2 = -19.2 → -19
 
-        assertThat(engine.evaluate(new PlateContext(troubledSkin, high)).score()).isEqualTo(70 - 14);
-        assertThat(engine.evaluate(new PlateContext(troubledSkin, veryHigh)).score()).isEqualTo(70 - 19);
+        assertThat(engine.evaluate(new PlateContext(troubledSkin, high)).score()).isEqualTo(75 - 14);
+        assertThat(engine.evaluate(new PlateContext(troubledSkin, veryHigh)).score()).isEqualTo(75 - 19);
     }
 
     @Test
@@ -328,17 +329,17 @@ class PlateRuleEngineTest {
         FoodAnalysis beyondHelp = food("초대형", CookingMethod.ETC, false,
                 nutrition(1200, "10.0", 1000, "5.0"), List.of());
 
-        assertThat(engine.evaluate(new PlateContext(neutral, boundary)).score()).isEqualTo(70);
+        assertThat(engine.evaluate(new PlateContext(neutral, boundary)).score()).isEqualTo(75);
 
         PlateEvaluation evaluation = engine.evaluate(new PlateContext(neutral, heavy));
-        assertThat(evaluation.score()).isEqualTo(70 - 4);
+        assertThat(evaluation.score()).isEqualTo(75 - 4);
         assertThat(evaluation.appliedRuleCodes()).containsExactly("R10");
         // 700 × 0.75 = 525 → 단계 0. 광고한 회복치가 시뮬레이션의 실제 효과와 같다.
         assertThat(evaluation.results().get(0).expectedGain()).isEqualTo(4);
 
         // 1000 × 0.75 = 750 → 2단계에서 1단계로만 내려간다. 회복은 7-4 = 3 이다.
         PlateEvaluation veryHeavyResult = engine.evaluate(new PlateContext(neutral, veryHeavy));
-        assertThat(veryHeavyResult.score()).isEqualTo(70 - 7);
+        assertThat(veryHeavyResult.score()).isEqualTo(75 - 7);
         assertThat(veryHeavyResult.results().get(0).expectedGain()).isEqualTo(3);
 
         // 1200 × 0.75 = 900 → 여전히 2단계라 실제 회복이 0 이다. 옛 고정값은 이 자리에서도
@@ -400,7 +401,7 @@ class PlateRuleEngineTest {
                 nutrition(237, "16.3", 329, "0.0", "16.4", "4.6", "3.8"),
                 IngredientTag.OMEGA3);
 
-        assertThat(deltaOf(mackerel, "R14")).isEqualTo(4);
+        assertThat(deltaOf(mackerel, "R14")).isEqualTo(9);
 
         // 건조(수분 35)·장벽 약화(35)면 R01·R08 이 그 위에 더 붙는다 — 독립이다.
         PlateEvaluation dry = engine.evaluate(
@@ -467,7 +468,7 @@ class PlateRuleEngineTest {
         FoodAnalysis beanSprouts = micronutrientFood("콩나물무침", CookingMethod.RAW,
                 25, "2.1", "1.2", 0, "0.0");
 
-        assertThat(deltaOf(beanSprouts, "R15")).isEqualTo(4);       // 밀도 4.8 → p75 통과
+        assertThat(deltaOf(beanSprouts, "R15")).isEqualTo(6);       // 밀도 4.8 → p75 통과
         assertThat(rulesOf(friesFixture)).doesNotContain("R15");    // 밀도 1.24 → 미달
     }
 
@@ -477,9 +478,9 @@ class PlateRuleEngineTest {
         assertThat(rulesOf(micronutrientFood("경계아래", CookingMethod.ETC, 100, "2.0", "2.9", 0, "0.0")))
                 .doesNotContain("R15");
         assertThat(deltaOf(micronutrientFood("1단계", CookingMethod.ETC, 100, "2.0", "3.0", 0, "0.0"), "R15"))
-                .isEqualTo(4);
-        assertThat(deltaOf(micronutrientFood("2단계", CookingMethod.ETC, 100, "2.0", "5.0", 0, "0.0"), "R15"))
                 .isEqualTo(6);
+        assertThat(deltaOf(micronutrientFood("2단계", CookingMethod.ETC, 100, "2.0", "5.0", 0, "0.0"), "R15"))
+                .isEqualTo(9);
     }
 
     /**
@@ -499,11 +500,11 @@ class PlateRuleEngineTest {
         both.assignStandardFoodName("당근 나물");
         both.addIngredient(FoodIngredient.fromStandardTable("당근", IngredientTag.VITAMIN_A));
 
-        assertThat(deltaOf(tagOnly, "R06")).isEqualTo(5);
-        assertThat(deltaOf(measuredOnly, "R06")).isEqualTo(5);
+        assertThat(deltaOf(tagOnly, "R06")).isEqualTo(7);
+        assertThat(deltaOf(measuredOnly, "R06")).isEqualTo(7);
         // 신호가 둘이라고 두 배 좋아지지 않는다 — R06 은 한 번만 실린다.
         assertThat(rulesOf(both)).filteredOn("R06"::equals).hasSize(1);
-        assertThat(deltaOf(both, "R06")).isEqualTo(5);
+        assertThat(deltaOf(both, "R06")).isEqualTo(7);
     }
 
     @Test

@@ -12,8 +12,16 @@ public final class RuleConstants {
 
     private RuleConstants() {}
 
-    /** 모든 Plate가 여기서 출발한다. */
-    public static final int BASE_SCORE = 70;
+    /**
+     * 모든 Plate가 여기서 출발한다.
+     *
+     * <p><b>2026-08-20 재캘리브레이션 — 70 → 75.</b> 실사용 첫 이틀의 기록 전부가
+     * 53~75 에 몰렸다. 감점 룰은 6개, 가점 룰은 5개인데 가점 쪽 델타가 작아서
+     * "잘 먹었다"가 점수로 안 보였다 — 연어 샐러드가 68점이면 화면이 사용자의
+     * 선택을 부정한다. 출발점을 올리고(전 구간 +5) 가점 델타를 키워 좋은 한 끼가
+     * 80 후반~90 대에 닿게 했다. 나쁜 한 끼는 감점이 그대로라 55~60 대에 남는다.
+     */
+    public static final int BASE_SCORE = 75;
 
     // ---- 룰별 기본 델타 (severityFactor 적용 전) ----
     public static final int R01_HYDRATION_FOOD   =  8;   // 건조 × 수분/오메가3
@@ -24,11 +32,11 @@ public final class RuleConstants {
     public static final int R04_SODIUM_HIGH      = -4;   // >1150mg (p75)
     public static final int R04_SODIUM_VERY_HIGH = -8;   // >1700mg (p90)
     public static final int R04_SODIUM_EXTREME   = -12;  // >2300mg (p95)
-    public static final int R05_PROTEIN          =  6;   // 단백질 충분
-    public static final int R06_VITAMIN          =  5;   // 비타민/항산화
+    public static final int R05_PROTEIN          =  7;   // 단백질 충분
+    public static final int R06_VITAMIN          =  7;   // 비타민/항산화
     public static final int R07_FRIED_OIL        = -10;  // 튀김/기름진 음식 — 게이트 없음, 심각도로 개인화
     public static final int R08_OMEGA3_BARRIER   =  7;   // 장벽 약화 × 오메가3
-    public static final int R09_PROBIOTIC        =  4;   // 발효식품
+    public static final int R09_PROBIOTIC        =  5;   // 발효식품
     // 피부 지표와 직접 매지 않는 보조 룰이라 심각도 계수를 태우지 않는 고정 델타다.
     // 같은 이유로 ConcernRules 에도 매지 않는다.
     public static final int R10_HIGH_CALORIE      = -4;  // >660kcal (p90)
@@ -38,10 +46,11 @@ public final class RuleConstants {
     public static final int R11_SAT_FAT_HIGH      = -7;  // >8.2g  (p90)
     public static final int R11_SAT_FAT_EXTREME   = -10; // >12.3g (p95)
     public static final int R12_REFINED_CARB      = -4;  // HIGH_GI 태그 + 탄수 30g 이상
-    // 가점 쪽 유일한 단계형. 이 룰이 "좋은 음식이 올라간다"를 담당한다.
-    public static final int R14_OMEGA3_FOOD       =  4;  // 오메가3 재료 — 게이트 없음
-    public static final int R15_FIBER             =  4;  // 100kcal 당 3.0g (p75)
-    public static final int R15_FIBER_HIGH        =  6;  // 100kcal 당 5.0g (p90)
+    // 이 두 룰이 "좋은 음식이 올라간다"를 담당한다. 재캘리브레이션에서 가장 크게
+    // 올렸다 — 등푸른생선과 채소·나물은 이 룰표가 아는 가장 확실한 "피부에 좋은" 신호다.
+    public static final int R14_OMEGA3_FOOD       =  9;  // 오메가3 재료 — 게이트 없음
+    public static final int R15_FIBER             =  6;  // 100kcal 당 3.0g (p75)
+    public static final int R15_FIBER_HIGH        =  9;  // 100kcal 당 5.0g (p90)
     // R13(생·찜 조리 +3) 과 R16(아연 가점) 은 만들지 않았다. 전자는 "날것이면 피부에 좋다"를
     // 이 룰표로 증명할 수 없고(RAW 에는 육회가, STEAMED 에는 만두가 함께 들어온다),
     // 후자는 아연 밀도가 단백질 밀도와 r=0.38 로 겹치는 데다 상위가 굴·조개·갈비탕·수육이라
@@ -89,6 +98,9 @@ public final class RuleConstants {
     public static final int R03_SUGAR_VERY_HIGH_EXTRA    = -4;
 
     // ---- 점수 범위 ----
+    // 상한이 100 이 아닌 이유: 만점은 "완벽한 음식"이라는 주장이 되고, 그 주장은
+    // 이 룰표로 증명할 수 없다. 최고의 한 끼(오메가3·단백질·비타민·발효가 전부
+    // 선 접시)가 97 에 닿고, 3점은 언제나 남는다.
     public static final int MIN_SCORE = 0;
-    public static final int MAX_SCORE = 100;
+    public static final int MAX_SCORE = 97;
 }

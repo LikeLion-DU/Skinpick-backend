@@ -200,6 +200,50 @@ public final class StandardFoodTable {
     }
 
     /**
+     * 조회한 <b>이름</b>에서 확실히 읽히는 가점 재료. 기본명 매칭은 수식어를 버리는
+     * 설계라("연어 샐러드" → 샐러드), 이름에 적혀 있는 연어의 오메가3 까지 함께
+     * 사라진다 — 가점 룰이 전부 꺼진 연어 샐러드가 68점으로 나온 원인이다.
+     *
+     * <p>이름은 결정적이다 — 같은 이름이면 같은 태그가 선다. AI 태그를 다시 믿는 것이
+     * 아니라, 표준표가 확정한 항목 위에 이름이 보증하는 재료를 얹는 것이다.
+     *
+     * <p><b>가점 태그만 얹는다.</b> 감점 재료(당·유제품·매운맛)는 영양값과 spicy 가
+     * 이미 잡고 있고, 낱말 하나로 벌을 주면 "고추냉이 연어"류 오탐이 점수를 깎는다.
+     * 낱말 목록은 tools/build_standard_food.py 의 TAG_RULES 와 같은 값을 쓴다.
+     */
+    private record BonusNameTag(IngredientTag tag, List<String> words) {}
+
+    private static final List<BonusNameTag> BONUS_NAME_TAGS = List.of(
+            new BonusNameTag(IngredientTag.OMEGA3,
+                    List.of("연어", "고등어", "삼치", "꽁치", "참치", "정어리", "방어", "멸치", "들기름")),
+            new BonusNameTag(IngredientTag.VITAMIN_C,
+                    List.of("파프리카", "브로콜리", "키위", "피망", "딸기", "귤", "오렌지", "레몬", "샐러드")),
+            new BonusNameTag(IngredientTag.VITAMIN_A,
+                    List.of("당근", "시금치", "단호박", "부추", "깻잎", "나물")),
+            new BonusNameTag(IngredientTag.ANTIOXIDANT,
+                    List.of("토마토", "녹차", "블루베리", "베리", "가지", "양파")),
+            new BonusNameTag(IngredientTag.PROBIOTIC,
+                    List.of("김치", "된장", "고추장", "청국장", "요거트", "요구르트", "낫토")));
+
+    /** 표준 항목의 태그에 조회 이름이 보증하는 가점 태그를 합친다. 중복은 한 번만. */
+    private static StandardFood withNameTags(StandardFood food, String queriedName) {
+        List<IngredientTag> merged = new ArrayList<>(food.tags());
+        for (BonusNameTag bonus : BONUS_NAME_TAGS) {
+            if (merged.contains(bonus.tag())) continue;
+            if (bonus.words().stream().anyMatch(queriedName::contains)) {
+                merged.add(bonus.tag());
+            }
+        }
+        if (merged.size() == food.tags().size()) return food;
+
+        return new StandardFood(food.name(), food.caloriesKcal(), food.proteinG(),
+                food.fatG(), food.carbG(), food.sodiumMg(), food.sugarG(),
+                food.saturatedFatG(), food.fiberG(), food.vitaminAUg(), food.vitaminCMg(),
+                food.zincMg(), food.cookingMethod(), food.spicy(), List.copyOf(merged),
+                food.measured(), food.sampleCount());
+    }
+
+    /**
      * 2단계 조회. 정확한 이름이 먼저다.
      *
      * <pre>
@@ -212,7 +256,12 @@ public final class StandardFoodTable {
         if (foodName == null || foodName.isBlank()) return Optional.empty();
 
         String trimmed = normalizeSpelling(foodName.trim());
+        // 어느 경로로 찾았든 조회 이름이 보증하는 가점 태그를 얹는다 — 기본명
+        // 매칭이 버린 수식어("연어 샐러드"의 연어)를 여기서 돌려받는다.
+        return locate(trimmed).map(found -> withNameTags(found, trimmed));
+    }
 
+    private static Optional<StandardFood> locate(String trimmed) {
         StandardFood exact = TABLE.get(trimmed);
         if (exact != null) return Optional.of(exact);
 

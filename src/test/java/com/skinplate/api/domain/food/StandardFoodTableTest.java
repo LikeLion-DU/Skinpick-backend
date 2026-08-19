@@ -130,6 +130,23 @@ class StandardFoodTableTest {
         assertThat(demo.sodiumMg()).isEqualTo(1850);
     }
 
+    /**
+     * 기본명 매칭은 수식어를 버린다("연어 샐러드" → 샐러드). 그대로 두면 이름에 적힌
+     * 연어의 오메가3까지 사라져 가점 룰이 전부 꺼진다 — 연어 샐러드가 68점으로 나온
+     * 원인이었다. 이름이 보증하는 가점 태그는 매칭 결과 위에 얹는다.
+     */
+    @Test
+    @DisplayName("이름이 보증하는 가점 재료는 기본명 매칭 뒤에도 살아남는다")
+    void nameBackedBonusTagsSurviveBaseNameFallback() {
+        StandardFood salmonSalad = StandardFoodTable.find("연어 샐러드").orElseThrow();
+        assertThat(salmonSalad.tags()).contains(IngredientTag.OMEGA3);      // 연어
+        assertThat(salmonSalad.tags()).contains(IngredientTag.VITAMIN_C);   // 샐러드(채소)
+
+        // 감점 재료는 이름으로 얹지 않는다 — "고추냉이 연어"가 매운 음식이 되면 안 된다.
+        StandardFood porkStew = StandardFoodTable.find("돼지고기 김치찌개").orElseThrow();
+        assertThat(porkStew.tags()).contains(IngredientTag.PROBIOTIC);
+    }
+
     @Test
     @DisplayName("모르는 음식과 null 은 조용히 비운다 — AI 추정치로 떨어진다")
     void missingIsEmpty() {

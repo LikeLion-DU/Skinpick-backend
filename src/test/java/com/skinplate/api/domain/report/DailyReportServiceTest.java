@@ -202,8 +202,8 @@ class DailyReportServiceTest {
 
         assertThat(concerns).extracting(ConcernScoreDto::concern)
                 .containsExactly(SkinConcern.ACNE, SkinConcern.PUFFINESS);   // enum 선언 순서
-        assertThat(scoreOf(concerns, SkinConcern.PUFFINESS)).isEqualTo(62);  // 70 - 8
-        assertThat(scoreOf(concerns, SkinConcern.ACNE)).isEqualTo(74);       // 70 + 4
+        assertThat(scoreOf(concerns, SkinConcern.PUFFINESS)).isEqualTo(67);  // 75 - 8
+        assertThat(scoreOf(concerns, SkinConcern.ACNE)).isEqualTo(79);       // 75 + 4
     }
 
     @Test
@@ -237,9 +237,9 @@ class DailyReportServiceTest {
         given(skinPlateRepository.findInRange(anyLong(), any(), any()))
                 .willReturn(List.of(first, second));
 
-        // 62 와 62 의 평균은 62 다. 하루치로 한 번에 더했다면 54 가 나온다.
+        // 67 과 67 의 평균은 67 이다. 하루치로 한 번에 더했다면 59 가 나온다.
         assertThat(scoreOf(dailyReportService.get(USER_ID, DATE).concerns(), SkinConcern.PUFFINESS))
-                .isEqualTo(62);
+                .isEqualTo(67);
     }
 
     @Test
